@@ -1,0 +1,5 @@
+{
+  "name": "FPT Poly Calendar Sync",
+  "description": "Đồng bộ lịch bảo vệ khóa luận từ Google Sheets sang Google Calendar với tính năng chống trùng lặp và phân quyền thông minh.",
+  "requestFramePermissions": []
+}

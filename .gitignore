@@ -10,13 +10,30 @@ lerna-debug.log*
 node_modules
 dist
 dist-ssr
+.vite
+.cache
+.parcel-cache
+.turbo
+.eslintcache
+.stylelintcache
+.npm
+.pnp
+.pnp.*
 *.local
+
+# Environment files
+.env
+.env.*
+!.env.example
+!.env.sample
 
 # Editor directories and files
 .vscode/*
 !.vscode/extensions.json
 .idea
 .DS_Store
+Thumbs.db
+ehthumbs.db
 *.suo
 *.ntvs*
 *.njsproj

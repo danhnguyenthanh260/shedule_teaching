@@ -7,6 +7,15 @@ export interface InferredSchema {
   isReliable: boolean;
 }
 
+export interface ColumnMapping {
+  date?: number;
+  time?: number;
+  person?: number;
+  task?: number;
+  location?: number;
+  email?: number;
+}
+
 export interface RowNormalized {
   id: string; // sheetRowId
   date: string;

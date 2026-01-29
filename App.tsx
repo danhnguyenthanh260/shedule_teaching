@@ -36,6 +36,19 @@ const App: React.FC = () => {
   const [headerRowIndex, setHeaderRowIndex] = useState<number>(0);
   const [mergedCells, setMergedCells] = useState<MergedCellGroup[]>([]);
 
+  // Get redirect URI (env override -> dynamic)
+  const getRedirectUri = (): string => {
+    const envRedirect = (import.meta as any).env?.VITE_REDIRECT_URI?.trim();
+    if (envRedirect) return envRedirect;
+
+    const isDevelopment = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
+    if (isDevelopment) {
+      return 'http://localhost:3000/callback.html';
+    }
+    // For production (Vercel)
+    return `${window.location.protocol}//${window.location.host}/callback.html`;
+  };
+
   // Restore session từ localStorage khi app load
   useEffect(() => {
     const savedToken = localStorage.getItem('accessToken');
@@ -65,6 +78,7 @@ const App: React.FC = () => {
         const client = window.google.accounts.oauth2.initTokenClient({
           client_id: (import.meta as any).env?.VITE_GOOGLE_CLIENT_ID || 'YOUR_CLIENT_ID_HERE',
           scope: 'https://www.googleapis.com/auth/spreadsheets.readonly https://www.googleapis.com/auth/calendar.events https://www.googleapis.com/auth/userinfo.profile https://www.googleapis.com/auth/userinfo.email',
+          redirect_uri: getRedirectUri(),
           callback: (response: any) => {
             if (response.error) {
               setError('Lỗi đăng nhập: ' + response.error);
@@ -273,7 +287,21 @@ const App: React.FC = () => {
   const filteredRows = useMemo(() => {
     if (!personFilter || personFilter.toLowerCase() === 'all') return rows;
     const f = personFilter.toLowerCase();
-    return rows.filter(r => r.person.toLowerCase().includes(f) || r.email?.toLowerCase().includes(f));
+    return rows.filter(r => {
+      // Search in all raw data columns for GVHD match
+      const gvhdColumns = Object.entries(r.raw).filter(([key]) => 
+        key.toLowerCase().includes('gvhd') || 
+        key.toLowerCase().includes('giảng viên') ||
+        key.toLowerCase().includes('hướng dẫn')
+      );
+      
+      if (gvhdColumns.length > 0) {
+        return gvhdColumns.some(([, value]) => value.toLowerCase().includes(f));
+      }
+      
+      // Fallback to person/email if no GVHD column found
+      return r.person.toLowerCase().includes(f) || r.email?.toLowerCase().includes(f);
+    });
   }, [rows, personFilter]);
 
   const handleMapChange = (key: keyof ColumnMapping) => (e: React.ChangeEvent<HTMLSelectElement>) => {
@@ -305,6 +333,31 @@ const App: React.FC = () => {
     // Nếu không có headers, generate generic names
     return Array.from({ length: maxCols }, (_, i) => `Column ${i + 1}`);
   }, [fullHeaders, fullRows]);
+
+  // Filter full table rows by GVHD
+  const filteredFullTableRows = useMemo(() => {
+    if (!personFilter || personFilter.toLowerCase() === 'all') return fullRows;
+    
+    const f = personFilter.toLowerCase();
+    const gvhdColIndices: number[] = [];
+    
+    // Find GVHD column indices
+    fullTableColumns.forEach((header, index) => {
+      const h = header.toLowerCase();
+      if (h.includes('gvhd') || h.includes('giảng viên') || h.includes('hướng dẫn')) {
+        gvhdColIndices.push(index);
+      }
+    });
+    
+    if (gvhdColIndices.length === 0) return fullRows;
+    
+    return fullRows.filter(row => {
+      return gvhdColIndices.some(colIndex => {
+        const cellValue = (row[colIndex] || '').toString().toLowerCase();
+        return cellValue.includes(f);
+      });
+    });
+  }, [fullRows, fullTableColumns, personFilter]);
 
   const headerOptions = useMemo(() => {
     return fullTableColumns.map((h, i) => ({
@@ -392,12 +445,12 @@ const App: React.FC = () => {
               />
             </div>
             <div className="md:col-span-3">
-              <label className="block text-sm font-semibold text-slate-900 mb-2">Lọc theo Tên/Email</label>
+              <label className="block text-sm font-semibold text-slate-900 mb-2">Lọc theo GVHD</label>
               <input 
                 className="w-full px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 outline-none transition-all font-medium text-slate-900 placeholder-slate-400" 
                 value={personFilter} 
                 onChange={e => setPersonFilter(e.target.value)}
-                placeholder="Ví dụ: Nguyễn Văn A"
+                placeholder="Nhập tên GVHD"
               />
             </div>
             <div className="md:col-span-2 flex items-end">
@@ -531,7 +584,7 @@ const App: React.FC = () => {
             >
               <div className="text-left">
                 <h3 className="font-bold text-slate-900 text-base">Xem toàn bộ dữ liệu từ Sheet ({fullTableColumns.length} cột)</h3>
-                <p className="text-xs text-slate-500 mt-1 font-medium">Bảng đầy đủ từ A đến BE • Click để {showFullTable ? 'thu gọn' : 'mở rộng'}</p>
+                <p className="text-xs text-slate-500 mt-1 font-medium">Bảng đầy đủ từ A đến BE • {personFilter ? `${filteredFullTableRows.length}/${fullRows.length} dòng` : `${fullRows.length} dòng`} • Click để {showFullTable ? 'thu gọn' : 'mở rộng'}</p>
               </div>
               <div className="flex items-center gap-2">
                 <span className="text-sm font-semibold text-indigo-600">{showFullTable ? 'Ẩn' : 'Xem'}</span>
@@ -596,7 +649,7 @@ const App: React.FC = () => {
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-slate-100">
-                      {fullRows.slice(0, 10).map((row, ri) => (
+                      {filteredFullTableRows.slice(0, 10).map((row, ri) => (
                         <tr key={ri} className="hover:bg-indigo-50/30 transition-colors duration-150">
                           {fullTableColumns.map((_, ci) => (
                             <td 
@@ -620,9 +673,9 @@ const App: React.FC = () => {
                       ))}
                     </tbody>
                   </table>
-                  {fullRows.length > 10 && (
+                  {filteredFullTableRows.length > 10 && (
                     <div className="p-4 text-center text-xs text-slate-600 border-t-2 border-slate-200 bg-slate-50 font-medium">
-                      📊 Hiển thị 10/{fullRows.length} dòng đầu tiên • {fullTableColumns.length} cột (A-{String.fromCharCode(64 + Math.ceil(fullTableColumns.length / 26))}{'ABCDEFGHIJKLMNOPQRSTUVWXYZ'[fullTableColumns.length % 26]})
+                      📊 Hiển thị 10/{filteredFullTableRows.length} dòng {personFilter ? '(đã lọc)' : 'đầu tiên'} • {fullTableColumns.length} cột (A-{String.fromCharCode(64 + Math.ceil(fullTableColumns.length / 26))}{'ABCDEFGHIJKLMNOPQRSTUVWXYZ'[fullTableColumns.length % 26]})
                     </div>
                   )}
                 </div>

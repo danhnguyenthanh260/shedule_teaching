@@ -1,8 +1,10 @@
 
 const SLOT_TIME_RANGES: Record<number, string> = {
-  1: '07:30-09:30',
-  2: '09:45-12:30',
-  3: '13:30-15:00'
+  1: '07:00-09:15',
+  2: '09:30-11:45',
+  3: '12:30-14:45',
+  4: '15:00-17:15',
+  5: '17:30-19:45'
 };
 
 export const parseVNTime = (dateStr: string, timeRange: string) => {

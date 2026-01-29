@@ -2,6 +2,7 @@
 import { RowNormalized, InferredSchema, SyncResult, ColumnMapping } from '../types';
 import { inferSchema } from '../lib/inference';
 import { parseVNTime, generateRowId } from '../lib/utils';
+import { parseHeadersFromSheet, parseMergedCells, MergedCellGroup } from '../lib/headerParser';
 
 export class GoogleSyncService {
   private async fetchWithAuth(url: string, token: string, options: RequestInit = {}) {
@@ -25,54 +26,43 @@ export class GoogleSyncService {
     return match ? match[1] : null;
   }
 
-  async loadSheet(url: string, tab: string, token: string): Promise<{ rows: RowNormalized[], schema: InferredSchema, headers: string[], rawRows: string[][], allRows: string[][], sheetId: string, headerRowIndex: number }> {
+  async loadSheet(url: string, tab: string, token: string): Promise<{ rows: RowNormalized[], schema: InferredSchema, headers: string[], rawRows: string[][], allRows: string[][], sheetId: string, headerRowIndex: number, mergedCells: MergedCellGroup[] }> {
     const sheetId = this.extractSheetId(url);
-    if (!sheetId) throw new Error("URL Google Sheet khÃ´ng há»£p lá»‡.");
+    if (!sheetId) throw new Error("URL Google Sheet khong hop le.");
 
-    // Fetch dá»¯ liá»‡u tá»« Google Sheets API v4
-    // Range máº·c Ä‘á»‹nh láº¥y tá»« dÃ²ng 1 Ä‘áº¿n 500 Ä‘á»ƒ Ä‘áº£m báº£o bao quÃ¡t Ä‘á»§ dá»¯ liá»‡u
-    const range = `${tab}!A1:Z500`;
+    // Fetch du lieu tu Google Sheets API v4
+    const range = `${tab}!A1:BE500`;
     const data = await this.fetchWithAuth(
       `https://sheets.googleapis.com/v4/spreadsheets/${sheetId}/values/${range}`,
       token
     );
 
     const values: string[][] = data.values;
-    if (!values || values.length < 1) throw new Error("Sheet khÃ´ng cÃ³ dá»¯ liá»‡u.");
+    if (!values || values.length < 1) throw new Error("Sheet khong co du lieu.");
 
-    const pickHeaderRowIndex = (rows: string[][]) => {
-      const scan = rows.slice(0, 10);
-      let bestIdx = 0;
-      let bestScore = -1;
-
-      scan.forEach((row, idx) => {
-        const filled = row.filter(c => (c || '').toString().trim() !== '').length;
-        if (filled > bestScore) {
-          bestScore = filled;
-          bestIdx = idx;
-        }
-      });
-
-      return bestIdx;
-    };
-
-    const headerRowIndex = pickHeaderRowIndex(values);
-    const rawHeaders = values[headerRowIndex] || [];
-    const rawData = values.slice(headerRowIndex + 1);
+    // Parse headers theo cau truc co dinh: Row 2 + Row 3 (index 1 + 2)
+    const headers = parseHeadersFromSheet(values);
     
-    // Chá»‰ láº¥y 5 dÃ²ng Ä‘áº§u Ä‘á»ƒ suy luáº­n schema (performance)
-    const schema = inferSchema(rawHeaders, rawData.slice(0, 5));
+    // Parse merged cells (cau truc co dinh)
+    const mergedCells = parseMergedCells();
+    
+    // Du lieu bat dau tu row 4 (index 3)
+    const headerRowIndex = 2; // Row 3 (0-based index 2) la header chi tiet cuoi cung
+    const rawData = values.slice(3); // Data from row 4 (index 3) onwards
+    
+    // Chi lay 5 dong dau de suy luan schema (performance)
+    const schema = inferSchema(headers, rawData.slice(0, 5));
 
     const normalized = this.normalizeRows({
       sheetId,
       tab,
-      headers: rawHeaders,
+      headers,
       rawRows: rawData,
       mapping: schema.mapping,
       headerRowIndex
     });
 
-    return { rows: normalized, schema, headers: rawHeaders, rawRows: rawData, allRows: values, sheetId, headerRowIndex };
+    return { rows: normalized, schema, headers, rawRows: rawData, allRows: values, sheetId, headerRowIndex, mergedCells };
   }
 
   normalizeRows(params: {
@@ -90,26 +80,33 @@ export class GoogleSyncService {
     }
 
     return rawRows
-      .filter(row => row[mapping.date!] && row[mapping.time!])
+      .filter(row => {
+        const dateVal = (row[mapping.date!] || "").toString().trim();
+        const timeVal = (row[mapping.time!] || "").toString().trim();
+        return dateVal && timeVal;
+      })
       .map((row, idx): RowNormalized | null => {
         try {
-          const { start, end } = parseVNTime(row[mapping.date!], row[mapping.time!]);
-          const person = mapping.person !== undefined ? (row[mapping.person] || "Unknown") : "Unknown";
+          const dateStr = (row[mapping.date!] || "").toString().trim();
+          const timeStr = (row[mapping.time!] || "").toString().trim();
+          
+          const { start, end } = parseVNTime(dateStr, timeStr);
+          const person = mapping.person !== undefined ? ((row[mapping.person] || "").toString().trim() || "Unknown") : "Unknown";
 
           const rawMap: Record<string, string> = {};
-          headers.forEach((h, i) => rawMap[h || `Column ${i + 1}`] = row[i] || "");
+          headers.forEach((h, i) => rawMap[h || `Column ${i + 1}`] = (row[i] || "").toString());
 
           const sheetRowNumber = headerRowIndex + 2 + idx;
 
           return {
             id: generateRowId(sheetId, tab, sheetRowNumber, person),
-            date: row[mapping.date!],
+            date: dateStr,
             startTime: start,
             endTime: end,
             person: person,
-            email: mapping.email !== undefined ? row[mapping.email] : undefined,
-            task: mapping.task !== undefined ? (row[mapping.task] || "Nhiem vu khong ten") : "Nhiem vu khong ten",
-            location: mapping.location !== undefined ? (row[mapping.location] || "Chua xac dinh") : "Chua xac dinh",
+            email: mapping.email !== undefined ? (row[mapping.email] || "").toString().trim() || undefined : undefined,
+            task: mapping.task !== undefined ? ((row[mapping.task] || "").toString().trim() || "Nhiem vu khong ten") : "Nhiem vu khong ten",
+            location: mapping.location !== undefined ? ((row[mapping.location] || "").toString().trim() || "Chua xac dinh") : "Chua xac dinh",
             raw: rawMap,
             status: 'pending'
           };
@@ -126,8 +123,9 @@ export class GoogleSyncService {
     
     for (const row of rows) {
       try {
-        // 1. TÃ¬m kiáº¿m event Ä‘Ã£ tá»“n táº¡i dá»±a trÃªn sheetRowId (Idempotency)
-        const searchUrl = `https://www.googleapis.com/calendar/v3/calendars/primary/events?privateExtendedProperty=sheetRowId=${row.id}`;
+        // 1. Tim kiem event da ton tai dua tren sheetRowId (Idempotency)
+        // CRITICAL: Chi search va update event da sync truoc day, ko delete
+        const searchUrl = `https://www.googleapis.com/calendar/v3/calendars/primary/events?privateExtendedProperty=sheetRowId=${row.id}&maxResults=1`;
         const searchResult = await this.fetchWithAuth(searchUrl, token);
         const existingEvent = searchResult.items?.[0];
 
@@ -140,38 +138,51 @@ export class GoogleSyncService {
           extendedProperties: {
             private: {
               sheetRowId: row.id,
-              person: row.person
+              person: row.person,
+              rowHash: this.hashRow(row) // Add hash for tracking
             }
           },
           reminders: { useDefault: true }
         };
 
         if (existingEvent) {
-          // Update event cÅ©
+          // Update event cu
           await this.fetchWithAuth(
             `https://www.googleapis.com/calendar/v3/calendars/primary/events/${existingEvent.id}`,
             token,
             { method: 'PUT', body: JSON.stringify(eventPayload) }
           );
           stats.updated++;
-          stats.logs.push(`Cáº­p nháº­t: ${row.task}`);
+          stats.logs.push(`Cap nhat: ${row.task}`);
         } else {
-          // Táº¡o má»›i
+          // Tao moi
           await this.fetchWithAuth(
             `https://www.googleapis.com/calendar/v3/calendars/primary/events`,
             token,
             { method: 'POST', body: JSON.stringify(eventPayload) }
           );
           stats.created++;
-          stats.logs.push(`Táº¡o má»›i: ${row.task}`);
+          stats.logs.push(`Tao moi: ${row.task}`);
         }
       } catch (e: any) {
         console.error(e);
         stats.failed++;
-        stats.logs.push(`Lá»—i dÃ²ng ${row.task}: ${e.message}`);
+        stats.logs.push(`Loi dong ${row.task}: ${e.message}`);
       }
     }
     return stats;
+  }
+
+  private hashRow(row: RowNormalized): string {
+    // Create hash cho idempotency tracking
+    const rowString = `${row.date}|${row.startTime}|${row.person}|${row.task}|${row.location}`;
+    let hash = 0;
+    for (let i = 0; i < rowString.length; i++) {
+      const char = rowString.charCodeAt(i);
+      hash = ((hash << 5) - hash) + char;
+      hash = hash & hash; // Convert to 32bit integer
+    }
+    return Math.abs(hash).toString(16);
   }
 }
 

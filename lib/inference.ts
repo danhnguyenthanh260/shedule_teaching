@@ -24,10 +24,10 @@ export const inferSchema = (headers: string[], samples: string[][]): InferredSch
 
   headers.forEach((header, index) => {
     const h = header.toLowerCase();
-    
+
     types.forEach(type => {
       let score = 0;
-      
+
       // 1. Check Keywords
       if (KEYWORDS[type].some(k => h.includes(k))) score += 0.6;
 
@@ -58,10 +58,34 @@ export const inferSchema = (headers: string[], samples: string[][]): InferredSch
   });
 
   const avgConfidence = count > 0 ? totalConfidence / count : 0;
+  const isReliable = avgConfidence > 0.75 && !!finalMapping.date && !!finalMapping.time && !!finalMapping.person;
+
+  // ✅ LOG chi tiết kết quả mapping
+  console.log('📊 Schema Inference Result:', {
+    headers: headers,
+    mapping: finalMapping,
+    confidence: avgConfidence.toFixed(2),
+    isReliable: isReliable,
+    status: {
+      date: finalMapping.date !== undefined ? `✅ Column ${finalMapping.date}: "${headers[finalMapping.date]}"` : '❌ MISSING',
+      time: finalMapping.time !== undefined ? `✅ Column ${finalMapping.time}: "${headers[finalMapping.time]}"` : '❌ MISSING',
+      person: finalMapping.person !== undefined ? `✅ Column ${finalMapping.person}: "${headers[finalMapping.person]}"` : '❌ MISSING',
+      task: finalMapping.task !== undefined ? `✅ Column ${finalMapping.task}: "${headers[finalMapping.task]}"` : '⚠️ Optional',
+      location: finalMapping.location !== undefined ? `✅ Column ${finalMapping.location}: "${headers[finalMapping.location]}"` : '⚠️ Optional'
+    }
+  });
+
+  if (!isReliable) {
+    console.warn(
+      '⚠️ Schema không đáng tin cậy!\n',
+      `Confidence: ${(avgConfidence * 100).toFixed(0)}% (cần >75%)\n`,
+      `Missing required columns: ${!finalMapping.date ? 'date ' : ''}${!finalMapping.time ? 'time ' : ''}${!finalMapping.person ? 'person' : ''}`
+    );
+  }
 
   return {
     mapping: finalMapping,
     confidence: avgConfidence,
-    isReliable: avgConfidence > 0.75 && !!finalMapping.date && !!finalMapping.time && !!finalMapping.person
+    isReliable: isReliable
   };
 };

@@ -43,6 +43,18 @@ const parseTimePart = (t: string) => {
  * Ưu tiên giờ lẻ nếu người dùng nhập giờ, chỉ dùng SLOT_TIME_RANGES nếu nhập số Slot đơn thuần.
  */
 export const parseVNTime = (dateStr: string, timeRange: string) => {
+  // ✅ VALIDATION: Kiểm tra input - LOG WARNING thay vì throw
+  if (!dateStr || !timeRange) {
+    console.warn(`⚠️ Thiếu thông tin thời gian - Ngày: ${dateStr || '(trống)'}, Giờ: ${timeRange || '(trống)'}`);
+    // Return default value thay vì throw
+    const now = new Date();
+    return {
+      start: now.toISOString(),
+      end: new Date(now.getTime() + 3600000).toISOString(), // +1 hour
+      isCustomTime: false
+    };
+  }
+
   // Chuẩn hóa dấu gạch ngang (xử lý các loại dấu gạch khác nhau từ Sheet)
   const normalizedRange = timeRange.replace(/\u2013|\u2014/g, '-').trim();
 
@@ -58,7 +70,16 @@ export const parseVNTime = (dateStr: string, timeRange: string) => {
   const endTime = parseTimePart(endStr);
 
   // 2. Parse Ngày tháng (Hỗ trợ DD/MM/YYYY hoặc YYYY/MM/DD)
-  const dateParts = dateStr.split(/[-/.]/).map(p => parseInt(p));
+  const dateParts = dateStr.split(/[-\/.]/).map(p => parseInt(p));
+
+  if (dateParts.length < 3 || dateParts.some(isNaN)) {
+    console.warn(`⚠️ Định dạng ngày không hợp lệ: "${dateStr}" - Sẽ dùng ngày hôm nay`);
+    const now = new Date();
+    dateParts[0] = now.getDate();
+    dateParts[1] = now.getMonth() + 1;
+    dateParts[2] = now.getFullYear();
+  }
+
   let d: number, m: number, y: number;
 
   if (dateParts[0] > 1000) {
@@ -67,9 +88,48 @@ export const parseVNTime = (dateStr: string, timeRange: string) => {
     [d, m, y] = dateParts; // DD/MM/YYYY (Chuẩn VN)
   }
 
+  // ✅ VALIDATION: Kiểm tra giá trị hợp lệ - LOG WARNING thay vì throw
+  if (m < 1 || m > 12) {
+    console.warn(`⚠️ Tháng không hợp lệ: ${m} từ "${dateStr}" - Có thể format MM/DD thay vì DD/MM?`);
+    // Swap d và m nếu có vẻ như bị nhầm
+    if (d >= 1 && d <= 12 && m >= 1 && m <= 31) {
+      [d, m] = [m, d];
+      console.log(`✅ Đã tự động swap: Ngày=${d}, Tháng=${m}`);
+    } else {
+      m = 1; // Fallback to January
+    }
+  }
+
+  if (d < 1 || d > 31) {
+    console.warn(`⚠️ Ngày không hợp lệ: ${d} từ "${dateStr}" - Sẽ dùng ngày 1`);
+    d = 1;
+  }
+
   // Tạo đối tượng Date (Tháng trong JS bắt đầu từ 0)
   const startDate = new Date(y, m - 1, d, startTime.h, startTime.m);
   const endDate = new Date(y, m - 1, d, endTime.h, endTime.m);
+
+  // ✅ VALIDATION: Kiểm tra kết quả parse
+  if (isNaN(startDate.getTime()) || isNaN(endDate.getTime())) {
+    console.error(`❌ Không thể tạo Date object từ: "${dateStr}" + "${timeRange}"`);
+    const now = new Date();
+    return {
+      start: now.toISOString(),
+      end: new Date(now.getTime() + 3600000).toISOString(),
+      isCustomTime: false
+    };
+  }
+
+  // ✅ CẢNH BÁO: Kiểm tra năm quá xa (có thể lỗi DD/MM vs MM/DD)
+  const now = new Date();
+  const diffYears = Math.abs(startDate.getFullYear() - now.getFullYear());
+
+  if (diffYears > 2) {
+    console.warn(
+      `⚠️ Cảnh báo: Ngày parse ra ${startDate.toLocaleDateString('vi-VN')} ` +
+      `cách hiện tại ${diffYears} năm! Input: "${dateStr}"`
+    );
+  }
 
   // Hàm helper format ISO +07:00
   const toISOWithTimezone = (date: Date) => {

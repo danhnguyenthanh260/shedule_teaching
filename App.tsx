@@ -296,7 +296,7 @@ const App: React.FC = () => {
       );
       
       if (gvhdColumns.length > 0) {
-        return gvhdColumns.some(([, value]) => value.toLowerCase().includes(f));
+        return gvhdColumns.some(([, value]) => (value as string).toLowerCase().includes(f));
       }
       
       // Fallback to person/email if no GVHD column found

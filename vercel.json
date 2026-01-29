@@ -1,9 +1,6 @@
 {
   "buildCommand": "npm run build",
   "outputDirectory": "dist",
-  "env": {
-    "VITE_GOOGLE_CLIENT_ID": "@google_client_id"
-  },
   "headers": [
     {
       "source": "/callback.html",

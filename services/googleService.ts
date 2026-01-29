@@ -1,5 +1,4 @@
-﻿
-import { RowNormalized, InferredSchema, SyncResult, ColumnMapping } from '../types';
+﻿import { RowNormalized, InferredSchema, SyncResult, ColumnMapping } from '../types';
 import { inferSchema } from '../lib/inference';
 import { parseVNTime, generateRowId } from '../lib/utils';
 import { parseHeadersFromSheet, parseMergedCells, MergedCellGroup } from '../lib/headerParser';
@@ -26,45 +25,84 @@ export class GoogleSyncService {
     return match ? match[1] : null;
   }
 
-  async loadSheet(url: string, tab: string, token: string): Promise<{ rows: RowNormalized[], schema: InferredSchema, headers: string[], rawRows: string[][], allRows: string[][], sheetId: string, headerRowIndex: number, mergedCells: MergedCellGroup[] }> {
+  async loadSheet(url: string, tab: string, token: string): Promise<{
+    rows: RowNormalized[],
+    schema: InferredSchema,
+    headers: string[],
+    rawRows: string[][],
+    allRows: string[][],
+    sheetId: string,
+    headerRowIndex: number,
+    mergedCells: MergedCellGroup[]
+  }> {
     const sheetId = this.extractSheetId(url);
-    if (!sheetId) throw new Error("URL Google Sheet khong hop le.");
+    if (!sheetId) throw new Error("URL Google Sheet không hợp lệ.");
 
-    // Fetch du lieu tu Google Sheets API v4
-    const range = `${tab}!A1:BE500`;
-    const data = await this.fetchWithAuth(
-      `https://sheets.googleapis.com/v4/spreadsheets/${sheetId}/values/${range}`,
-      token
-    );
+    try {
+      // BƯỚC 1: Lấy metadata để bypass tên sheet
+      const metadataUrl = `https://sheets.googleapis.com/v4/spreadsheets/${sheetId}?fields=sheets.properties.title`;
+      const metadata = await this.fetchWithAuth(metadataUrl, token);
 
-    const values: string[][] = data.values;
-    if (!values || values.length < 1) throw new Error("Sheet khong co du lieu.");
+      if (!metadata.sheets || metadata.sheets.length === 0) {
+        throw new Error("File Google Sheet này không có trang tính nào.");
+      }
 
-    // Parse headers theo cau truc co dinh: Row 2 + Row 3 (index 1 + 2)
-    const headers = parseHeadersFromSheet(values);
+      // Lấy danh sách tên tất cả các sheet hiện có
+      const allSheetNames = metadata.sheets.map((s: any) => s.properties.title);
 
-    // Parse merged cells (cau truc co dinh)
-    const mergedCells = parseMergedCells();
+      // Ưu tiên tên tab người dùng nhập, nếu không khớp thì lấy tab đầu tiên
+      const finalTabName = allSheetNames.includes(tab) ? tab : allSheetNames[0];
+      console.log(`Đang sử dụng Sheet: ${finalTabName}`);
 
-    // Du lieu bat dau tu row 4 (index 3)
-    const headerRowIndex = 2; // Row 3 (0-based index 2) la header chi tiet cuoi cung
-    const rawData = values.slice(3); // Data from row 4 (index 3) onwards
+      // BƯỚC 2: Truy vấn dữ liệu (Dùng dấu nháy đơn bao quanh tên sheet để tránh lỗi dấu cách)
+      const range = `'${finalTabName}'!A1:BE1000`;
+      const data = await this.fetchWithAuth(
+        `https://sheets.googleapis.com/v4/spreadsheets/${sheetId}/values/${encodeURIComponent(range)}`,
+        token
+      );
 
-    // Chi lay 5 dong dau de suy luan schema (performance)
-    const schema = inferSchema(headers, rawData.slice(0, 5));
+      const values: string[][] = data.values;
+      if (!values || values.length < 1) throw new Error("Sheet này không có dữ liệu.");
 
-    const normalized = this.normalizeRows({
-      sheetId,
-      tab,
-      headers,
-      rawRows: rawData,
-      mapping: schema.mapping,
-      headerRowIndex
-    });
+      // BƯỚC 3: Xử lý Headers và Schema
+      const headers = parseHeadersFromSheet(values);
+      const mergedCells = parseMergedCells();
+      const headerRowIndex = 2; // Row 3 (index 2)
+      const rawData = values.slice(3); // Dữ liệu từ dòng 4 trở đi
 
-    return { rows: normalized, schema, headers, rawRows: rawData, allRows: values, sheetId, headerRowIndex, mergedCells };
+      const schema = inferSchema(headers, rawData.slice(0, 5));
+
+      // BƯỚC 4: Normalize toàn bộ 57 cột (Dùng logic headers.forEach đã bàn)
+      const normalized = this.normalizeRows({
+        sheetId,
+        tab: finalTabName,
+        headers,
+        rawRows: rawData,
+        mapping: schema.mapping,
+        headerRowIndex
+      });
+
+      // QUAN TRỌNG: Luôn return đầy đủ object để tránh lỗi "destructure undefined"
+      return {
+        rows: normalized,
+        schema,
+        headers,
+        rawRows: rawData,
+        allRows: values,
+        sheetId,
+        headerRowIndex,
+        mergedCells
+      };
+
+    } catch (error: any) {
+      console.error("Lỗi chi tiết tại loadSheet:", error);
+      throw new Error(error.message || "Không thể tải dữ liệu từ Google Sheet.");
+    }
   }
 
+  /**
+   * REFACTORED: Tự động nhận diện tất cả các cột từ A đến hết
+   */
   normalizeRows(params: {
     sheetId: string;
     tab: string;
@@ -94,7 +132,11 @@ export class GoogleSyncService {
           const person = mapping.person !== undefined ? ((row[mapping.person] || "").toString().trim() || "Unknown") : "Unknown";
 
           const rawMap: Record<string, string> = {};
-          headers.forEach((h, i) => rawMap[h || `Column ${i + 1}`] = (row[i] || "").toString());
+
+          headers.forEach((h, i) => {
+            const headerName = h || `Column_${i + 1}`;
+            rawMap[headerName] = (row[i] || "").toString().trim();
+          });
 
           const sheetRowNumber = headerRowIndex + 2 + idx;
 
@@ -118,6 +160,9 @@ export class GoogleSyncService {
       .filter((r): r is RowNormalized => r !== null);
   }
 
+  /**
+   * REFACTORED: Xử lý xung đột khoảng thời gian (Overlap) và cho phép Ghi đè
+   */
   async syncToCalendar(rows: RowNormalized[], token: string): Promise<SyncResult> {
     const stats = { created: 0, updated: 0, failed: 0, logs: [] as string[] };
 
@@ -127,7 +172,6 @@ export class GoogleSyncService {
         const newEnd = new Date(row.endTime).getTime();
         const newSummary = `[${row.task}] - ${row.person}`;
 
-        // Bước 1: Quét toàn bộ lịch trong ngày để tìm "Vùng va chạm"
         const eventDate = new Date(row.startTime);
         const timeMin = new Date(eventDate).setHours(0, 0, 0, 0);
         const timeMax = new Date(eventDate).setHours(23, 59, 59, 999);
@@ -136,8 +180,7 @@ export class GoogleSyncService {
         const searchResult = await this.fetchWithAuth(searchUrl, token);
         const existingEvents = searchResult.items || [];
 
-        // Bước 2: Tìm TẤT CẢ các ca bị xâm lấn (Overlap)
-        // Thuật toán: (Start_A < End_B) AND (End_A > Start_B)
+        // THUẬT TOÁN KIỂM TRA XUNG ĐỘT (OVERLAP)
         const conflictingEvents = existingEvents.filter((event: any) => {
           const exStart = new Date(event.start.dateTime).getTime();
           const exEnd = new Date(event.end.dateTime).getTime();
@@ -147,29 +190,25 @@ export class GoogleSyncService {
         const eventPayload = {
           summary: newSummary,
           location: row.location,
+          // Đưa toàn bộ 57+ cột vào phần mô tả lịch để tra cứu nhanh
           description: Object.entries(row.raw).map(([k, v]) => `${k}: ${v}`).join('\n'),
           start: { dateTime: row.startTime, timeZone: 'Asia/Ho_Chi_Minh' },
           end: { dateTime: row.endTime, timeZone: 'Asia/Ho_Chi_Minh' },
         };
 
-        // Bước 3: Xử lý dựa trên kết quả va chạm
         if (conflictingEvents.length > 0) {
           const conflictNames = conflictingEvents.map((e: any) => e.summary).join(', ');
-
-          // Cảnh báo chi tiết các ca bị ảnh hưởng
           const userConfirmed = window.confirm(
-            `Phát hiện xung đột thời gian!\n\n` +
-            `Ca mới: ${new Date(newStart).toLocaleTimeString()} - ${new Date(newEnd).toLocaleTimeString()}\n` +
-            `Lịch bị đè: ${conflictNames}\n\n` +
-            `Bạn có muốn xóa các lịch cũ này để cập nhật không?`
+            `Xung đột lịch trình!\n\nLịch mới: ${new Date(newStart).toLocaleTimeString()} - ${new Date(newEnd).toLocaleTimeString()}\n` +
+            `Đang trùng với: ${conflictNames}\n\nBạn có muốn GHI ĐÈ để cập nhật không?`
           );
 
           if (!userConfirmed) {
-            stats.logs.push(`Hủy bỏ do xung đột: ${row.task}`);
+            stats.logs.push(`Bỏ qua: ${row.task}`);
             continue;
           }
 
-          // Xóa tất cả các ca gây xung đột (xử lý được cả trường hợp 1 ca cũ bị xé thành 2 ca mới)
+          // Xóa các lịch cũ gây xung đột
           for (const conflict of conflictingEvents) {
             await this.fetchWithAuth(
               `https://www.googleapis.com/calendar/v3/calendars/primary/events/${conflict.id}`,
@@ -179,7 +218,7 @@ export class GoogleSyncService {
           }
         }
 
-        // Bước 4: Thêm ca mới sau khi vùng ảnh hưởng đã sạch
+        // Tạo lịch mới
         await this.fetchWithAuth(
           `https://www.googleapis.com/calendar/v3/calendars/primary/events`,
           token,
@@ -187,157 +226,15 @@ export class GoogleSyncService {
         );
 
         stats.created++;
-        stats.logs.push(`Đồng bộ thành công: ${row.task}`);
+        stats.logs.push(`Thành công: ${row.task}`);
 
       } catch (e: any) {
-        console.error(e);
         stats.failed++;
         stats.logs.push(`Lỗi ${row.task}: ${e.message}`);
       }
     }
     return stats;
   }
-
-  private hashRow(row: RowNormalized): string {
-    // Create hash cho idempotency tracking
-    const rowString = `${row.date}|${row.startTime}|${row.person}|${row.task}|${row.location}`;
-    let hash = 0;
-    for (let i = 0; i < rowString.length; i++) {
-      const char = rowString.charCodeAt(i);
-      hash = ((hash << 5) - hash) + char;
-      hash = hash & hash; // Convert to 32bit integer
-    }
-    return Math.abs(hash).toString(16);
-  }
-
-  /**
-   * Handle synchronization of a calendar event with exact time validation
-   * Prevents stacked events by only confirming on exact matches (same title + same start time)
-   * @param newEvent - The new event to sync (must have summary, start.dateTime)
-   * @param token - Google OAuth token
-   * @returns Promise<{ success: boolean, message: string, eventId?: string }>
-   */
-  async handleSyncCalendarEvent(
-    newEvent: {
-      summary: string;
-      start: { dateTime: string };
-      end?: { dateTime: string };
-      location?: string;
-      description?: string;
-    },
-    token: string
-  ): Promise<{ success: boolean; message: string; eventId?: string }> {
-    try {
-      // 1. Get the start and end of the current day from newEvent's dateTime
-      const newEventDate = new Date(newEvent.start.dateTime);
-      const startOfDay = new Date(newEventDate);
-      startOfDay.setHours(0, 0, 0, 0);
-
-      const endOfDay = new Date(newEventDate);
-      endOfDay.setHours(23, 59, 59, 999);
-
-      // 2. Fetch existing events for the current day
-      const listUrl = `https://www.googleapis.com/calendar/v3/calendars/primary/events?timeMin=${startOfDay.toISOString()}&timeMax=${endOfDay.toISOString()}&singleEvents=true&orderBy=startTime`;
-
-      const listResponse = await this.fetchWithAuth(listUrl, token);
-      const existingEvents = listResponse.items || [];
-
-      // 3. Find an exact match: same summary AND same start.dateTime
-      const newStartTime = new Date(newEvent.start.dateTime);
-
-      const exactMatch = existingEvents.find(
-        (event: any) =>
-          event.summary === newEvent.summary &&
-          new Date(event.start.dateTime).getTime() === newStartTime.getTime()
-      );
-
-      if (exactMatch) {
-        // EXACT MATCH FOUND: Same Title + Same Start Time
-        const userConfirmed = window.confirm(
-          `An event at this exact time (${newStartTime.toLocaleTimeString()}) already exists.\n` +
-          `Do you want to Replace/Overwrite it?`
-        );
-
-        if (!userConfirmed) {
-          // User clicked Cancel - abort operation
-          return {
-            success: false,
-            message: 'Operation aborted. The existing event was not modified.'
-          };
-        }
-
-        // User clicked OK - Delete old event first, then insert new one
-        // CRITICAL: Fully await delete before insert to prevent duplicates
-        await this.fetchWithAuth(
-          `https://www.googleapis.com/calendar/v3/calendars/primary/events/${exactMatch.id}`,
-          token,
-          { method: 'DELETE' }
-        );
-
-        // Now insert the new event
-        const insertResponse = await this.fetchWithAuth(
-          `https://www.googleapis.com/calendar/v3/calendars/primary/events`,
-          token,
-          {
-            method: 'POST',
-            body: JSON.stringify({
-              ...newEvent,
-              start: { ...newEvent.start, timeZone: 'Asia/Ho_Chi_Minh' },
-              end: newEvent.end ? { ...newEvent.end, timeZone: 'Asia/Ho_Chi_Minh' } : undefined,
-              reminders: { useDefault: true }
-            })
-          }
-        );
-
-        return {
-          success: true,
-          message: `Event replaced successfully at ${newStartTime.toLocaleTimeString()}.`,
-          eventId: insertResponse.id
-        };
-      } else {
-        // NO EXACT MATCH: Either different name, or different time
-        // Proceed to insert normally (allows multiple sessions/slots for same task)
-        const insertResponse = await this.fetchWithAuth(
-          `https://www.googleapis.com/calendar/v3/calendars/primary/events`,
-          token,
-          {
-            method: 'POST',
-            body: JSON.stringify({
-              ...newEvent,
-              start: { ...newEvent.start, timeZone: 'Asia/Ho_Chi_Minh' },
-              end: newEvent.end ? { ...newEvent.end, timeZone: 'Asia/Ho_Chi_Minh' } : undefined,
-              reminders: { useDefault: true }
-            })
-          }
-        );
-
-        return {
-          success: true,
-          message: `Event created successfully at ${newStartTime.toLocaleTimeString()}.`,
-          eventId: insertResponse.id
-        };
-      }
-    } catch (error: any) {
-      // Handle specific error types
-      console.error('Error in handleSyncCalendarEvent:', error);
-
-      let errorMessage = 'Failed to sync calendar event';
-
-      if (error.message?.includes('401') || error.message?.toLowerCase().includes('auth')) {
-        errorMessage = 'Authentication error. Please sign in again.';
-      } else if (error.message?.includes('404')) {
-        errorMessage = 'Calendar event not found (404 error).';
-      } else if (error.message) {
-        errorMessage = `Error: ${error.message}`;
-      }
-
-      return {
-        success: false,
-        message: errorMessage
-      };
-    }
-  }
 }
 
 export const googleService = new GoogleSyncService();
-

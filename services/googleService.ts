@@ -232,7 +232,7 @@ export class GoogleSyncService {
     const finalTabName = allSheetNames.includes(tab) ? tab : allSheetNames[0];
 
     // ✅ Review: Always use J1:BE1000 to skip Project Information (A-I)
-    const range = `'${finalTabName}'!J1:BE1000`;
+    const range = `'${finalTabName}'!A1:BE1000`;
     const data = await this.fetchWithAuth(
       `https://sheets.googleapis.com/v4/spreadsheets/${sheetId}/values/${encodeURIComponent(range)}`,
       token
@@ -246,8 +246,8 @@ export class GoogleSyncService {
     // ⚠️ IMPORTANT: Use the exact row selected by user as headers
     // DO NOT merge or clean headers - user wants exact content of chosen row
     // Default to row 3 (index 2) for Review mode, but this should be configurable
-    const headers = values[2];
-    const rawData = values.slice(3);
+    const headers = values[2].slice(0, 12);
+    const rawData = values.slice(3).map(row => row.slice(0, 12));
 
     console.log(`✅ Review mode: Range ${range}`);
     console.log(`✅ Headers at row 3 (exact content):`, headers.slice(0, 10));
@@ -432,7 +432,12 @@ export class GoogleSyncService {
   /**
    * 3. SYNC TO CALENDAR: Sửa lỗi TypeScript operator, check xung đột chính xác
    */
-  async syncToCalendar(rows: RowNormalized[], token: string): Promise<SyncResult> {
+  async syncToCalendar(
+    rows: RowNormalized[],
+    token: string,
+    forceOverride: boolean = false
+  ): Promise<SyncResult> {
+
     const stats = { created: 0, updated: 0, failed: 0, logs: [] as string[] };
 
     if (!rows || rows.length === 0) {
@@ -441,13 +446,9 @@ export class GoogleSyncService {
 
     for (const row of rows) {
       try {
-        // ✅ Tách biệt việc tính toán timestamp để tránh lỗi TypeScript
-        const newStartTime = new Date(row.startTime);
-        const newEndTime = new Date(row.endTime);
-        const nStart = newStartTime.getTime();
-        const nEnd = newEndTime.getTime();
+        const nStart = new Date(row.startTime).getTime();
+        const nEnd = new Date(row.endTime).getTime();
 
-        // Lấy ngày hiện tại để tìm events trong cùng ngày
         const eventDate = new Date(row.startTime);
         const dayStart = new Date(eventDate);
         dayStart.setHours(0, 0, 0, 0);
@@ -457,39 +458,31 @@ export class GoogleSyncService {
         const tMin = dayStart.toISOString();
         const tMax = dayEnd.toISOString();
 
-        // Fetch existing events
-        const searchUrl = `https://www.googleapis.com/calendar/v3/calendars/primary/events?timeMin=${tMin}&timeMax=${tMax}&singleEvents=true`;
+        const searchUrl =
+          `https://www.googleapis.com/calendar/v3/calendars/primary/events?timeMin=${tMin}&timeMax=${tMax}&singleEvents=true`;
+
         const searchRes = await this.fetchWithAuth(searchUrl, token);
         const existingEvents = searchRes.items || [];
 
-        // ✅ Kiểm tra xung đột với logic rõ ràng
         const conflicts = existingEvents.filter((e: any) => {
-          if (!e.start || !e.start.dateTime || !e.end || !e.end.dateTime) {
-            return false;
-          }
+          if (!e.start?.dateTime || !e.end?.dateTime) return false;
 
           const existingStart = new Date(e.start.dateTime).getTime();
           const existingEnd = new Date(e.end.dateTime).getTime();
 
-          // Thuật toán overlap: A starts before B ends AND A ends after B starts
-          const hasOverlap = nStart < existingEnd && nEnd > existingStart;
-          return hasOverlap;
+          return nStart < existingEnd && nEnd > existingStart;
         });
 
-        // Xử lý xung đột nếu có
+        // 🔥 CHỈ xử lý theo forceOverride – KHÔNG confirm ở đây nữa
         if (conflicts.length > 0) {
-          const names = conflicts.map((e: any) => e.summary).join(', ');
-          const userConfirmed = window.confirm(
-            `Trùng lịch với: ${names}\n\nBạn có muốn ghi đè không?`
-          );
 
-          if (!userConfirmed) {
+          if (!forceOverride) {
             stats.failed++;
-            stats.logs.push(`❌ Người dùng hủy: ${row.task}`);
+            stats.logs.push(`⚠️ Trùng lịch: ${row.task}`);
             continue;
           }
 
-          // Xóa các events conflicting
+          // Nếu forceOverride = true → xóa event trùng
           for (const c of conflicts) {
             try {
               await this.fetchWithAuth(
@@ -498,7 +491,7 @@ export class GoogleSyncService {
                 { method: 'DELETE' }
               );
             } catch (deleteError) {
-              console.warn('⚠️ Không thể xóa event:', deleteError);
+              console.warn('Không thể xóa event:', deleteError);
             }
           }
         }
@@ -510,8 +503,14 @@ export class GoogleSyncService {
           description: Object.entries(row.raw)
             .map(([k, v]) => `${k}: ${v}`)
             .join('\n'),
-          start: { dateTime: row.startTime, timeZone: 'Asia/Ho_Chi_Minh' },
-          end: { dateTime: row.endTime, timeZone: 'Asia/Ho_Chi_Minh' },
+          start: {
+            dateTime: row.startTime,
+            timeZone: 'Asia/Ho_Chi_Minh'
+          },
+          end: {
+            dateTime: row.endTime,
+            timeZone: 'Asia/Ho_Chi_Minh'
+          },
         };
 
         await this.fetchWithAuth(
@@ -530,6 +529,32 @@ export class GoogleSyncService {
     }
 
     return stats;
+  }
+  async detectConflicts(row: RowNormalized, token: string) {
+    const eventDate = new Date(row.startTime);
+    const dayStart = new Date(eventDate);
+    dayStart.setHours(0, 0, 0, 0);
+    const dayEnd = new Date(eventDate);
+    dayEnd.setHours(23, 59, 59, 999);
+
+    const tMin = dayStart.toISOString();
+    const tMax = dayEnd.toISOString();
+
+    const searchUrl = `https://www.googleapis.com/calendar/v3/calendars/primary/events?timeMin=${tMin}&timeMax=${tMax}&singleEvents=true`;
+    const searchRes = await this.fetchWithAuth(searchUrl, token);
+    const existingEvents = searchRes.items || [];
+
+    const nStart = new Date(row.startTime).getTime();
+    const nEnd = new Date(row.endTime).getTime();
+
+    return existingEvents.filter((e: any) => {
+      if (!e.start?.dateTime || !e.end?.dateTime) return false;
+
+      const existingStart = new Date(e.start.dateTime).getTime();
+      const existingEnd = new Date(e.end.dateTime).getTime();
+
+      return nStart < existingEnd && nEnd > existingStart;
+    });
   }
 }
 

@@ -137,9 +137,61 @@ const App: React.FC = () => {
     setSelectedIds(new Set(matches.map(m => m.id)));
   };
 
+  const looksLikeDataRow = (row: string[]) => {
+    const joined = row.join(' ').toLowerCase();
+    const datePattern = /\b\d{1,2}[\/\-]\d{1,2}[\/\-]\d{2,4}\b/;
+    const timePattern = /\b\d{1,2}:\d{2}\b|\b\d{1,2}h\d{2}\b/;
+    const numericCells = row.filter(v => v && /^\d+$/.test(v.trim())).length;
+    const filledCells = row.filter(v => v && v.trim()).length;
+    const dataSignals = (datePattern.test(joined) ? 1 : 0) + (timePattern.test(joined) ? 1 : 0) + (numericCells > 2 ? 1 : 0);
+    return filledCells > 0 && dataSignals >= 1;
+  };
+
+  const looksLikeHeaderRow = (row: string[]) => {
+    const filledCells = row.filter(v => v && v.trim()).length;
+    if (filledCells === 0) return false;
+    const headerKeywords = ['ngành', 'mã', 'tên', 'đề tài', 'ngày', 'giờ', 'phòng', 'review', 'code', 'count', 'reviewer'];
+    const joined = row.join(' ').toLowerCase();
+    const keywordHits = headerKeywords.filter(k => joined.includes(k)).length;
+    return keywordHits > 0 || filledCells >= Math.max(3, row.length * 0.2);
+  };
+
+  const mergeHeaderRows = (primary: string[], secondary: string[]) => {
+    const maxLen = Math.max(primary.length, secondary.length);
+    return Array.from({ length: maxLen }, (_, i) => {
+      const a = primary[i]?.trim() || '';
+      const b = secondary[i]?.trim() || '';
+      if (a && b && a !== b) return `${a} ${b}`;
+      return a || b;
+    });
+  };
+
+  const trimLeadingEmptyRows = (rows: string[][]) => {
+    let start = 0;
+    while (start < rows.length && !rows[start].some(cell => cell && cell.trim())) {
+      start += 1;
+    }
+    return rows.slice(start);
+  };
+
   const applyHeaderRow = (idx: number, rows: string[][], meta?: { sheetId: string; tab: string }) => {
-    const headers = rows[idx] || [];
-    const rawRows = rows.slice(idx + 1);
+    const selectedRow = rows[idx] || [];
+    let headers = selectedRow;
+    let dataStartIndex = idx + 1;
+
+    if (looksLikeDataRow(selectedRow) && idx > 0) {
+      headers = rows[idx - 1] || [];
+      dataStartIndex = idx;
+    } else {
+      const nextRow = rows[idx + 1] || [];
+      if (looksLikeHeaderRow(nextRow)) {
+        headers = mergeHeaderRows(selectedRow, nextRow);
+        dataStartIndex = idx + 2;
+      }
+    }
+
+    let rawRows = rows.slice(dataStartIndex);
+    rawRows = trimLeadingEmptyRows(rawRows);
     const schema = inferSchema(headers, rawRows.slice(0, 5));
     const nextMeta = meta ? { ...meta, headerRowIndex: idx } : (sheetMeta ? { ...sheetMeta, headerRowIndex: idx } : null);
 
@@ -607,8 +659,8 @@ const App: React.FC = () => {
                 <div className="overflow-x-auto max-h-96 bg-gradient-to-b from-slate-50/50 to-white">
                   <table className="text-left text-sm border-collapse" style={{ width: `${fullTableColumns.length * 140}px` }}>
                     <thead className="sticky top-0 z-10">
-                      {/* Merged header row */}
-                      {mergedCells && mergedCells.length > 0 && (
+                      {/* Merged header row (chỉ hiển thị khi thực sự có multi-row headers) */}
+                      {mergedCells && mergedCells.length > 0 && headerRowIndex > 0 && mergedCells.some(group => group.name && group.name.trim().length > 0) && (
                         <tr className="bg-gradient-to-r from-indigo-500 to-indigo-600 text-[11px] font-bold text-white uppercase tracking-wider border-b-2 border-indigo-700 shadow-sm">
                           {mergedCells.map((group, gIdx) => {
                             const colSpan = group.colCount;
@@ -626,7 +678,7 @@ const App: React.FC = () => {
                         </tr>
                       )}
                       {/* Detail header row */}
-                      <tr className="bg-slate-100 text-[10px] font-semibold text-slate-700 uppercase tracking-wider border-b-2 border-slate-300 sticky top-[40px] z-10">
+                      <tr className={`bg-slate-100 text-[10px] font-semibold text-slate-700 uppercase tracking-wider border-b-2 border-slate-300 sticky ${mergedCells && mergedCells.length > 0 && headerRowIndex > 0 && mergedCells.some(group => group.name && group.name.trim().length > 0) ? 'top-[40px]' : 'top-0'} z-10`}>
                         {fullTableColumns.map((h, i) => {
                           const isSelected =
                             i === columnMap.date ||

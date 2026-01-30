@@ -37,6 +37,9 @@ const App: React.FC = () => {
   const [sheetMeta, setSheetMeta] = useState<{ sheetId: string; tab: string; headerRowIndex: number } | null>(null);
   const [headerRowIndex, setHeaderRowIndex] = useState<number>(0);
   const [mergedCells, setMergedCells] = useState<MergedCellGroup[]>([]);
+  const [duplicateRows, setDuplicateRows] = useState<RowNormalized[]>([]);
+  const [pendingRows, setPendingRows] = useState<RowNormalized[]>([]);
+  const [showDuplicateModal, setShowDuplicateModal] = useState(false);
 
   // Get redirect URI (env override -> dynamic)
   const getRedirectUri = (): string => {
@@ -439,24 +442,37 @@ const App: React.FC = () => {
       setLoading(false);
     }
   };
-
   const handleSync = async () => {
     const toSync = rows.filter(r => selectedIds.has(r.id));
     if (toSync.length === 0 || !accessToken || !sheetMeta) return;
+
     setSyncing(true);
     setError(null);
+
     try {
-      const res = await googleService.syncToCalendar(toSync, accessToken);
+      const duplicates: RowNormalized[] = [];
+      const cleanRows: RowNormalized[] = [];
+
+      for (const row of toSync) {
+        const conflicts = await googleService.detectConflicts(row, accessToken);
+
+        if (conflicts.length > 0) {
+          duplicates.push(row);
+        } else {
+          cleanRows.push(row);
+        }
+      }
+
+      if (duplicates.length > 0) {
+        setDuplicateRows(duplicates);
+        setPendingRows(cleanRows);
+        setShowDuplicateModal(true);
+        return; // ⛔ dừng lại ở đây
+      }
+
+      const res = await googleService.syncToCalendar(cleanRows, accessToken, true);
       setResult(res);
 
-      // Save sync history to database (non-blocking)
-      await syncHistoryService.saveSyncResult(
-        sheetMeta.sheetId,
-        sheetMeta.tab,
-        toSync,
-        res,
-        accessToken
-      );
     } catch (err: any) {
       setError(err.message);
     } finally {
@@ -1070,6 +1086,61 @@ const App: React.FC = () => {
           </div>
         )}
       </div>
+      {showDuplicateModal && (
+      <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50">
+        <div className="bg-white p-6 rounded-xl w-[500px] max-h-[500px] overflow-auto shadow-xl">
+          <h2 className="font-bold text-lg mb-4 text-slate-800">
+            Phát hiện lịch trùng
+          </h2>
+
+          {duplicateRows.map(row => (
+            <label key={row.id} className="flex items-center gap-3 mb-3 cursor-pointer">
+              <input
+                type="checkbox"
+                className="w-4 h-4"
+                onChange={(e) => {
+                  if (e.target.checked) {
+                    setPendingRows(prev => [...prev, row]);
+                  } else {
+                    setPendingRows(prev => prev.filter(r => r.id !== row.id));
+                  }
+                }}
+              />
+              <div>
+                <div className="font-semibold">{row.task}</div>
+                <div className="text-xs text-slate-500">
+                  {row.startTime.split('T')[1].substring(0,5)} - {row.endTime.split('T')[1].substring(0,5)}
+                </div>
+              </div>
+            </label>
+          ))}
+
+          <div className="flex justify-end gap-3 mt-6">
+            <button
+              onClick={() => {
+                setShowDuplicateModal(false);
+                setPendingRows([]);
+              }}
+              className="px-4 py-2 border rounded-lg"
+            >
+              Hủy
+            </button>
+
+            <button
+              onClick={async () => {
+                setShowDuplicateModal(false);
+                const res = await googleService.syncToCalendar(pendingRows, accessToken!, true);
+                setResult(res);
+                setPendingRows([]);
+              }}
+              className="px-4 py-2 bg-indigo-600 text-white rounded-lg"
+            >
+              Đồng bộ đã chọn
+            </button>
+          </div>
+        </div>
+      </div>
+    )}
     </Layout>
   );
 };

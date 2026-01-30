@@ -446,172 +446,99 @@ export class GoogleSyncService {
   /**
    * 3. SYNC TO CALENDAR: Đồng bộ tuyệt đối với logic Keep/Overwrite thông minh
    */
-  async syncToCalendar(rows: RowNormalized[], token: string): Promise<SyncResult> {
+  async syncToCalendar(
+    rows: RowNormalized[],
+    token: string
+  ): Promise<SyncResult> {
+
     const stats = { created: 0, updated: 0, failed: 0, logs: [] as string[] };
 
-    if (!rows || rows.length === 0) {
-      return stats;
-    }
+    if (!rows || rows.length === 0) return stats;
 
     for (const row of rows) {
       try {
-        const newStartTime = new Date(row.startTime);
-        const newEndTime = new Date(row.endTime);
-        const nStart = newStartTime.getTime();
-        const nEnd = newEndTime.getTime();
 
-        // 📅 BƯỚC 1: QUÉT DIỆN RỘNG - Lấy tất cả events trong cùng ngày
-        const eventDate = new Date(row.startTime);
-        const dayStart = new Date(eventDate);
+        const startISO = new Date(row.startTime).toISOString();
+        const endISO = new Date(row.endTime).toISOString();
+        const startMs = new Date(row.startTime).getTime();
+
+        // 🔎 Chỉ search trong ngày đó
+        const dayStart = new Date(row.startTime);
         dayStart.setHours(0, 0, 0, 0);
-        const dayEnd = new Date(eventDate);
+
+        const dayEnd = new Date(row.startTime);
         dayEnd.setHours(23, 59, 59, 999);
 
-        const tMin = dayStart.toISOString();
-        const tMax = dayEnd.toISOString();
+        const searchUrl =
+          `https://www.googleapis.com/calendar/v3/calendars/primary/events` +
+          `?timeMin=${dayStart.toISOString()}` +
+          `&timeMax=${dayEnd.toISOString()}` +
+          `&singleEvents=true`;
 
-        const searchUrl = `https://www.googleapis.com/calendar/v3/calendars/primary/events?timeMin=${tMin}&timeMax=${tMax}&singleEvents=true`;
         const searchRes = await this.fetchWithAuth(searchUrl, token);
         const existingEvents = searchRes.items || [];
 
-        // 🎯 BƯỚC 2: PHÂN LOẠI CÁC SỰ KIỆN
-        const targetSummary = `[${row.task}] - ${row.person}`;
+        const summary = `[${row.task}] - ${row.person}`;
 
-        // Tìm event trùng CHÍNH XÁC (cùng tên, người, giờ)
-        const exactMatch = existingEvents.find((e: any) => {
-          if (!e.start?.dateTime || !e.end?.dateTime) return false;
-
-          const existingStart = new Date(e.start.dateTime).getTime();
-          const existingEnd = new Date(e.end.dateTime).getTime();
-
-          return e.summary === targetSummary &&
-            existingStart === nStart &&
-            existingEnd === nEnd;
-        });
-
-        // ✅ LOGIC KEEP: Nếu tìm thấy event hoàn toàn giống nhau
-        if (exactMatch) {
-          stats.logs.push(`⏭️ Giữ nguyên: ${row.task} - ${row.person} (đã tồn tại đúng giờ)`);
-          continue; // Bỏ qua, không cần xóa hay tạo lại
-        }
-
-        // Tìm event cùng TÊN nhưng KHÁC GIỜ (Slot Shift)
-        const sameTaskDifferentTime = existingEvents.find((e: any) => {
-          if (!e.start?.dateTime) return false;
-          const existingStart = new Date(e.start.dateTime).getTime();
-          return e.summary === targetSummary && existingStart !== nStart;
-        });
-
-        // Tìm event KHÁC TÊN nhưng TRÙNG GIỜ (Time Conflict)
-        const differentTaskSameTime = existingEvents.filter((e: any) => {
-          if (!e.start?.dateTime || !e.end?.dateTime) return false;
-
-          const existingStart = new Date(e.start.dateTime).getTime();
-          const existingEnd = new Date(e.end.dateTime).getTime();
-
-          // Kiểm tra overlap thời gian
-          const hasOverlap = nStart < existingEnd && nEnd > existingStart;
-          return hasOverlap && e.summary !== targetSummary;
-        });
-
-        // 🔄 LOGIC OVERWRITE: Xử lý các trường hợp cần ghi đè
-        const eventsToDelete: any[] = [];
-
-        if (sameTaskDifferentTime) {
-          // Trường hợp 1: DỊCH CHUYỂN SLOT
-          const oldTime = new Date(sameTaskDifferentTime.start.dateTime).toLocaleTimeString('vi-VN', {
-            hour: '2-digit',
-            minute: '2-digit',
-            timeZone: 'Asia/Ho_Chi_Minh'
-          });
-          const newTime = newStartTime.toLocaleTimeString('vi-VN', {
-            hour: '2-digit',
-            minute: '2-digit',
-            timeZone: 'Asia/Ho_Chi_Minh'
-          });
-
-          const userConfirmed = window.confirm(
-            `⚠️ DỊCH CHUYỂN SLOT\n\n` +
-            `Nhiệm vụ: ${row.task}\n` +
-            `Người thực hiện: ${row.person}\n\n` +
-            `Giờ cũ: ${oldTime}\n` +
-            `Giờ mới: ${newTime}\n\n` +
-            `Bạn có muốn cập nhật theo giờ mới từ Sheet không?`
-          );
-
-          if (!userConfirmed) {
-            stats.failed++;
-            stats.logs.push(`❌ Người dùng hủy (dịch slot): ${row.task}`);
-            continue;
-          }
-
-          eventsToDelete.push(sameTaskDifferentTime);
-          stats.logs.push(`🔄 Dịch slot: ${row.task} (${oldTime} → ${newTime})`);
-        }
-
-        if (differentTaskSameTime.length > 0) {
-          // Trường hợp 2: XUNG ĐỘT CA
-          const conflictNames = differentTaskSameTime.map((e: any) => {
-            const time = new Date(e.start.dateTime).toLocaleTimeString('vi-VN', {
-              hour: '2-digit',
-              minute: '2-digit',
-              timeZone: 'Asia/Ho_Chi_Minh'
-            });
-            return `  • ${e.summary} (${time})`;
-          }).join('\n');
-
-          const userConfirmed = window.confirm(
-            `⚠️ XUNG ĐỘT CA\n\n` +
-            `Lịch mới từ Sheet:\n` +
-            `  • ${targetSummary}\n` +
-            `  • Giờ: ${newStartTime.toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit', timeZone: 'Asia/Ho_Chi_Minh' })}\n\n` +
-            `Trùng với các sự kiện sau:\n${conflictNames}\n\n` +
-            `Bạn có muốn XÓA các sự kiện cũ và TẠO MỚI theo Sheet không?`
-          );
-
-          if (!userConfirmed) {
-            stats.failed++;
-            stats.logs.push(`❌ Người dùng hủy (xung đột): ${row.task}`);
-            continue;
-          }
-
-          eventsToDelete.push(...differentTaskSameTime);
-          stats.logs.push(`⚔️ Ghi đè xung đột: ${row.task} (xóa ${differentTaskSameTime.length} event cũ)`);
-        }
-
-        // 🗑️ XÓA CÁC EVENTS CẦN GHI ĐÈ
-        for (const eventToDelete of eventsToDelete) {
-          try {
-            await this.fetchWithAuth(
-              `https://www.googleapis.com/calendar/v3/calendars/primary/events/${eventToDelete.id}`,
-              token,
-              { method: 'DELETE' }
-            );
-          } catch (deleteError) {
-            console.warn('⚠️ Không thể xóa event:', deleteError);
-          }
-        }
-
-        // ➕ TẠO EVENT MỚI
         const payload = {
-          summary: targetSummary,
+          summary,
           location: row.location,
           description: Object.entries(row.raw)
             .map(([k, v]) => `${k}: ${v}`)
             .join('\n'),
-          start: { dateTime: row.startTime, timeZone: 'Asia/Ho_Chi_Minh' },
-          end: { dateTime: row.endTime, timeZone: 'Asia/Ho_Chi_Minh' },
+          start: {
+            dateTime: startISO,
+            timeZone: "Asia/Ho_Chi_Minh"
+          },
+          end: {
+            dateTime: endISO,
+            timeZone: "Asia/Ho_Chi_Minh"
+          },
+          extendedProperties: {
+            private: {
+              source: "schedule-sync"
+            }
+          }
         };
 
-        await this.fetchWithAuth(
-          `https://www.googleapis.com/calendar/v3/calendars/primary/events`,
-          token,
-          { method: 'POST', body: JSON.stringify(payload) }
-        );
+        // 🔎 Tìm event do hệ thống tạo cùng slot
+        const matchedEvent = existingEvents.find((e: any) => {
+          if (!e.start?.dateTime) return false;
 
-        stats.created++;
+          const isSystemEvent =
+            e.extendedProperties?.private?.source === "schedule-sync";
 
-        if (eventsToDelete.length === 0) {
+          const sameStart =
+            new Date(e.start.dateTime).getTime() === startMs;
+
+          return isSystemEvent && sameStart;
+        });
+
+        if (matchedEvent) {
+          // 🔄 UPDATE (đè lên)
+          await this.fetchWithAuth(
+            `https://www.googleapis.com/calendar/v3/calendars/primary/events/${matchedEvent.id}`,
+            token,
+            {
+              method: "PATCH",
+              body: JSON.stringify(payload)
+            }
+          );
+
+          stats.updated++;
+          stats.logs.push(`🔄 Đã ghi đè: ${row.task} - ${row.person}`);
+        } else {
+          // ➕ CREATE
+          await this.fetchWithAuth(
+            `https://www.googleapis.com/calendar/v3/calendars/primary/events`,
+            token,
+            {
+              method: "POST",
+              body: JSON.stringify(payload)
+            }
+          );
+
+          stats.created++;
           stats.logs.push(`✅ Tạo mới: ${row.task} - ${row.person}`);
         }
 
@@ -622,6 +549,37 @@ export class GoogleSyncService {
     }
 
     return stats;
+  }
+  async detectConflicts(row: RowNormalized, token: string): Promise<any[]> {
+    const newStartTime = new Date(row.startTime);
+    const newEndTime = new Date(row.endTime);
+    const nStart = newStartTime.getTime();
+    const nEnd = newEndTime.getTime();
+
+    const eventDate = new Date(row.startTime);
+    const dayStart = new Date(eventDate);
+    dayStart.setHours(0, 0, 0, 0);
+    const dayEnd = new Date(eventDate);
+    dayEnd.setHours(23, 59, 59, 999);
+
+    const tMin = dayStart.toISOString();
+    const tMax = dayEnd.toISOString();
+
+    const searchUrl =
+      `https://www.googleapis.com/calendar/v3/calendars/primary/events` +
+      `?timeMin=${tMin}&timeMax=${tMax}&singleEvents=true`;
+
+    const searchRes = await this.fetchWithAuth(searchUrl, token);
+    const existingEvents = searchRes.items || [];
+
+    return existingEvents.filter((e: any) => {
+      if (!e.start?.dateTime || !e.end?.dateTime) return false;
+
+      const existingStart = new Date(e.start.dateTime).getTime();
+      const existingEnd = new Date(e.end.dateTime).getTime();
+
+      return nStart < existingEnd && nEnd > existingStart;
+    });
   }
 }
 

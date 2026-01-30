@@ -195,6 +195,153 @@ export class GoogleSyncService {
   }
 
   /**
+   * Load Test1 sheet: Simple structure (A1:BE1000)
+   * - Headers at row 1 (index 0)
+   * - Data starts from row 2 (index 1)
+   */
+  async loadSheetTest1(url: string, tab: string, token: string): Promise<{
+    rows: RowNormalized[];
+    schema: InferredSchema;
+    headers: string[];
+    rawRows: string[][];
+    allRows: string[][];
+    sheetId: string;
+    headerRowIndex: number;
+  }> {
+    const sheetId = this.extractSheetId(url);
+    if (!sheetId) throw new Error("URL Sheet không hợp lệ.");
+
+    const metadata = await this.fetchWithAuth(
+      `https://sheets.googleapis.com/v4/spreadsheets/${sheetId}?fields=sheets.properties.title`,
+      token
+    );
+    const allSheetNames = metadata.sheets.map((s: any) => s.properties.title);
+    const finalTabName = allSheetNames.includes(tab) ? tab : allSheetNames[0];
+
+    // ✅ Test1: Always use A1:BE1000 with header at row 1
+    const range = `'${finalTabName}'!A1:BE1000`;
+    const data = await this.fetchWithAuth(
+      `https://sheets.googleapis.com/v4/spreadsheets/${sheetId}/values/${encodeURIComponent(range)}`,
+      token
+    );
+
+    const values: string[][] = data.values;
+    if (!values || values.length < 2) {
+      throw new Error("Sheet không đủ dữ liệu (cần ít nhất 2 hàng).");
+    }
+
+    const headers = values[0];
+    const rawData = values.slice(1);
+
+    console.log(`✅ Test1 mode: Range ${range}`);
+    console.log(`✅ Headers at row 1:`, headers.slice(0, 10));
+    console.log(`✅ Data rows: ${rawData.length}`);
+
+    const schema = inferSchema(headers, rawData.slice(0, 5));
+
+    const normalized = this.normalizeRows({
+      sheetId,
+      tab: finalTabName,
+      headers,
+      rawRows: rawData,
+      mapping: schema.mapping,
+      headerRowIndex: 0,
+      isDataMau: false
+    });
+
+    return {
+      rows: normalized,
+      schema,
+      headers,
+      rawRows: rawData,
+      allRows: values,
+      sheetId,
+      headerRowIndex: 0
+    };
+  }
+
+  /**
+   * Load Review sheet: Complex structure (J1:BE1000)
+   * - Skip columns A-I (Project Information section)
+   * - Row 2: Merged headers (REVIEW 1, REVIEW 2, DEFENSE, CONFLICT)
+   * - Row 3: Detail headers (Code, Count, Reviewer 1, Reviewer 2, Date, Slot...)
+   * - Data starts from row 4 (index 3 in J1:BE range)
+   */
+  async loadSheetReview(url: string, tab: string, token: string): Promise<{
+    rows: RowNormalized[];
+    schema: InferredSchema;
+    headers: string[];
+    rawRows: string[][];
+    allRows: string[][];
+    sheetId: string;
+    headerRowIndex: number;
+  }> {
+    const sheetId = this.extractSheetId(url);
+    if (!sheetId) throw new Error("URL Sheet không hợp lệ.");
+
+    const metadata = await this.fetchWithAuth(
+      `https://sheets.googleapis.com/v4/spreadsheets/${sheetId}?fields=sheets.properties.title`,
+      token
+    );
+    const allSheetNames = metadata.sheets.map((s: any) => s.properties.title);
+    const finalTabName = allSheetNames.includes(tab) ? tab : allSheetNames[0];
+
+    // ✅ Detect tab type:
+    // - "Review1" tab: Uses A1:BE1000, header at row 4 (index 3)
+    // - Other Review tabs: Uses J1:BE1000 (skip Project Info A-I), header at row 3 (index 2)
+    const isReview1Tab = finalTabName.toLowerCase() === 'review1';
+    const range = isReview1Tab
+      ? `'${finalTabName}'!A1:BE1000`  // Review1: Full range
+      : `'${finalTabName}'!J1:BE1000`; // Data Mẫu: Skip A-I
+
+    const headerRowIndex = isReview1Tab ? 3 : 2; // Review1: row 4, Others: row 3
+
+    const data = await this.fetchWithAuth(
+      `https://sheets.googleapis.com/v4/spreadsheets/${sheetId}/values/${encodeURIComponent(range)}`,
+      token
+    );
+
+    const values: string[][] = data.values;
+    const minRows = isReview1Tab ? 5 : 4;
+    if (!values || values.length < minRows) {
+      throw new Error(`Sheet không đủ dữ liệu (cần ít nhất ${minRows} hàng).`);
+    }
+
+    // Get headers based on tab type
+    const headers = values[headerRowIndex];
+    const rawData = values.slice(headerRowIndex + 1);
+
+    console.log(`✅ ${isReview1Tab ? 'Review1' : 'Review'} mode: Range ${range}`);
+    if (!isReview1Tab) {
+      console.log(`✅ Row 2 (merged):`, values[1]?.slice(0, 5));
+    }
+    console.log(`✅ Row ${headerRowIndex + 1} (headers):`, headers.slice(0, 10));
+    console.log(`✅ Data rows: ${rawData.length}`);
+
+    const schema = inferSchema(headers, rawData.slice(0, 5));
+
+    const normalized = this.normalizeRows({
+      sheetId,
+      tab: finalTabName,
+      headers,
+      rawRows: rawData,
+      mapping: schema.mapping,
+      headerRowIndex: headerRowIndex,
+      isDataMau: !isReview1Tab  // Only Data Mẫu tabs need special handling
+    });
+
+    return {
+      rows: normalized,
+      schema,
+      headers,
+      rawRows: rawData,
+      allRows: values,  // Return full rows including Row 1, 2, 3 for header selection
+      sheetId,
+      headerRowIndex: headerRowIndex  // Dynamic based on tab type
+    };
+  }
+
+  /**
    * 2. NORMALIZE: Xử lý dữ liệu an toàn, chống trắng trang
    */
   normalizeRows(params: {

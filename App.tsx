@@ -224,16 +224,58 @@ const App: React.FC = () => {
     });
     const hasGroups = groups.some(g => g.span > 1);
 
-    // ✅ If this row has groups, use NEXT row for detail headers
-    // Example: Row 2 (groups: "REVIEW 1") → detail headers from Row 3 ("Code", "Date")
+    // ✅ SPECIAL: For Review mode (idx=2), ALWAYS use Row 3 as headers directly
+    // DO NOT merge with Row 2 - keep them separate (Row 2 = title, Row 3 = headers)
     let detailHeaders: string[];
     let dataStartIndex: number;
+    let titleRow: string[] = [];  // For Review mode: Row 2 titles
 
-    if (hasGroups && rows[idx + 1]) {
+    if (idx === 2) {
+      // Review mode: ALWAYS use Row 3 (idx=2) as headers, Row 2 (idx=1) as titles
+      detailHeaders = filledHeaders;  // Row 3
+      titleRow = rows[1] ? fillForwardHeaders(rows[1]) : [];  // Row 2
+      dataStartIndex = idx + 1;  // Data starts at Row 4
+
+      // Filter out DEFENSE and CONFLICT from both
+      const columnsToKeep: number[] = [];
+      titleRow.forEach((h, i) => {
+        const header = (h || "").toString().toLowerCase();
+        if (!header.includes('defense') && !header.includes('conflict')) {
+          columnsToKeep.push(i);
+        }
+      });
+
+      if (columnsToKeep.length < titleRow.length) {
+        titleRow = columnsToKeep.map(i => titleRow[i]);
+        detailHeaders = columnsToKeep.map(i => detailHeaders[i]);
+        headers = titleRow;  // Use filtered titles for group display
+        console.log(`✅ Filtered out ${filledHeaders.length - columnsToKeep.length} DEFENSE/CONFLICT columns`);
+      } else {
+        headers = titleRow;  // Use Row 2 titles for group display
+      }
+    } else if (hasGroups && rows[idx + 1]) {
       // Row has groups → use filled row for grouping, next row for details
       headers = filledHeaders;  // For group detection in UI
       detailHeaders = rows[idx + 1] || [];  // Detail column names from next row
       dataStartIndex = idx + 2;  // Data starts after detail header row
+
+      // ✅ Filter out DEFENSE and CONFLICT columns (for Review mode)
+      const columnsToKeep: number[] = [];
+      filledHeaders.forEach((h, i) => {
+        const header = (h || "").toString().toLowerCase();
+        // Keep columns that are NOT DEFENSE or CONFLICT
+        if (!header.includes('defense') && !header.includes('conflict')) {
+          columnsToKeep.push(i);
+        }
+      });
+
+      // Apply filter to headers and detail headers
+      if (columnsToKeep.length < filledHeaders.length) {
+        headers = columnsToKeep.map(i => filledHeaders[i]);
+        detailHeaders = columnsToKeep.map(i => detailHeaders[i]);
+        // Also need to filter all data rows later
+        console.log(`✅ Filtered out ${filledHeaders.length - columnsToKeep.length} DEFENSE/CONFLICT columns`);
+      }
     } else {
       // No groups → use current row as both group and detail
       headers = filledHeaders;
@@ -243,6 +285,37 @@ const App: React.FC = () => {
 
     // Get raw data rows (everything after headers)
     let rawRows = rows.slice(dataStartIndex);
+
+    // ✅ Apply column filter to data rows if we filtered headers
+    if (idx === 2 && titleRow.length > 0) {
+      // Review mode: filter based on titleRow (Row 2)
+      const unfilteredTitleRow = rows[1] ? fillForwardHeaders(rows[1]) : [];
+      if (titleRow.length < unfilteredTitleRow.length) {
+        const columnsToKeep: number[] = [];
+        unfilteredTitleRow.forEach((h, i) => {
+          const header = (h || "").toString().toLowerCase();
+          if (!header.includes('defense') && !header.includes('conflict')) {
+            columnsToKeep.push(i);
+          }
+        });
+
+        rawRows = rawRows.map(row => columnsToKeep.map(i => row[i] || ''));
+      }
+    } else {
+      // Other modes: use original logic
+      const hasColumnFilter = headers.length < filledHeaders.length;
+      if (hasColumnFilter) {
+        const columnsToKeep: number[] = [];
+        filledHeaders.forEach((h, i) => {
+          const header = (h || "").toString().toLowerCase();
+          if (!header.includes('defense') && !header.includes('conflict')) {
+            columnsToKeep.push(i);
+          }
+        });
+
+        rawRows = rawRows.map(row => columnsToKeep.map(i => row[i] || ''));
+      }
+    }
     rawRows = trimLeadingEmptyRows(rawRows);
 
     const schema = inferSchema(detailHeaders, rawRows.slice(0, 5));
@@ -474,15 +547,30 @@ const App: React.FC = () => {
   }, [fullTableColumns]);
 
   const headerRowOptions = useMemo(() => {
-    // ❌ Bỏ Row 1 (index 0 - "REVIEW 1-2-3"), chỉ hiện từ Row 2 (index 1) trở đi
-    const startIndex = 1;  // Bắt đầu từ Row 2
-    const limit = Math.min(10, allRows.length);
+    // For Review mode: Start from Row 2 (merged headers like "REVIEW 1")
+    // Row 2 (index 1) = REVIEW 1, REVIEW 2, DEFENSE, CONFLICT (merged)
+    // Row 3 (index 2) = Code, Count, Reviewer 1, Reviewer 2 (detail headers) - DEFAULT
+    const startIndex = 1;  // Start from Row 2
+    const limit = Math.min(5, allRows.length);  // Only show first 5 rows
     const options = [];
 
     for (let i = startIndex; i < limit; i++) {
       const preview = (allRows[i] || []).filter(Boolean).slice(0, 4).join(' | ');
+      let label = `Row ${i + 1}`;
+
+      // Add descriptive label for Review mode
+      if (i === 1) {
+        label += ' (Merged Headers)';
+      } else if (i === 2) {
+        label += ' (Detail Headers)';
+      }
+
+      if (preview) {
+        label += `: ${preview}`;
+      }
+
       options.push({
-        label: `Row ${i + 1}${preview ? `: ${preview}` : ''}`,
+        label,
         value: i
       });
     }
@@ -579,20 +667,9 @@ const App: React.FC = () => {
                     setAllRows(fetchedRows || []);
                     setShowFullTable(false);
                     setSheetMeta({ sheetId, tab: tabName, headerRowIndex });
-                    setHeaderRowIndex(headerRowIndex);
-                    setMergedCells([]);
-                    setRows(data);
-                    setFullHeaders(headers || []);
-                    setFullRows(rawRows || []);
-                    setColumnMap({
-                      date: schema.mapping.date,
-                      time: schema.mapping.time,
-                      person: schema.mapping.person,
-                      task: schema.mapping.task,
-                      location: schema.mapping.location,
-                      email: schema.mapping.email
-                    });
-                    updateSelections(data);
+
+                    // ✅ CRITICAL: Call applyHeaderRow to process merged cells and set up proper column mapping
+                    applyHeaderRow(headerRowIndex, fetchedRows, { sheetId, tab: tabName });
                   } catch (err: any) {
                     console.error('Load error:', err);
                     setError(err.message);
@@ -621,20 +698,9 @@ const App: React.FC = () => {
                     setAllRows(fetchedRows || []);
                     setShowFullTable(false);
                     setSheetMeta({ sheetId, tab: tabName, headerRowIndex });
-                    setHeaderRowIndex(headerRowIndex);
-                    setMergedCells([]);
-                    setRows(data);
-                    setFullHeaders(headers || []);
-                    setFullRows(rawRows || []);
-                    setColumnMap({
-                      date: schema.mapping.date,
-                      time: schema.mapping.time,
-                      person: schema.mapping.person,
-                      task: schema.mapping.task,
-                      location: schema.mapping.location,
-                      email: schema.mapping.email
-                    });
-                    updateSelections(data);
+
+                    // ✅ CRITICAL: Call applyHeaderRow to process merged cells and set up proper column mapping
+                    applyHeaderRow(headerRowIndex, fetchedRows, { sheetId, tab: tabName });
                   } catch (err: any) {
                     console.error('Load error:', err);
                     setError(err.message);

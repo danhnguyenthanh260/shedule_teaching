@@ -28,7 +28,8 @@ const App: React.FC = () => {
   const [result, setResult] = useState<SyncResult | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [tokenClient, setTokenClient] = useState<any>(null);
-  const [fullHeaders, setFullHeaders] = useState<string[]>([]);
+  const [fullHeaders, setFullHeaders] = useState<string[]>([]);  // For group detection
+  const [fullDetailHeaders, setFullDetailHeaders] = useState<string[]>([]);  // Actual column names for tier 2
   const [fullRows, setFullRows] = useState<string[][]>([]);
   const [allRows, setAllRows] = useState<string[][]>([]);
   const [showFullTable, setShowFullTable] = useState(false);
@@ -193,6 +194,7 @@ const App: React.FC = () => {
     return filled;
   };
 
+
   const applyHeaderRow = (idx: number, rows: string[][], meta?: { sheetId: string; tab: string }) => {
     // ⚠️ CRITICAL: Use EXACT row user selected - NO merging, NO auto-detection
     // Row 1 → Headers = Row 1 content (e.g., "REVIEW 1-2-3")
@@ -203,19 +205,52 @@ const App: React.FC = () => {
     // ✅ Fill forward empty cells (merged cell behavior)
     // Converts: ["REVIEW 1", "", "", "REVIEW 2", ""] 
     //      To: ["REVIEW 1", "REVIEW 1", "REVIEW 1", "REVIEW 2", "REVIEW 2"]
-    headers = fillForwardHeaders(headers);
+    const filledHeaders = fillForwardHeaders(headers);
 
-    const dataStartIndex = idx + 1;
+    // ✅ Detect if this row has grouped headers (consecutive identical values)
+    const groups: { name: string; span: number }[] = [];
+    let currentGroup: string | null = null;
+    filledHeaders.forEach(h => {
+      const header = (h || "").trim();
+      const isGeneric = header.match(/^Column_\d+$/);
+      if (!isGeneric && header && header === currentGroup) {
+        groups[groups.length - 1].span++;
+      } else if (!isGeneric && header) {
+        currentGroup = header;
+        groups.push({ name: header, span: 1 });
+      } else {
+        currentGroup = null;
+      }
+    });
+    const hasGroups = groups.some(g => g.span > 1);
 
-    // Get raw data rows (everything after header row)
+    // ✅ If this row has groups, use NEXT row for detail headers
+    // Example: Row 2 (groups: "REVIEW 1") → detail headers from Row 3 ("Code", "Date")
+    let detailHeaders: string[];
+    let dataStartIndex: number;
+
+    if (hasGroups && rows[idx + 1]) {
+      // Row has groups → use filled row for grouping, next row for details
+      headers = filledHeaders;  // For group detection in UI
+      detailHeaders = rows[idx + 1] || [];  // Detail column names from next row
+      dataStartIndex = idx + 2;  // Data starts after detail header row
+    } else {
+      // No groups → use current row as both group and detail
+      headers = filledHeaders;
+      detailHeaders = filledHeaders;
+      dataStartIndex = idx + 1;
+    }
+
+    // Get raw data rows (everything after headers)
     let rawRows = rows.slice(dataStartIndex);
     rawRows = trimLeadingEmptyRows(rawRows);
 
-    const schema = inferSchema(headers, rawRows.slice(0, 5));
+    const schema = inferSchema(detailHeaders, rawRows.slice(0, 5));
     const nextMeta = meta ? { ...meta, headerRowIndex: idx } : (sheetMeta ? { ...sheetMeta, headerRowIndex: idx } : null);
 
     setHeaderRowIndex(idx);
-    setFullHeaders(headers);
+    setFullHeaders(headers);  // For group detection
+    setFullDetailHeaders(detailHeaders);  // Actual column names for UI tier 2
     setFullRows(rawRows);
     setColumnMap({
       date: schema.mapping.date,
@@ -231,7 +266,7 @@ const App: React.FC = () => {
       const data = googleService.normalizeRows({
         sheetId: nextMeta.sheetId,
         tab: nextMeta.tab,
-        headers,
+        headers: detailHeaders,  // Use detail headers for data mapping
         rawRows,
         mapping: schema.mapping,
         headerRowIndex: idx
@@ -243,6 +278,7 @@ const App: React.FC = () => {
       setSelectedIds(new Set());
     }
   };
+
 
   const applyMapping = () => {
     try {
@@ -438,14 +474,20 @@ const App: React.FC = () => {
   }, [fullTableColumns]);
 
   const headerRowOptions = useMemo(() => {
+    // ❌ Bỏ Row 1 (index 0 - "REVIEW 1-2-3"), chỉ hiện từ Row 2 (index 1) trở đi
+    const startIndex = 1;  // Bắt đầu từ Row 2
     const limit = Math.min(10, allRows.length);
-    return Array.from({ length: limit }, (_, i) => {
+    const options = [];
+
+    for (let i = startIndex; i < limit; i++) {
       const preview = (allRows[i] || []).filter(Boolean).slice(0, 4).join(' | ');
-      return {
+      options.push({
         label: `Row ${i + 1}${preview ? `: ${preview}` : ''}`,
         value: i
-      };
-    });
+      });
+    }
+
+    return options;
   }, [allRows]);
 
   const getColumnLabel = (index?: number) => {
@@ -805,7 +847,7 @@ const App: React.FC = () => {
 
                             {/* Hàng 2: Detail Headers (Dòng 3 gốc) */}
                             <tr className={`bg-slate-100 text-[10px] font-semibold text-slate-700 uppercase tracking-wider border-b-2 border-slate-300 sticky ${detailRowStickyTop} z-10`}>
-                              {fullTableColumns.map((h, i) => {
+                              {(fullDetailHeaders.length > 0 ? fullDetailHeaders : fullTableColumns).map((h, i) => {
                                 const isSelected =
                                   i === columnMap.date ||
                                   i === columnMap.time ||

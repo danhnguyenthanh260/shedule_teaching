@@ -243,26 +243,25 @@ export class GoogleSyncService {
       throw new Error("Sheet không đủ dữ liệu (cần ít nhất 4 hàng cho cấu trúc Review).");
     }
 
-    // ⚠️ IMPORTANT: Use the exact row selected by user as headers
-    // DO NOT merge or clean headers - user wants exact content of chosen row
-    // Default to row 3 (index 2) for Review mode, but this should be configurable
-    const headers = values[2];
-    const rawData = values.slice(3);
+    // ⚠️ DEFAULT: Row 3 (detail headers) for immediate functionality
+    // Row 2 (grouped headers) available in dropdown for manual selection
+    // Using Row 3 ensures proper column mapping on first load
+    const headers = values[2];  // Row 3 of original sheet = index 2 in J1:BE range
+    const rawData = values.slice(3);  // Data from row 4+
 
     console.log(`✅ Review mode: Range ${range}`);
-    console.log(`✅ Headers at row 3 (exact content):`, headers.slice(0, 10));
-    console.log(`   → Code column is now at index 0 (original column J)`);
+    console.log(`✅ Default headers at row 3:`, headers.slice(0, 10));
+    console.log(`   → Detail columns (Code, Date, Slot) - mapping will work`);
+    console.log(`   → User can select Row 2 for grouped view`);
     console.log(`✅ Data rows: ${rawData.length}`);
 
     const schema = inferSchema(headers, rawData.slice(0, 5));
 
     console.log('🔍 Schema inference result:');
     console.log('   Date column:', schema.mapping.date !== undefined ?
-      `✅ Index ${schema.mapping.date} = "${headers[schema.mapping.date]}"` :
-      '❌ NOT DETECTED');
-    console.log('   Time/Slot column:', schema.mapping.time !== undefined ?
-      `✅ Index ${schema.mapping.time} = "${headers[schema.mapping.time]}"` :
-      '❌ NOT DETECTED');
+      `found at index ${schema.mapping.date} (${headers[schema.mapping.date]})` : 'NOT FOUND');
+    console.log('   Time column:', schema.mapping.time !== undefined ?
+      `found at index ${schema.mapping.time} (${headers[schema.mapping.time]})` : 'NOT FOUND');
 
     const normalized = this.normalizeRows({
       sheetId,
@@ -270,7 +269,7 @@ export class GoogleSyncService {
       headers,
       rawRows: rawData,
       mapping: schema.mapping,
-      headerRowIndex: 2,
+      headerRowIndex: 2,  // Row 3 (index 2) - detail headers
       isDataMau: true,
       rangeStartsAtJ: true
     });
@@ -282,7 +281,7 @@ export class GoogleSyncService {
       rawRows: rawData,
       allRows: values,
       sheetId,
-      headerRowIndex: 2
+      headerRowIndex: 2  // Row 3 (index 2)
     };
   }
 

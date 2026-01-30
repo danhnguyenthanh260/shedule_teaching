@@ -444,181 +444,68 @@ export class GoogleSyncService {
   }
 
   /**
-   * 3. SYNC TO CALENDAR: Đồng bộ tuyệt đối với logic Keep/Overwrite thông minh
+   * 3. SYNC TO CALENDAR: Gửi dữ liệu đến Google Apps Script Web App
+   * Apps Script tự động xử lý logic Mirroring (Xóa cũ - Đè mới)
    */
   async syncToCalendar(rows: RowNormalized[], token: string): Promise<SyncResult> {
     const stats = { created: 0, updated: 0, failed: 0, logs: [] as string[] };
 
     if (!rows || rows.length === 0) {
+      stats.logs.push('⚠️ Không có dữ liệu để đồng bộ');
       return stats;
     }
 
-    for (const row of rows) {
-      try {
-        const newStartTime = new Date(row.startTime);
-        const newEndTime = new Date(row.endTime);
-        const nStart = newStartTime.getTime();
-        const nEnd = newEndTime.getTime();
+    try {
+      // 📦 Chuẩn bị payload gửi đến Apps Script
+      const events = rows.map(row => ({
+        title: `[${row.task}] - ${row.person}`,
+        start: row.startTime,  // ISO 8601 format: "2026-01-31T08:00:00+07:00"
+        end: row.endTime,      // ISO 8601 format: "2026-01-31T10:00:00+07:00"
+        room: row.location || '',
+        description: Object.entries(row.raw)
+          .map(([k, v]) => `${k}: ${v}`)
+          .join('\n')
+      }));
 
-        // 📅 BƯỚC 1: QUÉT DIỆN RỘNG - Lấy tất cả events trong cùng ngày
-        const eventDate = new Date(row.startTime);
-        const dayStart = new Date(eventDate);
-        dayStart.setHours(0, 0, 0, 0);
-        const dayEnd = new Date(eventDate);
-        dayEnd.setHours(23, 59, 59, 999);
+      console.log(`🚀 Đang gửi ${events.length} sự kiện đến Apps Script...`);
 
-        const tMin = dayStart.toISOString();
-        const tMax = dayEnd.toISOString();
+      // 🌐 Gọi Google Apps Script Web App
+      const webAppUrl = 'https://script.google.com/macros/s/AKfycbzg4qQbfvVHERtYtNt0HbwsSItcmD4ehuSwPprZmjDeAOlz4f7Wl9jM1kU9qlo6QR8/exec';
 
-        const searchUrl = `https://www.googleapis.com/calendar/v3/calendars/primary/events?timeMin=${tMin}&timeMax=${tMax}&singleEvents=true`;
-        const searchRes = await this.fetchWithAuth(searchUrl, token);
-        const existingEvents = searchRes.items || [];
+      const response = await fetch(webAppUrl, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'text/plain'  // Tránh CORS preflight
+        },
+        body: JSON.stringify({ events, token })  // Gửi cả access token để Apps Script xác thực
+      });
 
-        // 🎯 BƯỚC 2: PHÂN LOẠI CÁC SỰ KIỆN
-        const targetSummary = `[${row.task}] - ${row.person}`;
-
-        // Tìm event trùng CHÍNH XÁC (cùng tên, người, giờ)
-        const exactMatch = existingEvents.find((e: any) => {
-          if (!e.start?.dateTime || !e.end?.dateTime) return false;
-
-          const existingStart = new Date(e.start.dateTime).getTime();
-          const existingEnd = new Date(e.end.dateTime).getTime();
-
-          return e.summary === targetSummary &&
-            existingStart === nStart &&
-            existingEnd === nEnd;
-        });
-
-        // ✅ LOGIC KEEP: Nếu tìm thấy event hoàn toàn giống nhau
-        if (exactMatch) {
-          stats.logs.push(`⏭️ Giữ nguyên: ${row.task} - ${row.person} (đã tồn tại đúng giờ)`);
-          continue; // Bỏ qua, không cần xóa hay tạo lại
-        }
-
-        // Tìm event cùng TÊN nhưng KHÁC GIỜ (Slot Shift)
-        const sameTaskDifferentTime = existingEvents.find((e: any) => {
-          if (!e.start?.dateTime) return false;
-          const existingStart = new Date(e.start.dateTime).getTime();
-          return e.summary === targetSummary && existingStart !== nStart;
-        });
-
-        // Tìm event KHÁC TÊN nhưng TRÙNG GIỜ (Time Conflict)
-        const differentTaskSameTime = existingEvents.filter((e: any) => {
-          if (!e.start?.dateTime || !e.end?.dateTime) return false;
-
-          const existingStart = new Date(e.start.dateTime).getTime();
-          const existingEnd = new Date(e.end.dateTime).getTime();
-
-          // Kiểm tra overlap thời gian
-          const hasOverlap = nStart < existingEnd && nEnd > existingStart;
-          return hasOverlap && e.summary !== targetSummary;
-        });
-
-        // 🔄 LOGIC OVERWRITE: Xử lý các trường hợp cần ghi đè
-        const eventsToDelete: any[] = [];
-
-        if (sameTaskDifferentTime) {
-          // Trường hợp 1: DỊCH CHUYỂN SLOT
-          const oldTime = new Date(sameTaskDifferentTime.start.dateTime).toLocaleTimeString('vi-VN', {
-            hour: '2-digit',
-            minute: '2-digit',
-            timeZone: 'Asia/Ho_Chi_Minh'
-          });
-          const newTime = newStartTime.toLocaleTimeString('vi-VN', {
-            hour: '2-digit',
-            minute: '2-digit',
-            timeZone: 'Asia/Ho_Chi_Minh'
-          });
-
-          const userConfirmed = window.confirm(
-            `⚠️ DỊCH CHUYỂN SLOT\n\n` +
-            `Nhiệm vụ: ${row.task}\n` +
-            `Người thực hiện: ${row.person}\n\n` +
-            `Giờ cũ: ${oldTime}\n` +
-            `Giờ mới: ${newTime}\n\n` +
-            `Bạn có muốn cập nhật theo giờ mới từ Sheet không?`
-          );
-
-          if (!userConfirmed) {
-            stats.failed++;
-            stats.logs.push(`❌ Người dùng hủy (dịch slot): ${row.task}`);
-            continue;
-          }
-
-          eventsToDelete.push(sameTaskDifferentTime);
-          stats.logs.push(`🔄 Dịch slot: ${row.task} (${oldTime} → ${newTime})`);
-        }
-
-        if (differentTaskSameTime.length > 0) {
-          // Trường hợp 2: XUNG ĐỘT CA
-          const conflictNames = differentTaskSameTime.map((e: any) => {
-            const time = new Date(e.start.dateTime).toLocaleTimeString('vi-VN', {
-              hour: '2-digit',
-              minute: '2-digit',
-              timeZone: 'Asia/Ho_Chi_Minh'
-            });
-            return `  • ${e.summary} (${time})`;
-          }).join('\n');
-
-          const userConfirmed = window.confirm(
-            `⚠️ XUNG ĐỘT CA\n\n` +
-            `Lịch mới từ Sheet:\n` +
-            `  • ${targetSummary}\n` +
-            `  • Giờ: ${newStartTime.toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit', timeZone: 'Asia/Ho_Chi_Minh' })}\n\n` +
-            `Trùng với các sự kiện sau:\n${conflictNames}\n\n` +
-            `Bạn có muốn XÓA các sự kiện cũ và TẠO MỚI theo Sheet không?`
-          );
-
-          if (!userConfirmed) {
-            stats.failed++;
-            stats.logs.push(`❌ Người dùng hủy (xung đột): ${row.task}`);
-            continue;
-          }
-
-          eventsToDelete.push(...differentTaskSameTime);
-          stats.logs.push(`⚔️ Ghi đè xung đột: ${row.task} (xóa ${differentTaskSameTime.length} event cũ)`);
-        }
-
-        // 🗑️ XÓA CÁC EVENTS CẦN GHI ĐÈ
-        for (const eventToDelete of eventsToDelete) {
-          try {
-            await this.fetchWithAuth(
-              `https://www.googleapis.com/calendar/v3/calendars/primary/events/${eventToDelete.id}`,
-              token,
-              { method: 'DELETE' }
-            );
-          } catch (deleteError) {
-            console.warn('⚠️ Không thể xóa event:', deleteError);
-          }
-        }
-
-        // ➕ TẠO EVENT MỚI
-        const payload = {
-          summary: targetSummary,
-          location: row.location,
-          description: Object.entries(row.raw)
-            .map(([k, v]) => `${k}: ${v}`)
-            .join('\n'),
-          start: { dateTime: row.startTime, timeZone: 'Asia/Ho_Chi_Minh' },
-          end: { dateTime: row.endTime, timeZone: 'Asia/Ho_Chi_Minh' },
-        };
-
-        await this.fetchWithAuth(
-          `https://www.googleapis.com/calendar/v3/calendars/primary/events`,
-          token,
-          { method: 'POST', body: JSON.stringify(payload) }
-        );
-
-        stats.created++;
-
-        if (eventsToDelete.length === 0) {
-          stats.logs.push(`✅ Tạo mới: ${row.task} - ${row.person}`);
-        }
-
-      } catch (e: any) {
-        stats.failed++;
-        stats.logs.push(`❌ ${row.task}: ${e.message}`);
+      if (!response.ok) {
+        throw new Error(`Apps Script lỗi ${response.status}: ${response.statusText}`);
       }
+
+      const result = await response.json();
+
+      // 📊 Xử lý kết quả từ Apps Script
+      if (result.success) {
+        stats.created = result.stats.added || 0;
+        stats.updated = result.stats.overwritten || 0;
+        const kept = result.stats.kept || 0;
+
+        stats.logs.push(`✅ Đồng bộ hoàn tất!`);
+        stats.logs.push(`   📌 Thêm mới: ${stats.created}`);
+        stats.logs.push(`   🔄 Ghi đè: ${stats.updated}`);
+        stats.logs.push(`   ⏭️ Giữ nguyên: ${kept}`);
+
+        console.log('✅ Sync thành công:', result.stats);
+      } else {
+        throw new Error(result.error || 'Lỗi không xác định từ Apps Script');
+      }
+
+    } catch (error: any) {
+      console.error('❌ Đồng bộ thất bại:', error);
+      stats.failed = rows.length;
+      stats.logs.push(`❌ Lỗi: ${error.message}`);
     }
 
     return stats;

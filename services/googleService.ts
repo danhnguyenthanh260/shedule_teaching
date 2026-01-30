@@ -121,7 +121,8 @@ export class GoogleSyncService {
   }
 
   /**
-   * 1. LOAD SHEET: Tự động nhận diện cấu trúc phẳng (test1) hoặc phức tạp (Data mẫu)
+   * @deprecated Use loadSheetTest1() or loadSheetReview() instead
+   * This function is kept for backward compatibility but will throw an error
    */
   async loadSheet(url: string, tab: string, token: string): Promise<{
     rows: RowNormalized[];
@@ -133,6 +134,26 @@ export class GoogleSyncService {
     headerRowIndex: number;
     mergedCells?: MergedCellGroup[];
   }> {
+    throw new Error(
+      "⚠️ Vui lòng sử dụng nút 'Load test1' hoặc 'Load Review' thay vì tải tự động.\n" +
+      "Chế độ tự động nhận diện đã bị gỡ bỏ để tránh lỗi lệch cột."
+    );
+  }
+
+  /**
+   * Load test1 sheet: Flat structure (A1:BE1000)
+   * - Headers at row 1 (index 0)
+   * - Data starts from row 2 (index 1)
+   */
+  async loadSheetTest1(url: string, tab: string, token: string): Promise<{
+    rows: RowNormalized[];
+    schema: InferredSchema;
+    headers: string[];
+    rawRows: string[][];
+    allRows: string[][];
+    sheetId: string;
+    headerRowIndex: number;
+  }> {
     const sheetId = this.extractSheetId(url);
     if (!sheetId) throw new Error("URL Sheet không hợp lệ.");
 
@@ -143,7 +164,7 @@ export class GoogleSyncService {
     const allSheetNames = metadata.sheets.map((s: any) => s.properties.title);
     const finalTabName = allSheetNames.includes(tab) ? tab : allSheetNames[0];
 
-    // ✅ Lấy range A1:BE1000 để đảm bảo hốt đủ 57 cột dữ liệu
+    // ✅ test1: Always use A1:BE1000
     const range = `'${finalTabName}'!A1:BE1000`;
     const data = await this.fetchWithAuth(
       `https://sheets.googleapis.com/v4/spreadsheets/${sheetId}/values/${encodeURIComponent(range)}`,
@@ -151,26 +172,17 @@ export class GoogleSyncService {
     );
 
     const values: string[][] = data.values;
-    if (!values || values.length < 1) {
-      throw new Error("Sheet rỗng hoặc không có dữ liệu.");
+    if (!values || values.length < 2) {
+      throw new Error("Sheet rỗng hoặc không đủ dữ liệu (cần ít nhất 2 hàng).");
     }
 
-    // ✅ NEW: Robust detection với multi-signal scoring
-    const detection = this.detectSheetFormat(values);
-    console.log(`📋 Detection result:`, {
-      format: detection.formatName,
-      headerRow: detection.headerRowIndex + 1,
-      confidence: detection.confidence,
-      isDataMau: detection.isDataMau
-    });
+    // Headers at row 1 (index 0)
+    const headers = values[0];
+    const rawData = values.slice(1);
 
-    const headers = values[detection.headerRowIndex];
-    const rawData = values.slice(detection.headerRowIndex + 1);
-    const headerRowIndex = detection.headerRowIndex;
-    const isDataMau = detection.isDataMau;
-
-    console.log(`✅ Headers detected:`, headers.slice(0, 10));
-    console.log(`✅ Raw data rows: ${rawData.length}`);
+    console.log(`✅ test1 mode: Range ${range}`);
+    console.log(`✅ Headers at row 1:`, headers.slice(0, 10));
+    console.log(`✅ Data rows: ${rawData.length}`);
 
     const schema = inferSchema(headers, rawData.slice(0, 5));
     const normalized = this.normalizeRows({
@@ -179,8 +191,8 @@ export class GoogleSyncService {
       headers,
       rawRows: rawData,
       mapping: schema.mapping,
-      headerRowIndex,
-      isDataMau
+      headerRowIndex: 0,
+      isDataMau: false
     });
 
     return {
@@ -190,12 +202,93 @@ export class GoogleSyncService {
       rawRows: rawData,
       allRows: values,
       sheetId,
-      headerRowIndex
+      headerRowIndex: 0
+    };
+  }
+
+  /**
+   * Load Review sheet: Complex structure (J1:BE1000)
+   * - Skip columns A-I (Project Information section)
+   * - Headers at row 3 of original sheet = index 2 in J1:BE range
+   * - Data starts from row 4 (index 3)
+   */
+  async loadSheetReview(url: string, tab: string, token: string): Promise<{
+    rows: RowNormalized[];
+    schema: InferredSchema;
+    headers: string[];
+    rawRows: string[][];
+    allRows: string[][];
+    sheetId: string;
+    headerRowIndex: number;
+  }> {
+    const sheetId = this.extractSheetId(url);
+    if (!sheetId) throw new Error("URL Sheet không hợp lệ.");
+
+    const metadata = await this.fetchWithAuth(
+      `https://sheets.googleapis.com/v4/spreadsheets/${sheetId}?fields=sheets.properties.title`,
+      token
+    );
+    const allSheetNames = metadata.sheets.map((s: any) => s.properties.title);
+    const finalTabName = allSheetNames.includes(tab) ? tab : allSheetNames[0];
+
+    // ✅ Review: Always use J1:BE1000 to skip Project Information (A-I)
+    const range = `'${finalTabName}'!J1:BE1000`;
+    const data = await this.fetchWithAuth(
+      `https://sheets.googleapis.com/v4/spreadsheets/${sheetId}/values/${encodeURIComponent(range)}`,
+      token
+    );
+
+    const values: string[][] = data.values;
+    if (!values || values.length < 4) {
+      throw new Error("Sheet không đủ dữ liệu (cần ít nhất 4 hàng cho cấu trúc Review).");
+    }
+
+    // ⚠️ IMPORTANT: Use the exact row selected by user as headers
+    // DO NOT merge or clean headers - user wants exact content of chosen row
+    // Default to row 3 (index 2) for Review mode, but this should be configurable
+    const headers = values[2];
+    const rawData = values.slice(3);
+
+    console.log(`✅ Review mode: Range ${range}`);
+    console.log(`✅ Headers at row 3 (exact content):`, headers.slice(0, 10));
+    console.log(`   → Code column is now at index 0 (original column J)`);
+    console.log(`✅ Data rows: ${rawData.length}`);
+
+    const schema = inferSchema(headers, rawData.slice(0, 5));
+
+    console.log('🔍 Schema inference result:');
+    console.log('   Date column:', schema.mapping.date !== undefined ?
+      `✅ Index ${schema.mapping.date} = "${headers[schema.mapping.date]}"` :
+      '❌ NOT DETECTED');
+    console.log('   Time/Slot column:', schema.mapping.time !== undefined ?
+      `✅ Index ${schema.mapping.time} = "${headers[schema.mapping.time]}"` :
+      '❌ NOT DETECTED');
+
+    const normalized = this.normalizeRows({
+      sheetId,
+      tab: finalTabName,
+      headers,
+      rawRows: rawData,
+      mapping: schema.mapping,
+      headerRowIndex: 2,
+      isDataMau: true,
+      rangeStartsAtJ: true
+    });
+
+    return {
+      rows: normalized,
+      schema,
+      headers,
+      rawRows: rawData,
+      allRows: values,
+      sheetId,
+      headerRowIndex: 2
     };
   }
 
   /**
    * 2. NORMALIZE: Xử lý dữ liệu an toàn, chống trắng trang
+   * ✅ REFACTORED: Smart Task Name mapping với xử lý đặc biệt cho Data Mẫu
    */
   normalizeRows(params: {
     sheetId: string;
@@ -205,14 +298,15 @@ export class GoogleSyncService {
     mapping: ColumnMapping;
     headerRowIndex: number;
     isDataMau?: boolean;
+    rangeStartsAtJ?: boolean; // ✅ NEW: Indicates if range starts at column J
   }): RowNormalized[] {
-    const { sheetId, tab, headers, rawRows, mapping, headerRowIndex, isDataMau } = params;
+    const { sheetId, tab, headers, rawRows, mapping, headerRowIndex, isDataMau, rangeStartsAtJ } = params;
 
     // ✅ VALIDATION: Kiểm tra mapping tồn tại để tránh crash
     if (!mapping || mapping.date === undefined || mapping.time === undefined) {
       console.warn('⚠️ Mapping không đầy đủ, tìm index thủ công...');
 
-      // Tự tìm index nếu mapping bị rỗng
+      // Tự tìm index nếu mapping bị rỗng (Keyword-based column detection)
       const dIdx = headers.findIndex(h =>
         h?.toLowerCase().includes("ngày") ||
         h?.toLowerCase().includes("date")
@@ -228,20 +322,36 @@ export class GoogleSyncService {
         return []; // ✅ Trả về mảng rỗng thay vì crash
       }
 
-      // Tạo mapping thủ công
+      // Tạo mapping thủ công với keyword search
       const manualMapping: ColumnMapping = {
         date: dIdx,
         time: tIdx,
-        person: headers.findIndex(h => h?.toLowerCase().includes("họ") || h?.toLowerCase().includes("tên")),
-        task: headers.findIndex(h => h?.toLowerCase().includes("nhiệm vụ") || h?.toLowerCase().includes("môn")),
-        location: headers.findIndex(h => h?.toLowerCase().includes("phòng"))
+        person: headers.findIndex(h =>
+          h?.toLowerCase().includes("họ") ||
+          h?.toLowerCase().includes("tên") ||
+          h?.toLowerCase().includes("name")
+        ),
+        task: headers.findIndex(h =>
+          h?.toLowerCase().includes("nhiệm vụ") ||
+          h?.toLowerCase().includes("môn") ||
+          h?.toLowerCase().includes("task") ||
+          h?.toLowerCase().includes("đề tài")
+        ),
+        location: headers.findIndex(h =>
+          h?.toLowerCase().includes("phòng") ||
+          h?.toLowerCase().includes("location") ||
+          h?.toLowerCase().includes("nơi")
+        )
       };
+
+      console.log('✅ Auto-detected mapping:', manualMapping);
 
       return this.normalizeRows({
         sheetId, tab, headers, rawRows,
         mapping: manualMapping,
         headerRowIndex,
-        isDataMau
+        isDataMau,
+        rangeStartsAtJ
       });
     }
 
@@ -257,17 +367,40 @@ export class GoogleSyncService {
           const timeStr = row[mapping.time!].toString().trim();
           const { start, end } = parseVNTime(dateStr, timeStr);
 
-          // Xử lý Task Name
+          // ✅ SMART TASK NAME HANDLING
           let taskName = mapping.task !== undefined ?
             (row[mapping.task] || "").toString().trim() :
             "";
 
+          // Xử lý đặc biệt cho Data Mẫu: fallback sang cột E gốc
           if (isDataMau && (!taskName || taskName.toLowerCase() === "unknown")) {
-            taskName = (row[4] || "Nhiệm vụ").toString().trim();
+            // Nếu range starts at J, cột E gốc không có trong dữ liệu hiện tại
+            // Trong trường hợp này, tìm cột có chứa thông tin đề tài
+            const taskColIndex = headers.findIndex(h =>
+              h?.toLowerCase().includes("tên đề tài") ||
+              h?.toLowerCase().includes("task") ||
+              h?.toLowerCase().includes("project name")
+            );
+
+            if (taskColIndex !== -1 && row[taskColIndex]) {
+              taskName = row[taskColIndex].toString().trim();
+              console.log(`✅ Task name found via header search: ${taskName}`);
+            } else {
+              // Fallback cuối cùng: thử tìm trong các cột đầu tiên
+              for (let i = 0; i < Math.min(5, row.length); i++) {
+                const cellValue = (row[i] || "").toString().trim();
+                if (cellValue && cellValue.length > 3 && !cellValue.match(/^\d+$/)) {
+                  taskName = cellValue;
+                  console.log(`✅ Task name found via fallback scan at col ${i}: ${taskName}`);
+                  break;
+                }
+              }
+            }
           }
+
           if (!taskName) taskName = "Nhiệm vụ";
 
-          // ✅ Thu thập tất cả 57 cột vào raw
+          // ✅ Thu thập tất cả cột vào raw
           const rawMap: Record<string, string> = {};
           headers.forEach((h: string, i: number) => {
             rawMap[h || `Col_${i}`] = (row[i] || "").toString().trim();

@@ -21,6 +21,7 @@ const App: React.FC = () => {
   const [tabName, setTabName] = useState('Sheet1');
   const [personFilter, setPersonFilter] = useState('');
   const [loading, setLoading] = useState(false);
+  const [loadingMode, setLoadingMode] = useState<'test1' | 'review' | null>(null);
   const [syncing, setSyncing] = useState(false);
   const [rows, setRows] = useState<RowNormalized[]>([]);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
@@ -174,24 +175,42 @@ const App: React.FC = () => {
     return rows.slice(start);
   };
 
-  const applyHeaderRow = (idx: number, rows: string[][], meta?: { sheetId: string; tab: string }) => {
-    const selectedRow = rows[idx] || [];
-    let headers = selectedRow;
-    let dataStartIndex = idx + 1;
-
-    if (looksLikeDataRow(selectedRow) && idx > 0) {
-      headers = rows[idx - 1] || [];
-      dataStartIndex = idx;
-    } else {
-      const nextRow = rows[idx + 1] || [];
-      if (looksLikeHeaderRow(nextRow)) {
-        headers = mergeHeaderRows(selectedRow, nextRow);
-        dataStartIndex = idx + 2;
+  // ✅ Fill forward empty cells with last non-empty value (for merged cells)
+  // Example: ["REVIEW 1", "", "", "REVIEW 2", "", ""] → ["REVIEW 1", "REVIEW 1", "REVIEW 1", "REVIEW 2", "REVIEW 2", "REVIEW 2"]
+  const fillForwardHeaders = (headers: string[]): string[] => {
+    const filled: string[] = [];
+    let lastValue = "";
+    for (let i = 0; i < headers.length; i++) {
+      const cell = (headers[i] || "").toString().trim();
+      if (cell) {
+        lastValue = cell;
+        filled[i] = cell;
+      } else {
+        // Empty cell - use last non-empty value (merged cell behavior)
+        filled[i] = lastValue || `Column_${i + 1}`;
       }
     }
+    return filled;
+  };
 
+  const applyHeaderRow = (idx: number, rows: string[][], meta?: { sheetId: string; tab: string }) => {
+    // ⚠️ CRITICAL: Use EXACT row user selected - NO merging, NO auto-detection
+    // Row 1 → Headers = Row 1 content (e.g., "REVIEW 1-2-3")
+    // Row 2 → Headers = Row 2 content (e.g., "REVIEW 1", "REVIEW 2")
+    // Row 3 → Headers = Row 3 content (e.g., "Code", "Date", "Slot")
+    let headers = rows[idx] || [];
+
+    // ✅ Fill forward empty cells (merged cell behavior)
+    // Converts: ["REVIEW 1", "", "", "REVIEW 2", ""] 
+    //      To: ["REVIEW 1", "REVIEW 1", "REVIEW 1", "REVIEW 2", "REVIEW 2"]
+    headers = fillForwardHeaders(headers);
+
+    const dataStartIndex = idx + 1;
+
+    // Get raw data rows (everything after header row)
     let rawRows = rows.slice(dataStartIndex);
     rawRows = trimLeadingEmptyRows(rawRows);
+
     const schema = inferSchema(headers, rawRows.slice(0, 5));
     const nextMeta = meta ? { ...meta, headerRowIndex: idx } : (sheetMeta ? { ...sheetMeta, headerRowIndex: idx } : null);
 
@@ -505,15 +524,90 @@ const App: React.FC = () => {
                 placeholder="Nhập tên GVHD"
               />
             </div>
-            <div className="md:col-span-2 flex items-end">
+            <div className="md:col-span-2 flex items-end gap-2">
               <button
-                onClick={handleLoad}
-                disabled={loading}
-                className="w-full py-2.5 px-4 bg-indigo-600 hover:bg-indigo-700 text-white font-semibold rounded-lg shadow-md hover:shadow-lg transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed active:scale-95"
+                onClick={async () => {
+                  if (!sheetUrl || !accessToken || loadingMode) return;
+                  setLoadingMode('test1');
+                  setLoading(true);
+                  setResult(null);
+                  setError(null);
+                  try {
+                    const { rows: data, headers, rawRows, allRows: fetchedRows, schema, sheetId, headerRowIndex } = await googleService.loadSheetTest1(sheetUrl, tabName, accessToken);
+                    setAllRows(fetchedRows || []);
+                    setShowFullTable(false);
+                    setSheetMeta({ sheetId, tab: tabName, headerRowIndex });
+                    setHeaderRowIndex(headerRowIndex);
+                    setMergedCells([]);
+                    setRows(data);
+                    setFullHeaders(headers || []);
+                    setFullRows(rawRows || []);
+                    setColumnMap({
+                      date: schema.mapping.date,
+                      time: schema.mapping.time,
+                      person: schema.mapping.person,
+                      task: schema.mapping.task,
+                      location: schema.mapping.location,
+                      email: schema.mapping.email
+                    });
+                    updateSelections(data);
+                  } catch (err: any) {
+                    console.error('Load error:', err);
+                    setError(err.message);
+                  } finally {
+                    setLoading(false);
+                    setLoadingMode(null);
+                  }
+                }}
+                disabled={loadingMode !== null}
+                className="flex-1 py-2.5 px-3 bg-blue-600 hover:bg-blue-700 text-white font-semibold rounded-lg shadow-md hover:shadow-lg transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed active:scale-95 text-sm"
+                title="Cấu trúc phẳng: Header dòng 1, range A1:BE"
               >
-                {loading ? (
-                  <div className="w-5 h-5 border-2 border-white/30 border-t-white rounded-full animate-spin mx-auto"></div>
-                ) : '🔄 Tải'}
+                {loadingMode === 'test1' ? (
+                  <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin mx-auto"></div>
+                ) : '📄 test1'}
+              </button>
+              <button
+                onClick={async () => {
+                  if (!sheetUrl || !accessToken || loadingMode) return;
+                  setLoadingMode('review');
+                  setLoading(true);
+                  setResult(null);
+                  setError(null);
+                  try {
+                    const { rows: data, headers, rawRows, allRows: fetchedRows, schema, sheetId, headerRowIndex } = await googleService.loadSheetReview(sheetUrl, tabName, accessToken);
+                    setAllRows(fetchedRows || []);
+                    setShowFullTable(false);
+                    setSheetMeta({ sheetId, tab: tabName, headerRowIndex });
+                    setHeaderRowIndex(headerRowIndex);
+                    setMergedCells([]);
+                    setRows(data);
+                    setFullHeaders(headers || []);
+                    setFullRows(rawRows || []);
+                    setColumnMap({
+                      date: schema.mapping.date,
+                      time: schema.mapping.time,
+                      person: schema.mapping.person,
+                      task: schema.mapping.task,
+                      location: schema.mapping.location,
+                      email: schema.mapping.email
+                    });
+                    updateSelections(data);
+                  } catch (err: any) {
+                    console.error('Load error:', err);
+                    setError(err.message);
+                  } finally {
+                    setLoading(false);
+                    setLoadingMode(null);
+                  }
+                }}
+                disabled={loadingMode !== null}
+                className="flex-1 py-2.5 px-3 bg-purple-600 hover:bg-purple-700 text-white font-semibold rounded-lg shadow-md hover:shadow-lg transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed active:scale-95 text-sm"
+                title="Cấu trúc phức tạp: Header dòng 3, range J1:BE"
+              >
+                {loadingMode === 'review' ? (
+                  <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin mx-auto"></div>
+                ) : '📊 Review'}
               </button>
             </div>
           </div>
@@ -659,47 +753,81 @@ const App: React.FC = () => {
                 <div className="overflow-x-auto max-h-96 bg-gradient-to-b from-slate-50/50 to-white">
                   <table className="text-left text-sm border-collapse" style={{ width: `${fullTableColumns.length * 140}px` }}>
                     <thead className="sticky top-0 z-10">
-                      {/* Merged header row (chỉ hiển thị khi thực sự có multi-row headers) */}
-                      {mergedCells && mergedCells.length > 0 && headerRowIndex > 0 && mergedCells.some(group => group.name && group.name.trim().length > 0) && (
-                        <tr className="bg-gradient-to-r from-indigo-500 to-indigo-600 text-[11px] font-bold text-white uppercase tracking-wider border-b-2 border-indigo-700 shadow-sm">
-                          {mergedCells.map((group, gIdx) => {
-                            const colSpan = group.colCount;
-                            return (
-                              <th
-                                key={gIdx}
-                                colSpan={colSpan}
-                                className="px-3 py-3 border-r border-indigo-400/30 text-center"
-                                style={{ minWidth: `${colSpan * 140}px` }}
-                              >
-                                <div className="truncate font-bold">{group.name}</div>
-                              </th>
-                            );
-                          })}
-                        </tr>
-                      )}
-                      {/* Detail header row */}
-                      <tr className={`bg-slate-100 text-[10px] font-semibold text-slate-700 uppercase tracking-wider border-b-2 border-slate-300 sticky ${mergedCells && mergedCells.length > 0 && headerRowIndex > 0 && mergedCells.some(group => group.name && group.name.trim().length > 0) ? 'top-[40px]' : 'top-0'} z-10`}>
-                        {fullTableColumns.map((h, i) => {
-                          const isSelected =
-                            i === columnMap.date ||
-                            i === columnMap.time ||
-                            i === columnMap.person ||
-                            i === columnMap.task ||
-                            i === columnMap.location ||
-                            i === columnMap.email;
+                      {(() => {
+                        // 1. Logic tính toán groups dùng chung cho cả 2 hàng header
+                        const groups: { name: string; start: number; span: number }[] = [];
+                        let currentGroup: string | null = null;
 
-                          return (
-                            <th
-                              key={i}
-                              className={`px-3 py-3 border-r border-slate-200 ${isSelected ? 'bg-indigo-100 text-indigo-900 font-black' : ''
-                                }`}
-                              style={{ minWidth: '140px', maxWidth: '140px' }}
-                            >
-                              <div className="truncate text-xs">{h || `Col ${i + 1}`}</div>
-                            </th>
-                          );
-                        })}
-                      </tr>
+                        fullTableColumns.forEach((h, i) => {
+                          const header = (h || "").trim();
+                          const isGeneric = header.match(/^Column_\d+$/);
+
+                          if (!isGeneric && header && header === currentGroup) {
+                            groups[groups.length - 1].span++;
+                          } else if (!isGeneric && header) {
+                            currentGroup = header;
+                            groups.push({ name: header, start: i, span: 1 });
+                          } else {
+                            currentGroup = null;
+                          }
+                        });
+
+                        const hasGroups = groups.some(g => g.span > 1);
+                        const detailRowStickyTop = hasGroups ? 'top-[42px]' : 'top-0';
+
+                        return (
+                          <>
+                            {/* Hàng 1: Merged/Grouped Headers */}
+                            {hasGroups && (
+                              <tr className="bg-gradient-to-r from-indigo-600 to-indigo-700 text-white text-xs font-bold uppercase tracking-wide border-b-2 border-indigo-800 sticky top-0 z-20">
+                                {fullTableColumns.map((_, i) => {
+                                  const group = groups.find(g => g.start === i);
+                                  if (group && group.span > 1) {
+                                    return (
+                                      <th
+                                        key={`group-${i}`}
+                                        colSpan={group.span}
+                                        className="px-3 py-2.5 border-r border-indigo-500 text-center"
+                                      >
+                                        <div className="font-extrabold text-sm truncate">{group.name}</div>
+                                      </th>
+                                    );
+                                  }
+                                  if (groups.some(g => i > g.start && i < g.start + g.span)) {
+                                    return null; // Bỏ qua ô đã bị merge bởi colSpan
+                                  }
+                                  return (
+                                    <th key={`empty-group-${i}`} className="px-3 py-2.5 border-r border-indigo-500" />
+                                  );
+                                })}
+                              </tr>
+                            )}
+
+                            {/* Hàng 2: Detail Headers (Dòng 3 gốc) */}
+                            <tr className={`bg-slate-100 text-[10px] font-semibold text-slate-700 uppercase tracking-wider border-b-2 border-slate-300 sticky ${detailRowStickyTop} z-10`}>
+                              {fullTableColumns.map((h, i) => {
+                                const isSelected =
+                                  i === columnMap.date ||
+                                  i === columnMap.time ||
+                                  i === columnMap.person ||
+                                  i === columnMap.task ||
+                                  i === columnMap.location ||
+                                  i === columnMap.email;
+
+                                return (
+                                  <th
+                                    key={`detail-${i}`}
+                                    className={`px-3 py-3 border-r border-slate-200 ${isSelected ? 'bg-indigo-100 text-indigo-900 font-black' : ''}`}
+                                    style={{ minWidth: '140px', maxWidth: '140px' }}
+                                  >
+                                    <div className="truncate text-xs">{h || `Col ${i + 1}`}</div>
+                                  </th>
+                                );
+                              })}
+                            </tr>
+                          </>
+                        );
+                      })()}
                     </thead>
                     <tbody className="divide-y divide-slate-100">
                       {filteredFullTableRows.slice(0, 10).map((row, ri) => (
@@ -708,13 +836,13 @@ const App: React.FC = () => {
                             <td
                               key={ci}
                               className={`px-3 py-2.5 border-r border-slate-100 ${ci === columnMap.date ||
-                                  ci === columnMap.time ||
-                                  ci === columnMap.person ||
-                                  ci === columnMap.task ||
-                                  ci === columnMap.location ||
-                                  ci === columnMap.email
-                                  ? 'bg-indigo-50/50 font-semibold text-indigo-900'
-                                  : 'text-slate-700'
+                                ci === columnMap.time ||
+                                ci === columnMap.person ||
+                                ci === columnMap.task ||
+                                ci === columnMap.location ||
+                                ci === columnMap.email
+                                ? 'bg-indigo-50/50 font-semibold text-indigo-900'
+                                : 'text-slate-700'
                                 }`}
                               style={{ minWidth: '140px', maxWidth: '140px' }}
                             >

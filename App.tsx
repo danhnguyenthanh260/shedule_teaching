@@ -21,13 +21,15 @@ const App: React.FC = () => {
   const [tabName, setTabName] = useState('Sheet1');
   const [personFilter, setPersonFilter] = useState('');
   const [loading, setLoading] = useState(false);
+  const [loadingMode, setLoadingMode] = useState<'test1' | 'review' | null>(null);
   const [syncing, setSyncing] = useState(false);
   const [rows, setRows] = useState<RowNormalized[]>([]);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [result, setResult] = useState<SyncResult | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [tokenClient, setTokenClient] = useState<any>(null);
-  const [fullHeaders, setFullHeaders] = useState<string[]>([]);
+  const [fullHeaders, setFullHeaders] = useState<string[]>([]);  // For group detection
+  const [fullDetailHeaders, setFullDetailHeaders] = useState<string[]>([]);  // Actual column names for tier 2
   const [fullRows, setFullRows] = useState<string[][]>([]);
   const [allRows, setAllRows] = useState<string[][]>([]);
   const [showFullTable, setShowFullTable] = useState(false);
@@ -137,14 +139,191 @@ const App: React.FC = () => {
     setSelectedIds(new Set(matches.map(m => m.id)));
   };
 
+  const looksLikeDataRow = (row: string[]) => {
+    const joined = row.join(' ').toLowerCase();
+    const datePattern = /\b\d{1,2}[\/\-]\d{1,2}[\/\-]\d{2,4}\b/;
+    const timePattern = /\b\d{1,2}:\d{2}\b|\b\d{1,2}h\d{2}\b/;
+    const numericCells = row.filter(v => v && /^\d+$/.test(v.trim())).length;
+    const filledCells = row.filter(v => v && v.trim()).length;
+    const dataSignals = (datePattern.test(joined) ? 1 : 0) + (timePattern.test(joined) ? 1 : 0) + (numericCells > 2 ? 1 : 0);
+    return filledCells > 0 && dataSignals >= 1;
+  };
+
+  const looksLikeHeaderRow = (row: string[]) => {
+    const filledCells = row.filter(v => v && v.trim()).length;
+    if (filledCells === 0) return false;
+    const headerKeywords = ['ngành', 'mã', 'tên', 'đề tài', 'ngày', 'giờ', 'phòng', 'review', 'code', 'count', 'reviewer'];
+    const joined = row.join(' ').toLowerCase();
+    const keywordHits = headerKeywords.filter(k => joined.includes(k)).length;
+    return keywordHits > 0 || filledCells >= Math.max(3, row.length * 0.2);
+  };
+
+  const mergeHeaderRows = (primary: string[], secondary: string[]) => {
+    const maxLen = Math.max(primary.length, secondary.length);
+    return Array.from({ length: maxLen }, (_, i) => {
+      const a = primary[i]?.trim() || '';
+      const b = secondary[i]?.trim() || '';
+      if (a && b && a !== b) return `${a} ${b}`;
+      return a || b;
+    });
+  };
+
+  const trimLeadingEmptyRows = (rows: string[][]) => {
+    let start = 0;
+    while (start < rows.length && !rows[start].some(cell => cell && cell.trim())) {
+      start += 1;
+    }
+    return rows.slice(start);
+  };
+
+  // ✅ Fill forward empty cells with last non-empty value (for merged cells)
+  // Example: ["REVIEW 1", "", "", "REVIEW 2", "", ""] → ["REVIEW 1", "REVIEW 1", "REVIEW 1", "REVIEW 2", "REVIEW 2", "REVIEW 2"]
+  const fillForwardHeaders = (headers: string[]): string[] => {
+    const filled: string[] = [];
+    let lastValue = "";
+    for (let i = 0; i < headers.length; i++) {
+      const cell = (headers[i] || "").toString().trim();
+      if (cell) {
+        lastValue = cell;
+        filled[i] = cell;
+      } else {
+        // Empty cell - use last non-empty value (merged cell behavior)
+        filled[i] = lastValue || `Column_${i + 1}`;
+      }
+    }
+    return filled;
+  };
+
+
   const applyHeaderRow = (idx: number, rows: string[][], meta?: { sheetId: string; tab: string }) => {
-    const headers = rows[idx] || [];
-    const rawRows = rows.slice(idx + 1);
-    const schema = inferSchema(headers, rawRows.slice(0, 5));
+    // ⚠️ CRITICAL: Use EXACT row user selected - NO merging, NO auto-detection
+    // Row 1 → Headers = Row 1 content (e.g., "REVIEW 1-2-3")
+    // Row 2 → Headers = Row 2 content (e.g., "REVIEW 1", "REVIEW 2")
+    // Row 3 → Headers = Row 3 content (e.g., "Code", "Date", "Slot")
+    let headers = rows[idx] || [];
+
+    // ✅ Fill forward empty cells (merged cell behavior)
+    // Converts: ["REVIEW 1", "", "", "REVIEW 2", ""] 
+    //      To: ["REVIEW 1", "REVIEW 1", "REVIEW 1", "REVIEW 2", "REVIEW 2"]
+    const filledHeaders = fillForwardHeaders(headers);
+
+    // ✅ Detect if this row has grouped headers (consecutive identical values)
+    const groups: { name: string; span: number }[] = [];
+    let currentGroup: string | null = null;
+    filledHeaders.forEach(h => {
+      const header = (h || "").trim();
+      const isGeneric = header.match(/^Column_\d+$/);
+      if (!isGeneric && header && header === currentGroup) {
+        groups[groups.length - 1].span++;
+      } else if (!isGeneric && header) {
+        currentGroup = header;
+        groups.push({ name: header, span: 1 });
+      } else {
+        currentGroup = null;
+      }
+    });
+    const hasGroups = groups.some(g => g.span > 1);
+
+    // ✅ SPECIAL: For Review mode (idx=2), ALWAYS use Row 3 as headers directly
+    // DO NOT merge with Row 2 - keep them separate (Row 2 = title, Row 3 = headers)
+    let detailHeaders: string[];
+    let dataStartIndex: number;
+    let titleRow: string[] = [];  // For Review mode: Row 2 titles
+
+    if (idx === 2) {
+      // Review mode: ALWAYS use Row 3 (idx=2) as headers, Row 2 (idx=1) as titles
+      detailHeaders = filledHeaders;  // Row 3
+      titleRow = rows[1] ? fillForwardHeaders(rows[1]) : [];  // Row 2
+      dataStartIndex = idx + 1;  // Data starts at Row 4
+
+      // Filter out DEFENSE and CONFLICT from both
+      const columnsToKeep: number[] = [];
+      titleRow.forEach((h, i) => {
+        const header = (h || "").toString().toLowerCase();
+        if (!header.includes('defense') && !header.includes('conflict')) {
+          columnsToKeep.push(i);
+        }
+      });
+
+      if (columnsToKeep.length < titleRow.length) {
+        titleRow = columnsToKeep.map(i => titleRow[i]);
+        detailHeaders = columnsToKeep.map(i => detailHeaders[i]);
+        headers = titleRow;  // Use filtered titles for group display
+        console.log(`✅ Filtered out ${filledHeaders.length - columnsToKeep.length} DEFENSE/CONFLICT columns`);
+      } else {
+        headers = titleRow;  // Use Row 2 titles for group display
+      }
+    } else if (hasGroups && rows[idx + 1]) {
+      // Row has groups → use filled row for grouping, next row for details
+      headers = filledHeaders;  // For group detection in UI
+      detailHeaders = rows[idx + 1] || [];  // Detail column names from next row
+      dataStartIndex = idx + 2;  // Data starts after detail header row
+
+      // ✅ Filter out DEFENSE and CONFLICT columns (for Review mode)
+      const columnsToKeep: number[] = [];
+      filledHeaders.forEach((h, i) => {
+        const header = (h || "").toString().toLowerCase();
+        // Keep columns that are NOT DEFENSE or CONFLICT
+        if (!header.includes('defense') && !header.includes('conflict')) {
+          columnsToKeep.push(i);
+        }
+      });
+
+      // Apply filter to headers and detail headers
+      if (columnsToKeep.length < filledHeaders.length) {
+        headers = columnsToKeep.map(i => filledHeaders[i]);
+        detailHeaders = columnsToKeep.map(i => detailHeaders[i]);
+        // Also need to filter all data rows later
+        console.log(`✅ Filtered out ${filledHeaders.length - columnsToKeep.length} DEFENSE/CONFLICT columns`);
+      }
+    } else {
+      // No groups → use current row as both group and detail
+      headers = filledHeaders;
+      detailHeaders = filledHeaders;
+      dataStartIndex = idx + 1;
+    }
+
+    // Get raw data rows (everything after headers)
+    let rawRows = rows.slice(dataStartIndex);
+
+    // ✅ Apply column filter to data rows if we filtered headers
+    if (idx === 2 && titleRow.length > 0) {
+      // Review mode: filter based on titleRow (Row 2)
+      const unfilteredTitleRow = rows[1] ? fillForwardHeaders(rows[1]) : [];
+      if (titleRow.length < unfilteredTitleRow.length) {
+        const columnsToKeep: number[] = [];
+        unfilteredTitleRow.forEach((h, i) => {
+          const header = (h || "").toString().toLowerCase();
+          if (!header.includes('defense') && !header.includes('conflict')) {
+            columnsToKeep.push(i);
+          }
+        });
+
+        rawRows = rawRows.map(row => columnsToKeep.map(i => row[i] || ''));
+      }
+    } else {
+      // Other modes: use original logic
+      const hasColumnFilter = headers.length < filledHeaders.length;
+      if (hasColumnFilter) {
+        const columnsToKeep: number[] = [];
+        filledHeaders.forEach((h, i) => {
+          const header = (h || "").toString().toLowerCase();
+          if (!header.includes('defense') && !header.includes('conflict')) {
+            columnsToKeep.push(i);
+          }
+        });
+
+        rawRows = rawRows.map(row => columnsToKeep.map(i => row[i] || ''));
+      }
+    }
+    rawRows = trimLeadingEmptyRows(rawRows);
+
+    const schema = inferSchema(detailHeaders, rawRows.slice(0, 5));
     const nextMeta = meta ? { ...meta, headerRowIndex: idx } : (sheetMeta ? { ...sheetMeta, headerRowIndex: idx } : null);
 
     setHeaderRowIndex(idx);
-    setFullHeaders(headers);
+    setFullHeaders(headers);  // For group detection
+    setFullDetailHeaders(detailHeaders);  // Actual column names for UI tier 2
     setFullRows(rawRows);
     setColumnMap({
       date: schema.mapping.date,
@@ -160,7 +339,7 @@ const App: React.FC = () => {
       const data = googleService.normalizeRows({
         sheetId: nextMeta.sheetId,
         tab: nextMeta.tab,
-        headers,
+        headers: detailHeaders,  // Use detail headers for data mapping
         rawRows,
         mapping: schema.mapping,
         headerRowIndex: idx
@@ -172,6 +351,7 @@ const App: React.FC = () => {
       setSelectedIds(new Set());
     }
   };
+
 
   const applyMapping = () => {
     try {
@@ -367,14 +547,35 @@ const App: React.FC = () => {
   }, [fullTableColumns]);
 
   const headerRowOptions = useMemo(() => {
-    const limit = Math.min(10, allRows.length);
-    return Array.from({ length: limit }, (_, i) => {
+    // For Review mode: Start from Row 2 (merged headers like "REVIEW 1")
+    // Row 2 (index 1) = REVIEW 1, REVIEW 2, DEFENSE, CONFLICT (merged)
+    // Row 3 (index 2) = Code, Count, Reviewer 1, Reviewer 2 (detail headers) - DEFAULT
+    const startIndex = 1;  // Start from Row 2
+    const limit = Math.min(5, allRows.length);  // Only show first 5 rows
+    const options = [];
+
+    for (let i = startIndex; i < limit; i++) {
       const preview = (allRows[i] || []).filter(Boolean).slice(0, 4).join(' | ');
-      return {
-        label: `Row ${i + 1}${preview ? `: ${preview}` : ''}`,
+      let label = `Row ${i + 1}`;
+
+      // Add descriptive label for Review mode
+      if (i === 1) {
+        label += ' (Merged Headers)';
+      } else if (i === 2) {
+        label += ' (Detail Headers)';
+      }
+
+      if (preview) {
+        label += `: ${preview}`;
+      }
+
+      options.push({
+        label,
         value: i
-      };
-    });
+      });
+    }
+
+    return options;
   }, [allRows]);
 
   const getColumnLabel = (index?: number) => {
@@ -453,15 +654,68 @@ const App: React.FC = () => {
                 placeholder="Nhập tên GVHD"
               />
             </div>
-            <div className="md:col-span-2 flex items-end">
+            <div className="md:col-span-2 flex items-end gap-2">
               <button
-                onClick={handleLoad}
-                disabled={loading}
-                className="w-full py-2.5 px-4 bg-indigo-600 hover:bg-indigo-700 text-white font-semibold rounded-lg shadow-md hover:shadow-lg transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed active:scale-95"
+                onClick={async () => {
+                  if (!sheetUrl || !accessToken || loadingMode) return;
+                  setLoadingMode('test1');
+                  setLoading(true);
+                  setResult(null);
+                  setError(null);
+                  try {
+                    const { rows: data, headers, rawRows, allRows: fetchedRows, schema, sheetId, headerRowIndex } = await googleService.loadSheetTest1(sheetUrl, tabName, accessToken);
+                    setAllRows(fetchedRows || []);
+                    setShowFullTable(false);
+                    setSheetMeta({ sheetId, tab: tabName, headerRowIndex });
+
+                    // ✅ CRITICAL: Call applyHeaderRow to process merged cells and set up proper column mapping
+                    applyHeaderRow(headerRowIndex, fetchedRows, { sheetId, tab: tabName });
+                  } catch (err: any) {
+                    console.error('Load error:', err);
+                    setError(err.message);
+                  } finally {
+                    setLoading(false);
+                    setLoadingMode(null);
+                  }
+                }}
+                disabled={loadingMode !== null}
+                className="flex-1 py-2.5 px-3 bg-blue-600 hover:bg-blue-700 text-white font-semibold rounded-lg shadow-md hover:shadow-lg transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed active:scale-95 text-sm"
+                title="Cấu trúc phẳng: Header dòng 1, range A1:BE"
               >
-                {loading ? (
-                  <div className="w-5 h-5 border-2 border-white/30 border-t-white rounded-full animate-spin mx-auto"></div>
-                ) : '🔄 Tải'}
+                {loadingMode === 'test1' ? (
+                  <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin mx-auto"></div>
+                ) : '📄 test1'}
+              </button>
+              <button
+                onClick={async () => {
+                  if (!sheetUrl || !accessToken || loadingMode) return;
+                  setLoadingMode('review');
+                  setLoading(true);
+                  setResult(null);
+                  setError(null);
+                  try {
+                    const { rows: data, headers, rawRows, allRows: fetchedRows, schema, sheetId, headerRowIndex } = await googleService.loadSheetReview(sheetUrl, tabName, accessToken);
+                    setAllRows(fetchedRows || []);
+                    setShowFullTable(false);
+                    setSheetMeta({ sheetId, tab: tabName, headerRowIndex });
+
+                    // ✅ CRITICAL: Call applyHeaderRow to process merged cells and set up proper column mapping
+                    applyHeaderRow(headerRowIndex, fetchedRows, { sheetId, tab: tabName });
+                  } catch (err: any) {
+                    console.error('Load error:', err);
+                    setError(err.message);
+                  } finally {
+                    setLoading(false);
+                    setLoadingMode(null);
+                  }
+                }}
+                disabled={loadingMode !== null}
+                className="flex-1 py-2.5 px-3 bg-purple-600 hover:bg-purple-700 text-white font-semibold rounded-lg shadow-md hover:shadow-lg transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed active:scale-95 text-sm"
+                title="Cấu trúc phức tạp: Header dòng 3, range J1:BE"
+              >
+                {loadingMode === 'review' ? (
+                  <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin mx-auto"></div>
+                ) : '📊 Review'}
               </button>
             </div>
           </div>
@@ -607,47 +861,81 @@ const App: React.FC = () => {
                 <div className="overflow-x-auto max-h-96 bg-gradient-to-b from-slate-50/50 to-white">
                   <table className="text-left text-sm border-collapse" style={{ width: `${fullTableColumns.length * 140}px` }}>
                     <thead className="sticky top-0 z-10">
-                      {/* Merged header row */}
-                      {mergedCells && mergedCells.length > 0 && (
-                        <tr className="bg-gradient-to-r from-indigo-500 to-indigo-600 text-[11px] font-bold text-white uppercase tracking-wider border-b-2 border-indigo-700 shadow-sm">
-                          {mergedCells.map((group, gIdx) => {
-                            const colSpan = group.colCount;
-                            return (
-                              <th
-                                key={gIdx}
-                                colSpan={colSpan}
-                                className="px-3 py-3 border-r border-indigo-400/30 text-center"
-                                style={{ minWidth: `${colSpan * 140}px` }}
-                              >
-                                <div className="truncate font-bold">{group.name}</div>
-                              </th>
-                            );
-                          })}
-                        </tr>
-                      )}
-                      {/* Detail header row */}
-                      <tr className="bg-slate-100 text-[10px] font-semibold text-slate-700 uppercase tracking-wider border-b-2 border-slate-300 sticky top-[40px] z-10">
-                        {fullTableColumns.map((h, i) => {
-                          const isSelected =
-                            i === columnMap.date ||
-                            i === columnMap.time ||
-                            i === columnMap.person ||
-                            i === columnMap.task ||
-                            i === columnMap.location ||
-                            i === columnMap.email;
+                      {(() => {
+                        // 1. Logic tính toán groups dùng chung cho cả 2 hàng header
+                        const groups: { name: string; start: number; span: number }[] = [];
+                        let currentGroup: string | null = null;
 
-                          return (
-                            <th
-                              key={i}
-                              className={`px-3 py-3 border-r border-slate-200 ${isSelected ? 'bg-indigo-100 text-indigo-900 font-black' : ''
-                                }`}
-                              style={{ minWidth: '140px', maxWidth: '140px' }}
-                            >
-                              <div className="truncate text-xs">{h || `Col ${i + 1}`}</div>
-                            </th>
-                          );
-                        })}
-                      </tr>
+                        fullTableColumns.forEach((h, i) => {
+                          const header = (h || "").trim();
+                          const isGeneric = header.match(/^Column_\d+$/);
+
+                          if (!isGeneric && header && header === currentGroup) {
+                            groups[groups.length - 1].span++;
+                          } else if (!isGeneric && header) {
+                            currentGroup = header;
+                            groups.push({ name: header, start: i, span: 1 });
+                          } else {
+                            currentGroup = null;
+                          }
+                        });
+
+                        const hasGroups = groups.some(g => g.span > 1);
+                        const detailRowStickyTop = hasGroups ? 'top-[42px]' : 'top-0';
+
+                        return (
+                          <>
+                            {/* Hàng 1: Merged/Grouped Headers */}
+                            {hasGroups && (
+                              <tr className="bg-gradient-to-r from-indigo-600 to-indigo-700 text-white text-xs font-bold uppercase tracking-wide border-b-2 border-indigo-800 sticky top-0 z-20">
+                                {fullTableColumns.map((_, i) => {
+                                  const group = groups.find(g => g.start === i);
+                                  if (group && group.span > 1) {
+                                    return (
+                                      <th
+                                        key={`group-${i}`}
+                                        colSpan={group.span}
+                                        className="px-3 py-2.5 border-r border-indigo-500 text-center"
+                                      >
+                                        <div className="font-extrabold text-sm truncate">{group.name}</div>
+                                      </th>
+                                    );
+                                  }
+                                  if (groups.some(g => i > g.start && i < g.start + g.span)) {
+                                    return null; // Bỏ qua ô đã bị merge bởi colSpan
+                                  }
+                                  return (
+                                    <th key={`empty-group-${i}`} className="px-3 py-2.5 border-r border-indigo-500" />
+                                  );
+                                })}
+                              </tr>
+                            )}
+
+                            {/* Hàng 2: Detail Headers (Dòng 3 gốc) */}
+                            <tr className={`bg-slate-100 text-[10px] font-semibold text-slate-700 uppercase tracking-wider border-b-2 border-slate-300 sticky ${detailRowStickyTop} z-10`}>
+                              {(fullDetailHeaders.length > 0 ? fullDetailHeaders : fullTableColumns).map((h, i) => {
+                                const isSelected =
+                                  i === columnMap.date ||
+                                  i === columnMap.time ||
+                                  i === columnMap.person ||
+                                  i === columnMap.task ||
+                                  i === columnMap.location ||
+                                  i === columnMap.email;
+
+                                return (
+                                  <th
+                                    key={`detail-${i}`}
+                                    className={`px-3 py-3 border-r border-slate-200 ${isSelected ? 'bg-indigo-100 text-indigo-900 font-black' : ''}`}
+                                    style={{ minWidth: '140px', maxWidth: '140px' }}
+                                  >
+                                    <div className="truncate text-xs">{h || `Col ${i + 1}`}</div>
+                                  </th>
+                                );
+                              })}
+                            </tr>
+                          </>
+                        );
+                      })()}
                     </thead>
                     <tbody className="divide-y divide-slate-100">
                       {filteredFullTableRows.slice(0, 10).map((row, ri) => (
@@ -656,13 +944,13 @@ const App: React.FC = () => {
                             <td
                               key={ci}
                               className={`px-3 py-2.5 border-r border-slate-100 ${ci === columnMap.date ||
-                                  ci === columnMap.time ||
-                                  ci === columnMap.person ||
-                                  ci === columnMap.task ||
-                                  ci === columnMap.location ||
-                                  ci === columnMap.email
-                                  ? 'bg-indigo-50/50 font-semibold text-indigo-900'
-                                  : 'text-slate-700'
+                                ci === columnMap.time ||
+                                ci === columnMap.person ||
+                                ci === columnMap.task ||
+                                ci === columnMap.location ||
+                                ci === columnMap.email
+                                ? 'bg-indigo-50/50 font-semibold text-indigo-900'
+                                : 'text-slate-700'
                                 }`}
                               style={{ minWidth: '140px', maxWidth: '140px' }}
                             >

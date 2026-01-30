@@ -121,8 +121,7 @@ export class GoogleSyncService {
   }
 
   /**
-   * @deprecated Use loadSheetTest1() or loadSheetReview() instead
-   * This function is kept for backward compatibility but will throw an error
+   * 1. LOAD SHEET: Tự động nhận diện cấu trúc phẳng (test1) hoặc phức tạp (Data mẫu)
    */
   async loadSheet(url: string, tab: string, token: string): Promise<{
     rows: RowNormalized[];
@@ -134,26 +133,6 @@ export class GoogleSyncService {
     headerRowIndex: number;
     mergedCells?: MergedCellGroup[];
   }> {
-    throw new Error(
-      "⚠️ Vui lòng sử dụng nút 'Load test1' hoặc 'Load Review' thay vì tải tự động.\n" +
-      "Chế độ tự động nhận diện đã bị gỡ bỏ để tránh lỗi lệch cột."
-    );
-  }
-
-  /**
-   * Load test1 sheet: Flat structure (A1:BE1000)
-   * - Headers at row 1 (index 0)
-   * - Data starts from row 2 (index 1)
-   */
-  async loadSheetTest1(url: string, tab: string, token: string): Promise<{
-    rows: RowNormalized[];
-    schema: InferredSchema;
-    headers: string[];
-    rawRows: string[][];
-    allRows: string[][];
-    sheetId: string;
-    headerRowIndex: number;
-  }> {
     const sheetId = this.extractSheetId(url);
     if (!sheetId) throw new Error("URL Sheet không hợp lệ.");
 
@@ -164,7 +143,7 @@ export class GoogleSyncService {
     const allSheetNames = metadata.sheets.map((s: any) => s.properties.title);
     const finalTabName = allSheetNames.includes(tab) ? tab : allSheetNames[0];
 
-    // ✅ test1: Always use A1:BE1000
+    // ✅ Lấy range A1:BE1000 để đảm bảo hốt đủ 57 cột dữ liệu
     const range = `'${finalTabName}'!A1:BE1000`;
     const data = await this.fetchWithAuth(
       `https://sheets.googleapis.com/v4/spreadsheets/${sheetId}/values/${encodeURIComponent(range)}`,
@@ -172,17 +151,26 @@ export class GoogleSyncService {
     );
 
     const values: string[][] = data.values;
-    if (!values || values.length < 2) {
-      throw new Error("Sheet rỗng hoặc không đủ dữ liệu (cần ít nhất 2 hàng).");
+    if (!values || values.length < 1) {
+      throw new Error("Sheet rỗng hoặc không có dữ liệu.");
     }
 
-    // Headers at row 1 (index 0)
-    const headers = values[0];
-    const rawData = values.slice(1);
+    // ✅ NEW: Robust detection với multi-signal scoring
+    const detection = this.detectSheetFormat(values);
+    console.log(`📋 Detection result:`, {
+      format: detection.formatName,
+      headerRow: detection.headerRowIndex + 1,
+      confidence: detection.confidence,
+      isDataMau: detection.isDataMau
+    });
 
-    console.log(`✅ test1 mode: Range ${range}`);
-    console.log(`✅ Headers at row 1:`, headers.slice(0, 10));
-    console.log(`✅ Data rows: ${rawData.length}`);
+    const headers = values[detection.headerRowIndex];
+    const rawData = values.slice(detection.headerRowIndex + 1);
+    const headerRowIndex = detection.headerRowIndex;
+    const isDataMau = detection.isDataMau;
+
+    console.log(`✅ Headers detected:`, headers.slice(0, 10));
+    console.log(`✅ Raw data rows: ${rawData.length}`);
 
     const schema = inferSchema(headers, rawData.slice(0, 5));
     const normalized = this.normalizeRows({
@@ -191,8 +179,8 @@ export class GoogleSyncService {
       headers,
       rawRows: rawData,
       mapping: schema.mapping,
-      headerRowIndex: 0,
-      isDataMau: false
+      headerRowIndex,
+      isDataMau
     });
 
     return {
@@ -202,92 +190,12 @@ export class GoogleSyncService {
       rawRows: rawData,
       allRows: values,
       sheetId,
-      headerRowIndex: 0
-    };
-  }
-
-  /**
-   * Load Review sheet: Complex structure (J1:BE1000)
-   * - Skip columns A-I (Project Information section)
-   * - Headers at row 3 of original sheet = index 2 in J1:BE range
-   * - Data starts from row 4 (index 3)
-   */
-  async loadSheetReview(url: string, tab: string, token: string): Promise<{
-    rows: RowNormalized[];
-    schema: InferredSchema;
-    headers: string[];
-    rawRows: string[][];
-    allRows: string[][];
-    sheetId: string;
-    headerRowIndex: number;
-  }> {
-    const sheetId = this.extractSheetId(url);
-    if (!sheetId) throw new Error("URL Sheet không hợp lệ.");
-
-    const metadata = await this.fetchWithAuth(
-      `https://sheets.googleapis.com/v4/spreadsheets/${sheetId}?fields=sheets.properties.title`,
-      token
-    );
-    const allSheetNames = metadata.sheets.map((s: any) => s.properties.title);
-    const finalTabName = allSheetNames.includes(tab) ? tab : allSheetNames[0];
-
-    // ✅ Review: Always use J1:BE1000 to skip Project Information (A-I)
-    const range = `'${finalTabName}'!J1:BE1000`;
-    const data = await this.fetchWithAuth(
-      `https://sheets.googleapis.com/v4/spreadsheets/${sheetId}/values/${encodeURIComponent(range)}`,
-      token
-    );
-
-    const values: string[][] = data.values;
-    if (!values || values.length < 4) {
-      throw new Error("Sheet không đủ dữ liệu (cần ít nhất 4 hàng cho cấu trúc Review).");
-    }
-
-    // ⚠️ DEFAULT: Row 3 (detail headers) for immediate functionality
-    // Row 2 (grouped headers) available in dropdown for manual selection
-    // Using Row 3 ensures proper column mapping on first load
-    const headers = values[2];  // Row 3 of original sheet = index 2 in J1:BE range
-    const rawData = values.slice(3);  // Data from row 4+
-
-    console.log(`✅ Review mode: Range ${range}`);
-    console.log(`✅ Default headers at row 3:`, headers.slice(0, 10));
-    console.log(`   → Detail columns (Code, Date, Slot) - mapping will work`);
-    console.log(`   → User can select Row 2 for grouped view`);
-    console.log(`✅ Data rows: ${rawData.length}`);
-
-    const schema = inferSchema(headers, rawData.slice(0, 5));
-
-    console.log('🔍 Schema inference result:');
-    console.log('   Date column:', schema.mapping.date !== undefined ?
-      `found at index ${schema.mapping.date} (${headers[schema.mapping.date]})` : 'NOT FOUND');
-    console.log('   Time column:', schema.mapping.time !== undefined ?
-      `found at index ${schema.mapping.time} (${headers[schema.mapping.time]})` : 'NOT FOUND');
-
-    const normalized = this.normalizeRows({
-      sheetId,
-      tab: finalTabName,
-      headers,
-      rawRows: rawData,
-      mapping: schema.mapping,
-      headerRowIndex: 2,  // Row 3 (index 2) - detail headers
-      isDataMau: true,
-      rangeStartsAtJ: true
-    });
-
-    return {
-      rows: normalized,
-      schema,
-      headers,
-      rawRows: rawData,
-      allRows: values,
-      sheetId,
-      headerRowIndex: 2  // Row 3 (index 2)
+      headerRowIndex
     };
   }
 
   /**
    * 2. NORMALIZE: Xử lý dữ liệu an toàn, chống trắng trang
-   * ✅ REFACTORED: Smart Task Name mapping với xử lý đặc biệt cho Data Mẫu
    */
   normalizeRows(params: {
     sheetId: string;
@@ -297,15 +205,14 @@ export class GoogleSyncService {
     mapping: ColumnMapping;
     headerRowIndex: number;
     isDataMau?: boolean;
-    rangeStartsAtJ?: boolean; // ✅ NEW: Indicates if range starts at column J
   }): RowNormalized[] {
-    const { sheetId, tab, headers, rawRows, mapping, headerRowIndex, isDataMau, rangeStartsAtJ } = params;
+    const { sheetId, tab, headers, rawRows, mapping, headerRowIndex, isDataMau } = params;
 
     // ✅ VALIDATION: Kiểm tra mapping tồn tại để tránh crash
     if (!mapping || mapping.date === undefined || mapping.time === undefined) {
       console.warn('⚠️ Mapping không đầy đủ, tìm index thủ công...');
 
-      // Tự tìm index nếu mapping bị rỗng (Keyword-based column detection)
+      // Tự tìm index nếu mapping bị rỗng
       const dIdx = headers.findIndex(h =>
         h?.toLowerCase().includes("ngày") ||
         h?.toLowerCase().includes("date")
@@ -321,36 +228,20 @@ export class GoogleSyncService {
         return []; // ✅ Trả về mảng rỗng thay vì crash
       }
 
-      // Tạo mapping thủ công với keyword search
+      // Tạo mapping thủ công
       const manualMapping: ColumnMapping = {
         date: dIdx,
         time: tIdx,
-        person: headers.findIndex(h =>
-          h?.toLowerCase().includes("họ") ||
-          h?.toLowerCase().includes("tên") ||
-          h?.toLowerCase().includes("name")
-        ),
-        task: headers.findIndex(h =>
-          h?.toLowerCase().includes("nhiệm vụ") ||
-          h?.toLowerCase().includes("môn") ||
-          h?.toLowerCase().includes("task") ||
-          h?.toLowerCase().includes("đề tài")
-        ),
-        location: headers.findIndex(h =>
-          h?.toLowerCase().includes("phòng") ||
-          h?.toLowerCase().includes("location") ||
-          h?.toLowerCase().includes("nơi")
-        )
+        person: headers.findIndex(h => h?.toLowerCase().includes("họ") || h?.toLowerCase().includes("tên")),
+        task: headers.findIndex(h => h?.toLowerCase().includes("nhiệm vụ") || h?.toLowerCase().includes("môn")),
+        location: headers.findIndex(h => h?.toLowerCase().includes("phòng"))
       };
-
-      console.log('✅ Auto-detected mapping:', manualMapping);
 
       return this.normalizeRows({
         sheetId, tab, headers, rawRows,
         mapping: manualMapping,
         headerRowIndex,
-        isDataMau,
-        rangeStartsAtJ
+        isDataMau
       });
     }
 
@@ -366,40 +257,17 @@ export class GoogleSyncService {
           const timeStr = row[mapping.time!].toString().trim();
           const { start, end } = parseVNTime(dateStr, timeStr);
 
-          // ✅ SMART TASK NAME HANDLING
+          // Xử lý Task Name
           let taskName = mapping.task !== undefined ?
             (row[mapping.task] || "").toString().trim() :
             "";
 
-          // Xử lý đặc biệt cho Data Mẫu: fallback sang cột E gốc
           if (isDataMau && (!taskName || taskName.toLowerCase() === "unknown")) {
-            // Nếu range starts at J, cột E gốc không có trong dữ liệu hiện tại
-            // Trong trường hợp này, tìm cột có chứa thông tin đề tài
-            const taskColIndex = headers.findIndex(h =>
-              h?.toLowerCase().includes("tên đề tài") ||
-              h?.toLowerCase().includes("task") ||
-              h?.toLowerCase().includes("project name")
-            );
-
-            if (taskColIndex !== -1 && row[taskColIndex]) {
-              taskName = row[taskColIndex].toString().trim();
-              console.log(`✅ Task name found via header search: ${taskName}`);
-            } else {
-              // Fallback cuối cùng: thử tìm trong các cột đầu tiên
-              for (let i = 0; i < Math.min(5, row.length); i++) {
-                const cellValue = (row[i] || "").toString().trim();
-                if (cellValue && cellValue.length > 3 && !cellValue.match(/^\d+$/)) {
-                  taskName = cellValue;
-                  console.log(`✅ Task name found via fallback scan at col ${i}: ${taskName}`);
-                  break;
-                }
-              }
-            }
+            taskName = (row[4] || "Nhiệm vụ").toString().trim();
           }
-
           if (!taskName) taskName = "Nhiệm vụ";
 
-          // ✅ Thu thập tất cả cột vào raw
+          // ✅ Thu thập tất cả 57 cột vào raw
           const rawMap: Record<string, string> = {};
           headers.forEach((h: string, i: number) => {
             rawMap[h || `Col_${i}`] = (row[i] || "").toString().trim();
@@ -429,7 +297,7 @@ export class GoogleSyncService {
   }
 
   /**
-   * 3. SYNC TO CALENDAR: Sửa lỗi TypeScript operator, check xung đột chính xác
+   * 3. SYNC TO CALENDAR: Đồng bộ tuyệt đối với logic Keep/Overwrite thông minh
    */
   async syncToCalendar(rows: RowNormalized[], token: string): Promise<SyncResult> {
     const stats = { created: 0, updated: 0, failed: 0, logs: [] as string[] };
@@ -440,13 +308,12 @@ export class GoogleSyncService {
 
     for (const row of rows) {
       try {
-        // ✅ Tách biệt việc tính toán timestamp để tránh lỗi TypeScript
         const newStartTime = new Date(row.startTime);
         const newEndTime = new Date(row.endTime);
         const nStart = newStartTime.getTime();
         const nEnd = newEndTime.getTime();
 
-        // Lấy ngày hiện tại để tìm events trong cùng ngày
+        // 📅 BƯỚC 1: QUÉT DIỆN RỘNG - Lấy tất cả events trong cùng ngày
         const eventDate = new Date(row.startTime);
         const dayStart = new Date(eventDate);
         dayStart.setHours(0, 0, 0, 0);
@@ -456,55 +323,131 @@ export class GoogleSyncService {
         const tMin = dayStart.toISOString();
         const tMax = dayEnd.toISOString();
 
-        // Fetch existing events
         const searchUrl = `https://www.googleapis.com/calendar/v3/calendars/primary/events?timeMin=${tMin}&timeMax=${tMax}&singleEvents=true`;
         const searchRes = await this.fetchWithAuth(searchUrl, token);
         const existingEvents = searchRes.items || [];
 
-        // ✅ Kiểm tra xung đột với logic rõ ràng
-        const conflicts = existingEvents.filter((e: any) => {
-          if (!e.start || !e.start.dateTime || !e.end || !e.end.dateTime) {
-            return false;
-          }
+        // 🎯 BƯỚC 2: PHÂN LOẠI CÁC SỰ KIỆN
+        const targetSummary = `[${row.task}] - ${row.person}`;
+
+        // Tìm event trùng CHÍNH XÁC (cùng tên, người, giờ)
+        const exactMatch = existingEvents.find((e: any) => {
+          if (!e.start?.dateTime || !e.end?.dateTime) return false;
 
           const existingStart = new Date(e.start.dateTime).getTime();
           const existingEnd = new Date(e.end.dateTime).getTime();
 
-          // Thuật toán overlap: A starts before B ends AND A ends after B starts
-          const hasOverlap = nStart < existingEnd && nEnd > existingStart;
-          return hasOverlap;
+          return e.summary === targetSummary &&
+            existingStart === nStart &&
+            existingEnd === nEnd;
         });
 
-        // Xử lý xung đột nếu có
-        if (conflicts.length > 0) {
-          const names = conflicts.map((e: any) => e.summary).join(', ');
+        // ✅ LOGIC KEEP: Nếu tìm thấy event hoàn toàn giống nhau
+        if (exactMatch) {
+          stats.logs.push(`⏭️ Giữ nguyên: ${row.task} - ${row.person} (đã tồn tại đúng giờ)`);
+          continue; // Bỏ qua, không cần xóa hay tạo lại
+        }
+
+        // Tìm event cùng TÊN nhưng KHÁC GIỜ (Slot Shift)
+        const sameTaskDifferentTime = existingEvents.find((e: any) => {
+          if (!e.start?.dateTime) return false;
+          const existingStart = new Date(e.start.dateTime).getTime();
+          return e.summary === targetSummary && existingStart !== nStart;
+        });
+
+        // Tìm event KHÁC TÊN nhưng TRÙNG GIỜ (Time Conflict)
+        const differentTaskSameTime = existingEvents.filter((e: any) => {
+          if (!e.start?.dateTime || !e.end?.dateTime) return false;
+
+          const existingStart = new Date(e.start.dateTime).getTime();
+          const existingEnd = new Date(e.end.dateTime).getTime();
+
+          // Kiểm tra overlap thời gian
+          const hasOverlap = nStart < existingEnd && nEnd > existingStart;
+          return hasOverlap && e.summary !== targetSummary;
+        });
+
+        // 🔄 LOGIC OVERWRITE: Xử lý các trường hợp cần ghi đè
+        const eventsToDelete: any[] = [];
+
+        if (sameTaskDifferentTime) {
+          // Trường hợp 1: DỊCH CHUYỂN SLOT
+          const oldTime = new Date(sameTaskDifferentTime.start.dateTime).toLocaleTimeString('vi-VN', {
+            hour: '2-digit',
+            minute: '2-digit',
+            timeZone: 'Asia/Ho_Chi_Minh'
+          });
+          const newTime = newStartTime.toLocaleTimeString('vi-VN', {
+            hour: '2-digit',
+            minute: '2-digit',
+            timeZone: 'Asia/Ho_Chi_Minh'
+          });
+
           const userConfirmed = window.confirm(
-            `Trùng lịch với: ${names}\n\nBạn có muốn ghi đè không?`
+            `⚠️ DỊCH CHUYỂN SLOT\n\n` +
+            `Nhiệm vụ: ${row.task}\n` +
+            `Người thực hiện: ${row.person}\n\n` +
+            `Giờ cũ: ${oldTime}\n` +
+            `Giờ mới: ${newTime}\n\n` +
+            `Bạn có muốn cập nhật theo giờ mới từ Sheet không?`
           );
 
           if (!userConfirmed) {
             stats.failed++;
-            stats.logs.push(`❌ Người dùng hủy: ${row.task}`);
+            stats.logs.push(`❌ Người dùng hủy (dịch slot): ${row.task}`);
             continue;
           }
 
-          // Xóa các events conflicting
-          for (const c of conflicts) {
-            try {
-              await this.fetchWithAuth(
-                `https://www.googleapis.com/calendar/v3/calendars/primary/events/${c.id}`,
-                token,
-                { method: 'DELETE' }
-              );
-            } catch (deleteError) {
-              console.warn('⚠️ Không thể xóa event:', deleteError);
-            }
+          eventsToDelete.push(sameTaskDifferentTime);
+          stats.logs.push(`🔄 Dịch slot: ${row.task} (${oldTime} → ${newTime})`);
+        }
+
+        if (differentTaskSameTime.length > 0) {
+          // Trường hợp 2: XUNG ĐỘT CA
+          const conflictNames = differentTaskSameTime.map((e: any) => {
+            const time = new Date(e.start.dateTime).toLocaleTimeString('vi-VN', {
+              hour: '2-digit',
+              minute: '2-digit',
+              timeZone: 'Asia/Ho_Chi_Minh'
+            });
+            return `  • ${e.summary} (${time})`;
+          }).join('\n');
+
+          const userConfirmed = window.confirm(
+            `⚠️ XUNG ĐỘT CA\n\n` +
+            `Lịch mới từ Sheet:\n` +
+            `  • ${targetSummary}\n` +
+            `  • Giờ: ${newStartTime.toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit', timeZone: 'Asia/Ho_Chi_Minh' })}\n\n` +
+            `Trùng với các sự kiện sau:\n${conflictNames}\n\n` +
+            `Bạn có muốn XÓA các sự kiện cũ và TẠO MỚI theo Sheet không?`
+          );
+
+          if (!userConfirmed) {
+            stats.failed++;
+            stats.logs.push(`❌ Người dùng hủy (xung đột): ${row.task}`);
+            continue;
+          }
+
+          eventsToDelete.push(...differentTaskSameTime);
+          stats.logs.push(`⚔️ Ghi đè xung đột: ${row.task} (xóa ${differentTaskSameTime.length} event cũ)`);
+        }
+
+        // 🗑️ XÓA CÁC EVENTS CẦN GHI ĐÈ
+        for (const eventToDelete of eventsToDelete) {
+          try {
+            await this.fetchWithAuth(
+              `https://www.googleapis.com/calendar/v3/calendars/primary/events/${eventToDelete.id}`,
+              token,
+              { method: 'DELETE' }
+            );
+          } catch (deleteError) {
+            console.warn('⚠️ Không thể xóa event:', deleteError);
           }
         }
 
-        // Tạo event mới
+        // ➕ TẠO EVENT MỚI
         const payload = {
-          summary: `[${row.task}] - ${row.person}`,
+          summary: targetSummary,
           location: row.location,
           description: Object.entries(row.raw)
             .map(([k, v]) => `${k}: ${v}`)
@@ -520,7 +463,10 @@ export class GoogleSyncService {
         );
 
         stats.created++;
-        stats.logs.push(`✅ ${row.task}`);
+
+        if (eventsToDelete.length === 0) {
+          stats.logs.push(`✅ Tạo mới: ${row.task} - ${row.person}`);
+        }
 
       } catch (e: any) {
         stats.failed++;

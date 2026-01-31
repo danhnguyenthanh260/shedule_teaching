@@ -1,4 +1,6 @@
 
+import { Timestamp } from 'firebase/firestore';
+
 export type ColumnType = 'date' | 'time' | 'person' | 'task' | 'location' | 'email' | 'unknown';
 
 export interface InferredSchema {
@@ -41,4 +43,30 @@ export interface UserProfile {
   name: string;
   email: string;
   image?: string;
+}
+
+// Firebase Types
+export interface FirebaseColumnMapping {
+  titleCol: number;
+  dateCol: number;
+  startTimeCol: number;
+  endTimeCol: number;
+  locationCol: number;
+}
+
+export interface FirebaseUserMapping {
+  userId: string;
+  fileId: string;
+  mapping: FirebaseColumnMapping;
+  createdAt: Timestamp;
+  updatedAt: Timestamp;
+}
+
+export interface FirebaseSyncRecord {
+  userId: string;
+  fileId: string;
+  eventCount: number;
+  status: 'pending' | 'success' | 'failed';
+  errorMessage?: string;
+  createdAt: Timestamp;
 }

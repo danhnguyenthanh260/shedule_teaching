@@ -409,10 +409,10 @@ const App: React.FC = () => {
       setLoading(false);
     }
   };
-
   const handleSync = async () => {
     const toSync = rows.filter(r => selectedIds.has(r.id));
     if (toSync.length === 0 || !sheetMeta) return;
+
     setSyncing(true);
     setError(null);
 

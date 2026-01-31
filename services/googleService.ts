@@ -449,9 +449,14 @@ export class GoogleSyncService {
    * 
    * ✅ CORS Bypass: Sử dụng hidden iframe để submit form thay vì fetch API
    */
-  async syncToCalendar(rows: RowNormalized[], token: string): Promise<SyncResult> {
+  async syncToCalendar(
+    rows: RowNormalized[],
+    token: string
+  ): Promise<SyncResult> {
+
     const stats = { created: 0, updated: 0, failed: 0, logs: [] as string[] };
 
+<<<<<<< HEAD
     if (!rows || rows.length === 0) {
       stats.logs.push('⚠️ Không có dữ liệu để đồng bộ');
       return stats;

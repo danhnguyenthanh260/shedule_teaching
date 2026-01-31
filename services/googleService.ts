@@ -444,6 +444,130 @@ export class GoogleSyncService {
   }
 
   /**
+   * 2b. FLATTEN ROW: Decompose a row with grouped columns into multiple events
+   * Used for sheets with structure: Row 2 = Groups ('REVIEW 1', 'REVIEW 2'), Row 3 = Details ('Code', 'Date', 'Reviewer')
+   */
+  private flattenRow(params: {
+    sheetId: string;
+    tab: string;
+    rowIndex: number;
+    groupHeaders: string[]; // Row 2: ['REVIEW 1', 'REVIEW 1', ..., 'REVIEW 2', ...]
+    detailHeaders: string[]; // Row 3: ['Code', 'Count', 'Date', 'Slot', 'Room', 'Reviewer', ...]
+    rawRow: string[];
+    headerRowIndex: number;
+  }): RowNormalized[] {
+    const { sheetId, tab, rowIndex, groupHeaders, detailHeaders, rawRow, headerRowIndex } = params;
+    const events: RowNormalized[] = [];
+
+    // Group columns by group name
+    const groups = new Map<string, number[]>(); // 'REVIEW 1' => [0, 1, 2, 3, 4, 5]
+    groupHeaders.forEach((group, colIndex) => {
+      const groupName = (group || '').trim();
+      // Skip generic columns or empty groups
+      if (!groupName || groupName.match(/^Column_?\d+$/i)) return;
+
+      if (!groups.has(groupName)) groups.set(groupName, []);
+      groups.get(groupName)!.push(colIndex);
+    });
+
+    // For each group, extract values and create event
+    groups.forEach((colIndices, groupName) => {
+      try {
+        // Extract values for this group
+        const groupData: Record<string, string> = {};
+        colIndices.forEach(colIndex => {
+          const header = detailHeaders[colIndex];
+          const value = (rawRow[colIndex] || '').toString().trim();
+          if (header && value) {
+            groupData[header] = value;
+          }
+        });
+
+        // Find reviewer, date, slot, room in this group using flexible matching
+        const findValueInGroup = (data: Record<string, string>, keywords: string[]): string => {
+          for (const [key, val] of Object.entries(data)) {
+            const keyLower = key.toLowerCase();
+            if (keywords.some(kw => keyLower.includes(kw.toLowerCase()))) {
+              return val;
+            }
+          }
+          return '';
+        };
+
+        const reviewer = findValueInGroup(groupData, ['reviewer', 'người đánh giá', 'đánh giá']);
+        const date = findValueInGroup(groupData, ['date', 'ngày']);
+        const slot = findValueInGroup(groupData, ['slot', 'tiết', 'time', 'giờ']);
+        const room = findValueInGroup(groupData, ['room', 'phòng']);
+        const code = findValueInGroup(groupData, ['code', 'mã']);
+        const count = findValueInGroup(groupData, ['count', 'số lượng']);
+
+        // Only create event if has reviewer AND date (essential fields)
+        if (reviewer && date) {
+          const { start, end } = parseVNTime(date, slot || '');
+
+          events.push({
+            id: `${sheetId}_${tab}_row${rowIndex + headerRowIndex + 1}_${groupName}`,
+            groupName,
+            sourceRowId: `${sheetId}_${tab}_row${rowIndex + headerRowIndex + 1}`,
+            person: reviewer,
+            date,
+            startTime: start,
+            endTime: end,
+            task: code || count || groupName,
+            location: room || 'Chưa xác định',
+            raw: groupData,
+            status: 'pending'
+          });
+        }
+      } catch (e) {
+        console.warn(`⚠️ Bỏ qua ${groupName} trong dòng ${rowIndex + 1}:`, e);
+      }
+    });
+
+    return events;
+  }
+
+  /**
+   * 2c. NORMALIZE ROWS with optional nested mapping support
+   */
+  normalizeRowsWithGrouping(params: {
+    sheetId: string;
+    tab: string;
+    groupHeaders?: string[]; // Row 2: groups like 'REVIEW 1', 'REVIEW 2'
+    detailHeaders: string[]; // Row 3: detail columns like 'Code', 'Date', 'Reviewer'
+    rawRows: string[][];
+    mapping: ColumnMapping;
+    headerRowIndex: number;
+  }): RowNormalized[] {
+    const { groupHeaders, detailHeaders, rawRows, headerRowIndex } = params;
+
+    // If no groupHeaders, use legacy normalization (1 row = 1 event)
+    if (!groupHeaders || groupHeaders.length === 0) {
+      return this.normalizeRows({
+        ...params,
+        headers: detailHeaders
+      });
+    }
+
+    // Flatten: each row becomes multiple events (one per review group)
+    const allEvents: RowNormalized[] = [];
+    rawRows.forEach((rawRow, rowIndex) => {
+      const events = this.flattenRow({
+        sheetId: params.sheetId,
+        tab: params.tab,
+        rowIndex,
+        groupHeaders,
+        detailHeaders,
+        rawRow,
+        headerRowIndex
+      });
+      allEvents.push(...events);
+    });
+
+    return allEvents;
+  }
+
+  /**
    * 3. SYNC TO CALENDAR: Gửi dữ liệu đến Google Apps Script Web App
    * Apps Script tự động xử lý logic Mirroring (Xóa cũ - Đè mới)
    * 
@@ -456,7 +580,6 @@ export class GoogleSyncService {
 
     const stats = { created: 0, updated: 0, failed: 0, logs: [] as string[] };
 
-<<<<<<< HEAD
     if (!rows || rows.length === 0) {
       stats.logs.push('⚠️ Không có dữ liệu để đồng bộ');
       return stats;

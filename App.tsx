@@ -295,14 +295,28 @@ const App: React.FC = () => {
 
     if (nextMeta) {
       setSheetMeta(nextMeta);
-      const data = googleService.normalizeRows({
-        sheetId: nextMeta.sheetId,
-        tab: nextMeta.tab,
-        headers: detailHeaders,  // Use detail headers for data mapping
-        rawRows,
-        mapping: schema.mapping,
-        headerRowIndex: idx
-      });
+
+      // ✅ Use nested mapping strategy for Review mode (idx=2)
+      // Pass both titleRow (Row 2 groups) and detailHeaders (Row 3 columns)
+      const data = idx === 2 && titleRow.length > 0
+        ? googleService.normalizeRowsWithGrouping({
+          sheetId: nextMeta.sheetId,
+          tab: nextMeta.tab,
+          groupHeaders: titleRow,  // Row 2: 'REVIEW 1', 'REVIEW 2', etc.
+          detailHeaders,           // Row 3: 'Code', 'Date', 'Reviewer', etc.
+          rawRows,
+          mapping: schema.mapping,
+          headerRowIndex: idx
+        })
+        : googleService.normalizeRows({
+          sheetId: nextMeta.sheetId,
+          tab: nextMeta.tab,
+          headers: detailHeaders,  // Use detail headers for data mapping
+          rawRows,
+          mapping: schema.mapping,
+          headerRowIndex: idx
+        });
+
       setRows(data);
       updateSelections(data);
     } else {
@@ -582,6 +596,17 @@ const App: React.FC = () => {
       if (filterKeywords.some(keyword => h.includes(keyword))) {
         targetColIndices.push(index);
       }
+    });
+
+    // 🐛 Debug logging
+    console.log('🔍 Full Table Filter Debug:', {
+      personFilter: f,
+      currentTab: currentTab,
+      filterKeywords,
+      fullTableColumnsCount: fullTableColumns.length,
+      fullTableColumnsPreview: fullTableColumns.slice(0, 10),
+      targetColIndices,
+      targetColNames: targetColIndices.map(i => fullTableColumns[i])
     });
 
     if (targetColIndices.length === 0) return fullRows;
@@ -1063,7 +1088,8 @@ const App: React.FC = () => {
                     </th>
                     {columnMap.date !== undefined && <th className="px-5 py-4">Ngày</th>}
                     {columnMap.time !== undefined && <th className="px-5 py-4">Thời gian</th>}
-                    {columnMap.person !== undefined && <th className="px-5 py-4">Tên đề tài</th>}
+                    <th className="px-5 py-4">Review</th>
+                    {columnMap.person !== undefined && <th className="px-5 py-4">Giảng viên</th>}
                     {columnMap.location !== undefined && <th className="px-5 py-4">Phòng</th>}
                   </tr>
                 </thead>
@@ -1097,6 +1123,15 @@ const App: React.FC = () => {
                           <div className="text-slate-500 text-xs">→ {row.endTime.split('T')[1].substring(0, 5)}</div>
                         </td>
                       )}
+                      <td className="px-5 py-4">
+                        {row.groupName ? (
+                          <span className="inline-block px-3 py-1 bg-indigo-100 text-indigo-700 text-xs font-semibold rounded-full">
+                            {row.groupName}
+                          </span>
+                        ) : (
+                          <span className="text-slate-400 text-xs">-</span>
+                        )}
+                      </td>
                       {columnMap.person !== undefined && (
                         <td className="px-5 py-4 font-semibold text-slate-900 max-w-xs truncate" title={row.person}>
                           {row.person}

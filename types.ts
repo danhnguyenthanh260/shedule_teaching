@@ -19,7 +19,9 @@ export interface ColumnMapping {
 }
 
 export interface RowNormalized {
-  id: string; // sheetRowId
+  id: string; // sheetRowId + reviewGroupName (for flattened events)
+  groupName?: string; // 'REVIEW 1', 'REVIEW 2', etc. (for nested mapping)
+  sourceRowId?: string; // Original sheet row ID (for tracking)
   date: string;
   startTime: string; // ISO string
   endTime: string; // ISO string

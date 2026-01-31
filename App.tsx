@@ -411,7 +411,7 @@ const App: React.FC = () => {
     let dataStartIndex: number;
     let computedTitleRow: string[] = [];  // For Review mode: Row 2 titles (renamed)
 
-    if (idx === 2 || idx === 3) {
+    if (idx === 2) {
       // Review mode: ALWAYS use Row 3 (idx=2) as headers, Row 2 (idx=1) as titles
       detailHeaders = filledHeaders;  // Row 3
       computedTitleRow = rows[idx - 1] ? fillForwardHeaders(rows[idx - 1]) : [];  // Row above header
@@ -468,7 +468,7 @@ const App: React.FC = () => {
     let rawRows = rows.slice(dataStartIndex);
 
     // ✅ Apply column filter to data rows if we filtered headers
-    if ((idx === 2 || idx === 3) && computedTitleRow.length > 0) {
+    if (idx === 2 && computedTitleRow.length > 0) {
       // Review mode: filter based on titleRow (Row 2)
       const unfilteredTitleRow = rows[idx - 1] ? fillForwardHeaders(rows[idx - 1]) : [];
       if (computedTitleRow.length < unfilteredTitleRow.length) {
@@ -521,7 +521,7 @@ const App: React.FC = () => {
 
       // ✅ Use nested mapping strategy for Review mode (idx=2 or idx=3)
       // Pass both computedTitleRow (Row 2 groups) and detailHeaders (Row 3 columns)
-      const data = (idx === 2 || idx === 3) && computedTitleRow.length > 0
+      const data = idx === 2 && computedTitleRow.length > 0
         ? googleService.normalizeRowsWithGrouping({
           sheetId: nextMeta.sheetId,
           tab: nextMeta.tab,
@@ -596,7 +596,7 @@ const App: React.FC = () => {
         console.log(`applyMapping: Got ${rawFromAll.length} raw rows from allRows, dataStartIdx=${dataStartIdx}`);
 
         // ✅ For Review mode (headerRowIndex=2 or 3), reconstruct group headers from Row 2
-        if (sheetMeta.headerRowIndex === 2 || sheetMeta.headerRowIndex === 3) {
+        if (sheetMeta.headerRowIndex === 2) {
           const row2Raw = allRows[1] || []; // Row 2 (index 1) contains group headers
 
           // Fill forward Row 2 to handle merged cells
@@ -662,7 +662,7 @@ const App: React.FC = () => {
 
       console.log('applyMapping proceeding with data...');
       setError(null);
-      const data = (sheetMeta.headerRowIndex === 2 || sheetMeta.headerRowIndex === 3) && groupHeadersToUse.length > 0
+      const data = sheetMeta.headerRowIndex === 2 && groupHeadersToUse.length > 0
         ? googleService.normalizeRowsWithGrouping({
           sheetId: sheetMeta.sheetId,
           tab: sheetMeta.tab,
@@ -698,7 +698,6 @@ const App: React.FC = () => {
           await saveFirebaseMapping(sheetMeta.sheetId, columnMap);
           setToastMessage('✓ Đã lưu mapping cho lần sau');
           console.log('Saved mapping to Firebase:', columnMap);
-          S
         } catch (err) {
           console.error('Failed to save mapping to Firebase:', err);
         }
@@ -1442,8 +1441,7 @@ const App: React.FC = () => {
                     </th>
                     {columnMap.date !== undefined && <th className="px-5 py-4">Ngày</th>}
                     {columnMap.time !== undefined && <th className="px-5 py-4">Thời gian</th>}
-                    <th className="px-5 py-4">Review</th>
-                    {columnMap.person !== undefined && <th className="px-5 py-4">Giảng viên</th>}
+                    {rows.some(r => r.groupName) && <th className="px-5 py-4">Review</th>}
                     {columnMap.location !== undefined && <th className="px-5 py-4">Phòng</th>}
                   </tr>
                 </thead>
@@ -1477,18 +1475,15 @@ const App: React.FC = () => {
                           <div className="text-slate-500 text-xs">→ {row.endTime.split('T')[1].substring(0, 5)}</div>
                         </td>
                       )}
-                      <td className="px-5 py-4">
-                        {row.groupName ? (
-                          <span className="inline-block px-3 py-1 bg-indigo-100 text-indigo-700 text-xs font-semibold rounded-full">
-                            {row.groupName}
-                          </span>
-                        ) : (
-                          <span className="text-slate-400 text-xs">-</span>
-                        )}
-                      </td>
-                      {columnMap.person !== undefined && (
-                        <td className="px-5 py-4 font-semibold text-slate-900 max-w-xs truncate" title={row.person}>
-                          {row.person}
+                      {rows.some(r => r.groupName) && (
+                        <td className="px-5 py-4">
+                          {row.groupName ? (
+                            <span className="inline-block px-3 py-1 bg-indigo-100 text-indigo-700 text-xs font-semibold rounded-full">
+                              {row.groupName}
+                            </span>
+                          ) : (
+                            <span className="text-slate-400 text-xs">-</span>
+                          )}
                         </td>
                       )}
                       {columnMap.location !== undefined && (

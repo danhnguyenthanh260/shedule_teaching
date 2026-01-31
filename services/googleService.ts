@@ -501,15 +501,16 @@ export class GoogleSyncService {
         const code = findValueInGroup(groupData, ['code', 'mã']);
         const count = findValueInGroup(groupData, ['count', 'số lượng']);
 
-        // Only create event if has reviewer AND date (essential fields)
-        if (reviewer && date) {
+        // ✅ FIX: Only require date (not reviewer) to create event
+        // Reviewer can be empty - many review slots don't have reviewers assigned yet
+        if (date && date.trim() !== '') {
           const { start, end } = parseVNTime(date, slot || '');
 
           events.push({
             id: `${sheetId}_${tab}_row${rowIndex + headerRowIndex + 1}_${groupName}`,
             groupName,
             sourceRowId: `${sheetId}_${tab}_row${rowIndex + headerRowIndex + 1}`,
-            person: reviewer,
+            person: reviewer || 'Chưa phân công', // ✅ Default value if reviewer not assigned
             date,
             startTime: start,
             endTime: end,

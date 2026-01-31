@@ -35,10 +35,19 @@ export const FirebaseProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     const unsubscribe = onAuthStateChanged(auth, (currentUser) => {
       setUser(currentUser);
       setLoading(false);
+      
+      // If user is logged in and we don't have access token, try to restore from localStorage
+      if (currentUser && !accessToken) {
+        const stored = localStorage.getItem('google_access_token');
+        if (stored) {
+          setAccessToken(stored);
+          console.log('✓ Restored access token from localStorage');
+        }
+      }
     });
 
     return unsubscribe;
-  }, []);
+  }, [accessToken]);
 
   const loginWithGoogle = async () => {
     try {

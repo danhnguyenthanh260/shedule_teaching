@@ -36,6 +36,7 @@ const App: React.FC = () => {
   const [toastMessage, setToastMessage] = useState<string | null>(null);
   const [fullHeaders, setFullHeaders] = useState<string[]>([]);  // For group detection
   const [fullDetailHeaders, setFullDetailHeaders] = useState<string[]>([]);  // Actual column names for tier 2
+  const [titleRow, setTitleRow] = useState<string[]>([]);  // Row 2 groups for Review mode
   const [fullRows, setFullRows] = useState<string[][]>([]);
   const [allRows, setAllRows] = useState<string[][]>([]);
   const [showFullTable, setShowFullTable] = useState(false);
@@ -283,6 +284,7 @@ const App: React.FC = () => {
     setHeaderRowIndex(idx);
     setFullHeaders(headers);  // For group detection
     setFullDetailHeaders(detailHeaders);  // Actual column names for UI tier 2
+    setTitleRow(titleRow);  // Save titleRow for applyMapping
     setFullRows(rawRows);
     setColumnMap({
       date: schema.mapping.date,
@@ -298,6 +300,10 @@ const App: React.FC = () => {
 
       // ✅ Use nested mapping strategy for Review mode (idx=2)
       // Pass both titleRow (Row 2 groups) and detailHeaders (Row 3 columns)
+      console.log(`🔍 Checking grouping condition: idx=${idx}, titleRow.length=${titleRow.length}`);
+      console.log(`🔍 titleRow:`, titleRow.slice(0, 5));
+      console.log(`🔍 detailHeaders:`, detailHeaders.slice(0, 5));
+
       const data = idx === 2 && titleRow.length > 0
         ? googleService.normalizeRowsWithGrouping({
           sheetId: nextMeta.sheetId,
@@ -317,8 +323,35 @@ const App: React.FC = () => {
           headerRowIndex: idx
         });
 
-      setRows(data);
-      updateSelections(data);
+      console.log(`✅ Used ${idx === 2 && titleRow.length > 0 ? 'normalizeRowsWithGrouping' : 'normalizeRows'}, generated ${data.length} events`);
+
+      // ✅ Sort by date first (30/1, 31/1, 1/2...), then by time within same date
+      const sortedData = data.sort((a, b) => {
+        // Parse dates from DD/MM/YYYY format
+        const parseDate = (dateStr: string) => {
+          const parts = dateStr.split('/');
+          if (parts.length === 3) {
+            const day = parseInt(parts[0], 10);
+            const month = parseInt(parts[1], 10);
+            const year = parseInt(parts[2], 10);
+            return new Date(year, month - 1, day);
+          }
+          return new Date(dateStr);
+        };
+
+        const dateA = parseDate(a.date);
+        const dateB = parseDate(b.date);
+        const dateDiff = dateA.getTime() - dateB.getTime();
+
+        // If different dates, sort by date
+        if (dateDiff !== 0) return dateDiff;
+
+        // Same date, sort by startTime
+        return new Date(a.startTime).getTime() - new Date(b.startTime).getTime();
+      });
+
+      setRows(sortedData);
+      updateSelections(sortedData);
     } else {
       setRows([]);
       setSelectedIds(new Set());
@@ -346,24 +379,61 @@ const App: React.FC = () => {
       }
       console.log('applyMapping proceeding with data...');
       setError(null);
-      const data = googleService.normalizeRows({
-        sheetId: sheetMeta.sheetId,
-        tab: sheetMeta.tab,
-        headers: fullHeaders,
-        rawRows: fullRows,
-        mapping: columnMap,
-        headerRowIndex: sheetMeta.headerRowIndex
-      });
+
+      // ✅ Check if grouping is needed (same logic as applyHeaderRow)
+      console.log(`🔍 applyMapping: Checking grouping - headerRowIndex=${sheetMeta.headerRowIndex}, titleRow.length=${titleRow.length}`);
+      const data = sheetMeta.headerRowIndex === 2 && titleRow.length > 0
+        ? googleService.normalizeRowsWithGrouping({
+          sheetId: sheetMeta.sheetId,
+          tab: sheetMeta.tab,
+          groupHeaders: titleRow,  // Use saved titleRow
+          detailHeaders: fullDetailHeaders,  // Use saved detail headers
+          rawRows: fullRows,
+          mapping: columnMap,
+          headerRowIndex: sheetMeta.headerRowIndex
+        })
+        : googleService.normalizeRows({
+          sheetId: sheetMeta.sheetId,
+          tab: sheetMeta.tab,
+          headers: fullHeaders,
+          rawRows: fullRows,
+          mapping: columnMap,
+          headerRowIndex: sheetMeta.headerRowIndex
+        });
+
+      console.log(`✅ applyMapping: Used ${sheetMeta.headerRowIndex === 2 && titleRow.length > 0 ? 'normalizeRowsWithGrouping' : 'normalizeRows'}, generated ${data.length} events`);
       console.log('Normalized data:', data.length, 'rows');
       console.log('First row:', data[0]);
       if (data.length === 0) {
         setError('Không tìm thấy dòng nào hợp lệ với ngày và thời gian');
       }
-      console.log('Setting rows state to:', data);
-      setRows(data);
+
+      // ✅ Sort by date first, then time (same as applyHeaderRow)
+      const sortedData = data.sort((a, b) => {
+        const parseDate = (dateStr: string) => {
+          const parts = dateStr.split('/');
+          if (parts.length === 3) {
+            const day = parseInt(parts[0], 10);
+            const month = parseInt(parts[1], 10);
+            const year = parseInt(parts[2], 10);
+            return new Date(year, month - 1, day);
+          }
+          return new Date(dateStr);
+        };
+
+        const dateA = parseDate(a.date);
+        const dateB = parseDate(b.date);
+        const dateDiff = dateA.getTime() - dateB.getTime();
+
+        if (dateDiff !== 0) return dateDiff;
+        return new Date(a.startTime).getTime() - new Date(b.startTime).getTime();
+      });
+
+      console.log('Setting rows state to:', sortedData);
+      setRows(sortedData);
       setPersonFilter(''); // Reset filter khi apply mapping
       console.log('After setRows, rows state should be updated');
-      updateSelections(data);
+      updateSelections(sortedData);
 
       // 💾 Save mapping to Firebase for next time
       if (firebaseUser && sheetMeta) {
@@ -483,14 +553,17 @@ const App: React.FC = () => {
       setResult(res);
 
       // 💾 Save sync history to Firestore (non-blocking)
-      if (firebaseUser) {
+      if (firebaseUser && sheetMeta) {
         try {
-          await syncHistoryService.saveSyncResult(
+          const { firestoreSyncHistoryService } = await import('./services/firestoreSyncHistoryService');
+          await firestoreSyncHistoryService.saveSyncResult(
+            firebaseUser.uid,
             sheetMeta.sheetId,
             sheetMeta.tab,
-            toSync,
-            res,
-            accessToken || ''
+            toSync.length,
+            res.created,
+            res.updated,
+            res.failed
           );
         } catch (historyError) {
           console.error('Failed to save sync history:', historyError);
@@ -537,7 +610,13 @@ const App: React.FC = () => {
 
       // Fallback to person/email if no matching column found
       return r.person.toLowerCase().includes(f) || r.email?.toLowerCase().includes(f);
-    });
+    })
+      // ✅ Sort by startTime (chronological order: date + time)
+      .sort((a, b) => {
+        const timeA = new Date(a.startTime).getTime();
+        const timeB = new Date(b.startTime).getTime();
+        return timeA - timeB;
+      });
   }, [rows, personFilter, sheetMeta]);
 
   const handleMapChange = (key: keyof ColumnMapping) => (e: React.ChangeEvent<HTMLSelectElement>) => {
@@ -596,17 +675,6 @@ const App: React.FC = () => {
       if (filterKeywords.some(keyword => h.includes(keyword))) {
         targetColIndices.push(index);
       }
-    });
-
-    // 🐛 Debug logging
-    console.log('🔍 Full Table Filter Debug:', {
-      personFilter: f,
-      currentTab: currentTab,
-      filterKeywords,
-      fullTableColumnsCount: fullTableColumns.length,
-      fullTableColumnsPreview: fullTableColumns.slice(0, 10),
-      targetColIndices,
-      targetColNames: targetColIndices.map(i => fullTableColumns[i])
     });
 
     if (targetColIndices.length === 0) return fullRows;
@@ -690,11 +758,15 @@ const App: React.FC = () => {
   }
 
   return (
-    <Layout user={user} onLogout={async () => {
-      await logout();
-      setUser(null);
-      setAccessToken(null);
-    }}>
+    <Layout
+      user={user}
+      userId={firebaseUser?.uid || ''}
+      onLogout={async () => {
+        await logout();
+        setUser(null);
+        setAccessToken(null);
+      }}
+    >
       <div className="max-w-7xl mx-auto space-y-6 pb-12">
         {/* Input Section */}
         <div className="bg-white rounded-2xl border border-slate-200 shadow-sm hover:shadow-md transition-shadow duration-300 overflow-hidden">
@@ -1074,8 +1146,8 @@ const App: React.FC = () => {
             </div>
             <div className="overflow-x-auto">
               <table className="w-full text-left text-sm">
-                <thead className="sticky top-0 z-10">
-                  <tr className="bg-gradient-to-r from-slate-50 to-slate-50 text-xs font-semibold text-slate-600 uppercase tracking-wider border-b border-slate-200">
+                <thead className="sticky top-0 z-20 bg-gradient-to-r from-slate-50 to-slate-50">
+                  <tr className="text-xs font-semibold text-slate-600 uppercase tracking-wider border-b border-slate-200">
                     <th className="px-5 py-4 text-center w-12">
                       <input
                         type="checkbox"

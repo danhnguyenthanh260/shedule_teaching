@@ -1005,13 +1005,17 @@ const App: React.FC = () => {
                   }
                 }}
                 disabled={loadingMode !== null}
-                className="flex-1 py-2.5 px-3 bg-blue-600 hover:bg-blue-700 text-white font-semibold rounded-lg shadow-md hover:shadow-lg transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed active:scale-95 text-sm"
-                title="Cấu trúc phẳng: Header dòng 1, range A1:BE"
-              >
-                {loadingMode === 'test1' ? (
-                  <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin mx-auto"></div>
-                ) : '📄 test1'}
-              </button>
+                  className="flex-1 h-[42px] flex items-center justify-center bg-blue-600 hover:bg-blue-700 text-white font-semibold rounded-lg shadow-md hover:shadow-lg transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed active:scale-95 text-sm"
+                  title="Cấu trúc phẳng: Header dòng 1, range A1:BE"
+                >
+                  {loadingMode === 'test1' ? (
+                    <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin"></div>
+                  ) : (
+                    <span className="flex items-center gap-1">
+                      <span>📄</span> test1
+                    </span>
+                  )}
+                </button>
               <button
                 onClick={async () => {
                   if (!sheetUrl || !accessToken || loadingMode) return;
@@ -1036,13 +1040,17 @@ const App: React.FC = () => {
                   }
                 }}
                 disabled={loadingMode !== null}
-                className="flex-1 py-2.5 px-3 bg-purple-600 hover:bg-purple-700 text-white font-semibold rounded-lg shadow-md hover:shadow-lg transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed active:scale-95 text-sm"
-                title="Cấu trúc phức tạp: Header dòng 3, range J1:BE"
-              >
-                {loadingMode === 'review' ? (
-                  <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin mx-auto"></div>
-                ) : '📊 Review'}
-              </button>
+                  className="flex-1 h-[42px] flex items-center justify-center bg-purple-600 hover:bg-purple-700 text-white font-semibold rounded-lg shadow-md hover:shadow-lg transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed active:scale-95 text-sm"
+                  title="Cấu trúc phức tạp: Header dòng 3, range J1:BE"
+                >
+                  {loadingMode === 'review' ? (
+                    <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin"></div>
+                  ) : (
+                    <span className="flex items-center gap-1">
+                      <span>📊</span> Review
+                    </span>
+                  )}
+                </button>
             </div>
           </div>
         </div>
@@ -1056,7 +1064,7 @@ const App: React.FC = () => {
               </div>
               <button
                 onClick={applyMapping}
-                className="px-5 py-2 bg-indigo-600 hover:bg-indigo-700 text-white font-semibold rounded-lg shadow-md hover:shadow-lg transition-all duration-200 text-sm active:scale-95"
+                className="py-2.5 px-3 bg-indigo-600 hover:bg-indigo-700 text-white font-semibold rounded-lg shadow-md hover:shadow-lg transition-all duration-200 text-sm active:scale-95"
               >
                 ✓ Áp dụng
               </button>

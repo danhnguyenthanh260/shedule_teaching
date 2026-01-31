@@ -1441,8 +1441,7 @@ const App: React.FC = () => {
                     </th>
                     {columnMap.date !== undefined && <th className="px-5 py-4">Ngày</th>}
                     {columnMap.time !== undefined && <th className="px-5 py-4">Thời gian</th>}
-                    <th className="px-5 py-4">Review</th>
-                    {columnMap.person !== undefined && <th className="px-5 py-4">Giảng viên</th>}
+                    {rows.some(r => r.groupName) && <th className="px-5 py-4">Review</th>}
                     {columnMap.location !== undefined && <th className="px-5 py-4">Phòng</th>}
                   </tr>
                 </thead>
@@ -1476,18 +1475,15 @@ const App: React.FC = () => {
                           <div className="text-slate-500 text-xs">→ {row.endTime.split('T')[1].substring(0, 5)}</div>
                         </td>
                       )}
-                      <td className="px-5 py-4">
-                        {row.groupName ? (
-                          <span className="inline-block px-3 py-1 bg-indigo-100 text-indigo-700 text-xs font-semibold rounded-full">
-                            {row.groupName}
-                          </span>
-                        ) : (
-                          <span className="text-slate-400 text-xs">-</span>
-                        )}
-                      </td>
-                      {columnMap.person !== undefined && (
-                        <td className="px-5 py-4 font-semibold text-slate-900 max-w-xs truncate" title={row.person}>
-                          {row.person}
+                      {rows.some(r => r.groupName) && (
+                        <td className="px-5 py-4">
+                          {row.groupName ? (
+                            <span className="inline-block px-3 py-1 bg-indigo-100 text-indigo-700 text-xs font-semibold rounded-full">
+                              {row.groupName}
+                            </span>
+                          ) : (
+                            <span className="text-slate-400 text-xs">-</span>
+                          )}
                         </td>
                       )}
                       {columnMap.location !== undefined && (

@@ -271,6 +271,8 @@ const App: React.FC = () => {
   // Auto-load sheet when URL and accessToken are available (e.g., after F5 refresh)
   // Chỉ chạy khi chưa có persisted data
   useEffect(() => {
+    if (hasAutoLoaded.current) return; // ✅ Prevent duplicate auto-load
+    
     if (
       sheetUrl &&
       accessToken &&
@@ -279,6 +281,7 @@ const App: React.FC = () => {
       fullHeaders.length === 0 && // Chưa có persisted headers
       !sheetMeta // Chưa có persisted meta
     ) {
+      hasAutoLoaded.current = true; // ✅ Mark as loaded
       console.log('Auto-loading sheet after refresh (no persisted data)...');
       // Trigger Review mode load (more common)
       setTimeout(() => {
@@ -850,21 +853,24 @@ const App: React.FC = () => {
     if (!personFilter || personFilter.toLowerCase() === 'all') return rows;
     const f = personFilter.toLowerCase();
 
-    // 🔍 Detect sheet name to determine filter columns
-    const currentTab = sheetMeta?.tab?.toLowerCase() || '';
+    // ✅ Detect filter columns based on ACTUAL HEADERS (not sheet name)
     let filterKeywords: string[] = [];
-
-    // ✅ "Data mẫu" sheets (Sheet1, Review1) → Filter by "Reviewer"
-    if (currentTab.includes('sheet1') || currentTab.includes('review')) {
+    
+    // Check what types of headers exist in the data
+    const headerStr = fullHeaders.join('|').toLowerCase();
+    
+    if (headerStr.includes('reviewer') || headerStr.includes('đánh giá')) {
+      // Sheet has "Reviewer" columns → Filter by reviewer
       filterKeywords = ['reviewer', 'người đánh giá', 'đánh giá'];
-    }
-    // ✅ "test1" sheet → Filter by "Thành viên hội đồng"
-    else if (currentTab.includes('test')) {
+    } else if (headerStr.includes('thành viên') || headerStr.includes('hội đồng')) {
+      // Sheet has "Thành viên" columns → Filter by committee member
       filterKeywords = ['thành viên', 'hội đồng', 'member'];
-    }
-    // ⚠️ Fallback: Filter by "GVHD" (old behavior)
-    else {
+    } else if (headerStr.includes('gvhd') || headerStr.includes('giảng viên')) {
+      // Sheet has "GVHD" columns → Filter by instructor
       filterKeywords = ['gvhd', 'giảng viên', 'hướng dẫn'];
+    } else {
+      // ✅ Fallback: Try all person-related keywords
+      filterKeywords = ['reviewer', 'người đánh giá', 'đánh giá', 'thành viên', 'hội đồng', 'gvhd', 'giảng viên', 'person'];
     }
 
     return rows.filter(r => {
@@ -886,7 +892,7 @@ const App: React.FC = () => {
         const timeB = new Date(b.startTime).getTime();
         return timeA - timeB;
       });
-  }, [rows, personFilter, sheetMeta]);
+  }, [rows, personFilter, fullHeaders]);
 
   const handleMapChange = (key: keyof ColumnMapping) => (e: React.ChangeEvent<HTMLSelectElement>) => {
     const value = e.target.value;
@@ -924,16 +930,19 @@ const App: React.FC = () => {
 
     const f = personFilter.toLowerCase();
 
-    // 🔍 Detect sheet name to determine filter columns (same as filteredRows)
-    const currentTab = sheetMeta?.tab?.toLowerCase() || '';
+    // ✅ Detect filter columns based on ACTUAL HEADERS (not sheet name)
     let filterKeywords: string[] = [];
-
-    if (currentTab.includes('sheet1') || currentTab.includes('review')) {
+    
+    const headerStr = fullTableColumns.join('|').toLowerCase();
+    
+    if (headerStr.includes('reviewer') || headerStr.includes('đánh giá')) {
       filterKeywords = ['reviewer', 'người đánh giá', 'đánh giá'];
-    } else if (currentTab.includes('test')) {
+    } else if (headerStr.includes('thành viên') || headerStr.includes('hội đồng')) {
       filterKeywords = ['thành viên', 'hội đồng', 'member'];
-    } else {
+    } else if (headerStr.includes('gvhd') || headerStr.includes('giảng viên')) {
       filterKeywords = ['gvhd', 'giảng viên', 'hướng dẫn'];
+    } else {
+      filterKeywords = ['reviewer', 'người đánh giá', 'đánh giá', 'thành viên', 'hội đồng', 'gvhd', 'giảng viên', 'person'];
     }
 
     const targetColIndices: number[] = [];

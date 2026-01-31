@@ -57,9 +57,11 @@ export class GoogleSyncService {
       dataMauScore += 30;
       console.log("✓ Data Mẫu signal: Found 'Hạng mục/GVHD/CVHD' at row 1 (+30)");
     }
-    if (row2Str.includes("review 1") || row2Str.includes("review 2")) {
+    // ✅ Check row 1 OR row 2 for REVIEW keywords (flexible detection)
+    if (row1Str.includes("review 1") || row1Str.includes("review 2") ||
+        row2Str.includes("review 1") || row2Str.includes("review 2")) {
       dataMauScore += 40;
-      console.log("✓ Data Mẫu signal: Found 'Review' at row 2 (+40)");
+      console.log("✓ Data Mẫu signal: Found 'Review' at row 1 or 2 (+40)");
     }
     if (row3Str.includes("date") || row3Str.includes("day of week") || row3Str.includes("slot")) {
       dataMauScore += 30;

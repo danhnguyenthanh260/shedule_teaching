@@ -6,18 +6,20 @@ interface Props {
     isOpen: boolean;
     onClose: () => void;
     userId: string;
+    refreshTrigger?: number; // Trigger để force refresh khi có sync mới
 }
 
-const SyncHistoryModal: React.FC<Props> = ({ isOpen, onClose, userId }) => {
+const SyncHistoryModal: React.FC<Props> = ({ isOpen, onClose, userId, refreshTrigger }) => {
     const [history, setHistory] = useState<SyncHistoryRecord[]>([]);
     const [loading, setLoading] = useState(false);
     const [error, setError] = useState<string | null>(null);
 
+    // Load history khi modal mở hoặc khi có refreshTrigger thay đổi
     useEffect(() => {
         if (isOpen && userId) {
             loadHistory();
         }
-    }, [isOpen, userId]);
+    }, [isOpen, userId, refreshTrigger]);
 
     const loadHistory = async () => {
         setLoading(true);

@@ -8,9 +8,10 @@ interface Props {
   user: UserProfile;
   userId: string; // Firebase user ID for history lookup
   onLogout: () => void;
+  syncHistoryRefresh?: number; // Trigger để refresh history modal
 }
 
-const Layout: React.FC<Props> = ({ children, user, userId, onLogout }) => {
+const Layout: React.FC<Props> = ({ children, user, userId, onLogout, syncHistoryRefresh }) => {
   const [showHistoryModal, setShowHistoryModal] = useState(false);
 
   return (
@@ -58,6 +59,7 @@ const Layout: React.FC<Props> = ({ children, user, userId, onLogout }) => {
         isOpen={showHistoryModal}
         onClose={() => setShowHistoryModal(false)}
         userId={userId}
+        refreshTrigger={syncHistoryRefresh}
       />
     </div>
   );

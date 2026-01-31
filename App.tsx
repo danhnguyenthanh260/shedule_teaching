@@ -10,6 +10,7 @@ import { useFirebase } from './src/context/FirebaseContext';
 import { GoogleLoginButton, UserProfile as FirebaseUserProfile } from './src/components/FirebaseAuth';
 import { useFirebaseMapping } from './src/hooks/useFirebaseMapping';
 import { syncEventsToCalendar } from './src/services/appsScriptService';
+import { persistStateService } from './lib/persistState';
 
 // Khai báo kiểu cho SDK Google
 declare global {
@@ -34,9 +35,9 @@ const App: React.FC = () => {
   const [result, setResult] = useState<SyncResult | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [toastMessage, setToastMessage] = useState<string | null>(null);
+  const [syncHistoryRefresh, setSyncHistoryRefresh] = useState(0); // Trigger để refresh history modal
   const [fullHeaders, setFullHeaders] = useState<string[]>([]);  // For group detection
   const [fullDetailHeaders, setFullDetailHeaders] = useState<string[]>([]);  // Actual column names for tier 2
-  const [titleRow, setTitleRow] = useState<string[]>([]);  // Row 2 groups for Review mode
   const [fullRows, setFullRows] = useState<string[][]>([]);
   const [allRows, setAllRows] = useState<string[][]>([]);
   const [showFullTable, setShowFullTable] = useState(false);
@@ -60,6 +61,121 @@ const App: React.FC = () => {
       return () => clearTimeout(timer);
     }
   }, [toastMessage]);
+
+  // ✅ Restore toàn bộ state từ localStorage on mount
+  useEffect(() => {
+    const restored = persistStateService.restoreState();
+    
+    if (restored.sheetUrl) {
+      setSheetUrl(restored.sheetUrl);
+      console.log('✓ Restored sheet URL:', restored.sheetUrl);
+    }
+    
+    if (restored.tabName) {
+      setTabName(restored.tabName);
+      console.log('✓ Restored tab name:', restored.tabName);
+    }
+    
+    if (restored.sheetMeta) {
+      setSheetMeta(restored.sheetMeta);
+      console.log('✓ Restored sheet meta:', restored.sheetMeta);
+    }
+    
+    if (restored.headerRowIndex !== undefined) {
+      setHeaderRowIndex(restored.headerRowIndex);
+      console.log('✓ Restored header row index:', restored.headerRowIndex);
+    }
+    
+    if (restored.columnMap) {
+      setColumnMap(restored.columnMap);
+      console.log('✓ Restored column map:', restored.columnMap);
+    }
+    
+    if (restored.personFilter) {
+      setPersonFilter(restored.personFilter);
+      console.log('✓ Restored person filter:', restored.personFilter);
+    }
+    
+    if (restored.allRows && restored.allRows.length > 0) {
+      setAllRows(restored.allRows);
+      console.log('✓ Restored all rows:', restored.allRows.length);
+    }
+    
+    if (restored.fullHeaders && restored.fullHeaders.length > 0) {
+      setFullHeaders(restored.fullHeaders);
+      console.log('✓ Restored full headers:', restored.fullHeaders.length);
+    }
+    
+    if (restored.fullDetailHeaders && restored.fullDetailHeaders.length > 0) {
+      setFullDetailHeaders(restored.fullDetailHeaders);
+      console.log('✓ Restored full detail headers:', restored.fullDetailHeaders.length);
+    }
+    
+    if (restored.fullRows && restored.fullRows.length > 0) {
+      setFullRows(restored.fullRows);
+      console.log('✓ Restored full rows:', restored.fullRows.length);
+    }
+    
+    if (restored.selectedIds && restored.selectedIds.length > 0) {
+      setSelectedIds(new Set(restored.selectedIds));
+      console.log('✓ Restored selected IDs:', restored.selectedIds.length);
+    }
+  }, []);
+
+  // ✅ Auto-save state khi thay đổi
+  useEffect(() => {
+    persistStateService.saveState({ sheetUrl });
+  }, [sheetUrl]);
+
+  useEffect(() => {
+    persistStateService.saveState({ tabName });
+  }, [tabName]);
+
+  useEffect(() => {
+    persistStateService.saveState({ sheetMeta });
+  }, [sheetMeta]);
+
+  useEffect(() => {
+    persistStateService.saveState({ headerRowIndex });
+  }, [headerRowIndex]);
+
+  useEffect(() => {
+    persistStateService.saveState({ columnMap });
+  }, [columnMap]);
+
+  useEffect(() => {
+    persistStateService.saveState({ personFilter });
+  }, [personFilter]);
+
+  useEffect(() => {
+    if (allRows.length > 0) {
+      persistStateService.saveState({ allRows });
+    }
+  }, [allRows]);
+
+  useEffect(() => {
+    if (fullHeaders.length > 0) {
+      persistStateService.saveState({ fullHeaders });
+    }
+  }, [fullHeaders]);
+
+  useEffect(() => {
+    if (fullDetailHeaders.length > 0) {
+      persistStateService.saveState({ fullDetailHeaders });
+    }
+  }, [fullDetailHeaders]);
+
+  useEffect(() => {
+    if (fullRows.length > 0) {
+      persistStateService.saveState({ fullRows });
+    }
+  }, [fullRows]);
+
+  useEffect(() => {
+    if (selectedIds.size > 0) {
+      persistStateService.saveState({ selectedIds: Array.from(selectedIds) });
+    }
+  }, [selectedIds]);
 
   // Sync Firebase user with local user state and get access token
   useEffect(() => {
@@ -89,6 +205,79 @@ const App: React.FC = () => {
       console.log('Auto-loaded saved mapping:', savedMapping);
     }
   }, [savedMapping, sheetMeta?.sheetId]);
+
+  // ✅ Tái tạo rows từ persisted data khi có đủ thông tin (sau F5)
+  useEffect(() => {
+    if (
+      sheetMeta &&
+      fullHeaders.length > 0 &&
+      fullRows.length > 0 &&
+      columnMap.date !== undefined &&
+      columnMap.time !== undefined &&
+      rows.length === 0 && // Chỉ tái tạo khi rows chưa có
+      !loading // Không tái tạo khi đang load
+    ) {
+      console.log('🔄 Recreating rows from persisted data...');
+      try {
+        const recreatedRows = googleService.normalizeRows({
+          sheetId: sheetMeta.sheetId,
+          tab: sheetMeta.tab,
+          headers: fullHeaders,
+          rawRows: fullRows,
+          mapping: columnMap,
+          headerRowIndex: sheetMeta.headerRowIndex
+        });
+        
+        if (recreatedRows.length > 0) {
+          setRows(recreatedRows);
+          updateSelections(recreatedRows);
+          console.log(`✅ Recreated ${recreatedRows.length} rows from persisted data`);
+          setToastMessage(`✓ Đã khôi phục ${recreatedRows.length} dòng dữ liệu`);
+        }
+      } catch (err: any) {
+        console.error('Error recreating rows:', err);
+        setError(`Không thể khôi phục dữ liệu: ${err.message}`);
+      }
+    }
+  }, [sheetMeta, fullHeaders, fullRows, columnMap, rows.length, loading]);
+
+  // Auto-load sheet when URL and accessToken are available (e.g., after F5 refresh)
+  // Chỉ chạy khi chưa có persisted data
+  useEffect(() => {
+    if (
+      sheetUrl &&
+      accessToken &&
+      !loadingMode &&
+      rows.length === 0 &&
+      fullHeaders.length === 0 && // Chưa có persisted headers
+      !sheetMeta // Chưa có persisted meta
+    ) {
+      console.log('Auto-loading sheet after refresh (no persisted data)...');
+      // Trigger Review mode load (more common)
+      setTimeout(() => {
+        setLoadingMode('review');
+        setLoading(true);
+        setResult(null);
+        setError(null);
+        
+        (async () => {
+          try {
+            const { rows: data, headers, rawRows, allRows: fetchedRows, schema, sheetId, headerRowIndex } = await googleService.loadSheetReview(sheetUrl, tabName, accessToken);
+            setAllRows(fetchedRows || []);
+            setShowFullTable(false);
+            setSheetMeta({ sheetId, tab: tabName, headerRowIndex });
+            applyHeaderRow(headerRowIndex, fetchedRows, { sheetId, tab: tabName });
+          } catch (err: any) {
+            console.error('Auto-load error:', err);
+            setError(err.message);
+          } finally {
+            setLoading(false);
+            setLoadingMode(null);
+          }
+        })();
+      }, 500); // Small delay to ensure state is settled
+    }
+  }, [sheetUrl, accessToken, loadingMode, rows.length, fullHeaders.length, sheetMeta]);
 
   const updateSelections = (data: RowNormalized[]) => {
     const filterLower = personFilter.toLowerCase();
@@ -284,7 +473,6 @@ const App: React.FC = () => {
     setHeaderRowIndex(idx);
     setFullHeaders(headers);  // For group detection
     setFullDetailHeaders(detailHeaders);  // Actual column names for UI tier 2
-    setTitleRow(titleRow);  // Save titleRow for applyMapping
     setFullRows(rawRows);
     setColumnMap({
       date: schema.mapping.date,
@@ -300,8 +488,6 @@ const App: React.FC = () => {
 
       // ✅ Use nested mapping strategy for Review mode (idx=2)
       // Pass both titleRow (Row 2 groups) and detailHeaders (Row 3 columns)
-
-
       const data = idx === 2 && titleRow.length > 0
         ? googleService.normalizeRowsWithGrouping({
           sheetId: nextMeta.sheetId,
@@ -321,31 +507,11 @@ const App: React.FC = () => {
           headerRowIndex: idx
         });
 
-
-
-      // ✅ Sort by date first (30/1, 31/1, 1/2...), then by time within same date
+      // ✅ Sort by startTime (chronological order) before setting rows
       const sortedData = data.sort((a, b) => {
-        // Parse dates from DD/MM/YYYY format
-        const parseDate = (dateStr: string) => {
-          const parts = dateStr.split('/');
-          if (parts.length === 3) {
-            const day = parseInt(parts[0], 10);
-            const month = parseInt(parts[1], 10);
-            const year = parseInt(parts[2], 10);
-            return new Date(year, month - 1, day);
-          }
-          return new Date(dateStr);
-        };
-
-        const dateA = parseDate(a.date);
-        const dateB = parseDate(b.date);
-        const dateDiff = dateA.getTime() - dateB.getTime();
-
-        // If different dates, sort by date
-        if (dateDiff !== 0) return dateDiff;
-
-        // Same date, sort by startTime
-        return new Date(a.startTime).getTime() - new Date(b.startTime).getTime();
+        const timeA = new Date(a.startTime).getTime();
+        const timeB = new Date(b.startTime).getTime();
+        return timeA - timeB;
       });
 
       setRows(sortedData);
@@ -359,7 +525,14 @@ const App: React.FC = () => {
 
   const applyMapping = async () => {
     try {
-
+      console.log('applyMapping called:', { 
+        sheetMeta, 
+        columnMap, 
+        fullHeaders: fullHeaders.length, 
+        fullRows: fullRows.length,
+        allRows: allRows.length 
+      });
+      console.log('First 3 rows of fullRows:', fullRows.slice(0, 3).map(r => r.slice(0, 5)));
       if (!sheetMeta) {
         setError('Vui lòng tải dữ liệu trước (sheetMeta không tồn tại)');
         console.error('sheetMeta is null');
@@ -375,61 +548,64 @@ const App: React.FC = () => {
         console.error('Missing date or time mapping:', { date: columnMap.date, time: columnMap.time });
         return;
       }
+      
+      // ✅ IMPORTANT: Use allRows to get fresh unprocessed data rows
+      // Do not use fullRows which might have been trimmed or filtered
+      let dataRowsToUse = fullRows;
+      
+      // If we have allRows (raw data from API), extract and reconstruct data rows
+      if (allRows.length > 0 && sheetMeta.headerRowIndex !== undefined) {
+        const dataStartIdx = sheetMeta.headerRowIndex + 1;
+        let rawFromAll = allRows.slice(dataStartIdx);
+        
+        console.log(`applyMapping: Got ${rawFromAll.length} raw rows from allRows, dataStartIdx=${dataStartIdx}`);
+        
+        // ✅ Apply the same column filtering as applyHeaderRow did
+        // Check if headers were filtered (shorter than original)
+        const originalHeaderCount = allRows[sheetMeta.headerRowIndex]?.length || 0;
+        const currentHeaderCount = fullHeaders.length;
+        
+        if (currentHeaderCount < originalHeaderCount) {
+          console.log(`applyMapping: Applying column filter (${originalHeaderCount} → ${currentHeaderCount})`);
+          // Headers were filtered, so we need to filter data columns too
+          // Reconstruct which columns were kept based on filter logic (exclude DEFENSE/CONFLICT)
+          const originalHeaderRow = allRows[sheetMeta.headerRowIndex] || [];
+          const columnsToKeep: number[] = [];
+          
+          originalHeaderRow.forEach((h, i) => {
+            const header = (h || "").toString().toLowerCase();
+            if (!header.includes('defense') && !header.includes('conflict')) {
+              columnsToKeep.push(i);
+            }
+          });
+          
+          console.log(`applyMapping: Keeping columns ${columnsToKeep.join(', ')} (filtered out DEFENSE/CONFLICT)`);
+          rawFromAll = rawFromAll.map(row => columnsToKeep.map(i => row[i] || ''));
+        }
+        
+        dataRowsToUse = rawFromAll;
+      }
+      
       console.log('applyMapping proceeding with data...');
       setError(null);
-
-      // ✅ Check if grouping is needed (same logic as applyHeaderRow)
-
-      const data = sheetMeta.headerRowIndex === 2 && titleRow.length > 0
-        ? googleService.normalizeRowsWithGrouping({
-          sheetId: sheetMeta.sheetId,
-          tab: sheetMeta.tab,
-          groupHeaders: titleRow,  // Use saved titleRow
-          detailHeaders: fullDetailHeaders,  // Use saved detail headers
-          rawRows: fullRows,
-          mapping: columnMap,
-          headerRowIndex: sheetMeta.headerRowIndex
-        })
-        : googleService.normalizeRows({
-          sheetId: sheetMeta.sheetId,
-          tab: sheetMeta.tab,
-          headers: fullHeaders,
-          rawRows: fullRows,
-          mapping: columnMap,
-          headerRowIndex: sheetMeta.headerRowIndex
-        });
-
-
+      const data = googleService.normalizeRows({
+        sheetId: sheetMeta.sheetId,
+        tab: sheetMeta.tab,
+        headers: fullHeaders,
+        rawRows: dataRowsToUse,
+        mapping: columnMap,
+        headerRowIndex: sheetMeta.headerRowIndex
+      });
+      console.log('Normalized data:', data.length, 'rows');
+      console.log('First row:', data[0]);
       if (data.length === 0) {
         setError('Không tìm thấy dòng nào hợp lệ với ngày và thời gian');
       }
-
-      // ✅ Sort by date first, then time (same as applyHeaderRow)
-      const sortedData = data.sort((a, b) => {
-        const parseDate = (dateStr: string) => {
-          const parts = dateStr.split('/');
-          if (parts.length === 3) {
-            const day = parseInt(parts[0], 10);
-            const month = parseInt(parts[1], 10);
-            const year = parseInt(parts[2], 10);
-            return new Date(year, month - 1, day);
-          }
-          return new Date(dateStr);
-        };
-
-        const dateA = parseDate(a.date);
-        const dateB = parseDate(b.date);
-        const dateDiff = dateA.getTime() - dateB.getTime();
-
-        if (dateDiff !== 0) return dateDiff;
-        return new Date(a.startTime).getTime() - new Date(b.startTime).getTime();
-      });
-
-
-      setRows(sortedData);
+      console.log('Setting rows state to:', data);
+      setRows(data);
       setPersonFilter(''); // Reset filter khi apply mapping
-
-      updateSelections(sortedData);
+      console.log('After setRows, rows state should be updated');
+      updateSelections(data);
 
       // 💾 Save mapping to Firebase for next time
       if (firebaseUser && sheetMeta) {
@@ -490,7 +666,6 @@ const App: React.FC = () => {
     }
   };
   const handleSync = async () => {
-
     const toSync = rows.filter(r => selectedIds.has(r.id));
     if (toSync.length === 0 || !sheetMeta) return;
 
@@ -516,29 +691,22 @@ const App: React.FC = () => {
             guests: row.email
           }));
 
-
-
           const appsScriptResult = await syncEventsToCalendar(events, 'Schedule Teaching');
 
-
           // Convert Apps Script response to SyncResult format
-          // Note: Apps Script doesn't distinguish between created/updated, only returns success count
-          const successCount = appsScriptResult.data?.success || 0;
           res = {
-            created: successCount,  // Apps Script combines created + updated
-            updated: 0,  // Backend doesn't track this separately
+            created: appsScriptResult.data?.success || 0,
+            updated: 0,
             failed: appsScriptResult.data?.failed || 0,
             logs: appsScriptResult.data?.errors?.map(e => e.message) || []
           };
 
-          setToastMessage(`✓ Đã đồng bộ ${successCount}/${toSync.length} sự kiện`);
+          setToastMessage(`✓ Đã đồng bộ ${res.created}/${toSync.length} sự kiện`);
         } catch (appsScriptError: any) {
           console.error('Apps Script sync failed, falling back to Calendar API:', appsScriptError);
           // Fallback to direct Calendar API if Apps Script fails
           if (accessToken) {
-
             res = await googleService.syncToCalendar(toSync, accessToken);
-
             setToastMessage('✓ Đã đồng bộ qua Calendar API (fallback)');
           } else {
             throw new Error('Không có access token để sử dụng Calendar API');
@@ -550,44 +718,36 @@ const App: React.FC = () => {
         if (!accessToken) {
           throw new Error('Cần access token để sử dụng Calendar API');
         }
-
         res = await googleService.syncToCalendar(toSync, accessToken);
-
         setToastMessage('✓ Đã đồng bộ qua Calendar API');
       }
 
-
       setResult(res);
 
-      // 💾 Save sync history to Firestore (non-blocking - use Promise without await)
+      // 💾 Save sync history to Firestore (non-blocking)
       if (firebaseUser && sheetMeta) {
-
-        import('./services/firestoreSyncHistoryService')
-          .then(({ firestoreSyncHistoryService }) => {
-            return firestoreSyncHistoryService.saveSyncResult(
-              firebaseUser.uid,
-              sheetMeta.sheetId,
-              sheetMeta.tab,
-              toSync.length,
-              res.created,
-              res.updated,
-              res.failed
-            );
-          })
-          .then(() => {
-
-          })
-          .catch(historyError => {
-            console.error('⚠️ Failed to save sync history (non-critical):', historyError);
-          });
+        try {
+          const { firestoreSyncHistoryService } = await import('./services/firestoreSyncHistoryService');
+          await firestoreSyncHistoryService.saveSyncResult(
+            firebaseUser.uid,
+            sheetMeta.sheetId,
+            sheetMeta.tab,
+            toSync.length,
+            res.created,
+            res.updated,
+            res.failed
+          );
+          // ✅ Trigger history modal refresh
+          setSyncHistoryRefresh(prev => prev + 1);
+          console.log('✓ Saved sync history and triggered refresh');
+        } catch (historyError) {
+          console.error('Failed to save sync history:', historyError);
+        }
       }
-
-
     } catch (err: any) {
-      console.error('❌ Sync error:', err);
+      console.error('Sync error:', err);
       setError(err.message);
     } finally {
-
       setSyncing(false);
     }
   };
@@ -776,10 +936,14 @@ const App: React.FC = () => {
     <Layout
       user={user}
       userId={firebaseUser?.uid || ''}
+      syncHistoryRefresh={syncHistoryRefresh}
       onLogout={async () => {
         await logout();
         setUser(null);
         setAccessToken(null);
+        // ✅ Clear persisted state khi logout
+        persistStateService.clearState();
+        console.log('✓ Cleared all persisted state on logout');
       }}
     >
       <div className="max-w-7xl mx-auto space-y-6 pb-12">
@@ -983,7 +1147,8 @@ const App: React.FC = () => {
             <div>
               <h4 className="font-bold text-emerald-900 text-base">✓ Đồng bộ hoàn tất!</h4>
               <p className="text-emerald-700 text-sm font-medium mt-1">
-                Thành công: <span className="font-bold">{result.created}</span> |
+                Thêm: <span className="font-bold">{result.created}</span> |
+                Cập nhật: <span className="font-bold">{result.updated}</span> |
                 Lỗi: <span className="font-bold">{result.failed}</span>
               </p>
             </div>

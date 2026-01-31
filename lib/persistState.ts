@@ -15,6 +15,7 @@ const KEYS = {
   ALL_ROWS: 'all_rows',
   FULL_HEADERS: 'full_headers',
   FULL_DETAIL_HEADERS: 'full_detail_headers',
+  TITLE_ROW: 'title_row',
   FULL_ROWS: 'full_rows',
   SELECTED_IDS: 'selected_ids',
 };
@@ -29,6 +30,7 @@ export interface PersistedState {
   allRows: string[][];
   fullHeaders: string[];
   fullDetailHeaders: string[];
+  titleRow: string[];
   fullRows: string[][];
   selectedIds: string[];
 }
@@ -69,6 +71,9 @@ export const persistStateService = {
       }
       if (state.fullDetailHeaders !== undefined) {
         localStorage.setItem(KEYS.FULL_DETAIL_HEADERS, JSON.stringify(state.fullDetailHeaders));
+      }
+      if (state.titleRow !== undefined) {
+        localStorage.setItem(KEYS.TITLE_ROW, JSON.stringify(state.titleRow));
       }
       if (state.fullRows !== undefined) {
         const serialized = JSON.stringify(state.fullRows);
@@ -148,6 +153,15 @@ export const persistStateService = {
         }
       }
 
+      const titleRow = localStorage.getItem(KEYS.TITLE_ROW);
+      if (titleRow) {
+        try {
+          state.titleRow = JSON.parse(titleRow);
+        } catch (e) {
+          console.error('Error parsing titleRow:', e);
+        }
+      }
+
       const fullRows = localStorage.getItem(KEYS.FULL_ROWS);
       if (fullRows) {
         try {
@@ -198,6 +212,7 @@ export const persistStateService = {
       localStorage.removeItem(KEYS.ALL_ROWS);
       localStorage.removeItem(KEYS.FULL_HEADERS);
       localStorage.removeItem(KEYS.FULL_DETAIL_HEADERS);
+      localStorage.removeItem(KEYS.TITLE_ROW);
       localStorage.removeItem(KEYS.FULL_ROWS);
       localStorage.removeItem(KEYS.SELECTED_IDS);
       console.log('✓ Cleared data state (kept URL and tab)');

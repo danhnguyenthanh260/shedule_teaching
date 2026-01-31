@@ -112,6 +112,11 @@ const App: React.FC = () => {
       console.log('✓ Restored full detail headers:', restored.fullDetailHeaders.length);
     }
 
+    if (restored.titleRow && restored.titleRow.length > 0) {
+      setTitleRow(restored.titleRow);
+      console.log('✓ Restored title row:', restored.titleRow.length);
+    }
+
     if (restored.fullRows && restored.fullRows.length > 0) {
       setFullRows(restored.fullRows);
       console.log('✓ Restored full rows:', restored.fullRows.length);
@@ -167,6 +172,12 @@ const App: React.FC = () => {
   }, [fullDetailHeaders]);
 
   useEffect(() => {
+    if (titleRow.length > 0) {
+      persistStateService.saveState({ titleRow });
+    }
+  }, [titleRow]);
+
+  useEffect(() => {
     if (fullRows.length > 0) {
       persistStateService.saveState({ fullRows });
     }
@@ -220,14 +231,28 @@ const App: React.FC = () => {
     ) {
       console.log('🔄 Recreating rows from persisted data...');
       try {
-        const recreatedRows = googleService.normalizeRows({
-          sheetId: sheetMeta.sheetId,
-          tab: sheetMeta.tab,
-          headers: fullHeaders,
-          rawRows: fullRows,
-          mapping: columnMap,
-          headerRowIndex: sheetMeta.headerRowIndex
-        });
+        // ✅ Check if Review mode (headerRowIndex=2 or 3) and titleRow is available
+        const isReviewMode = (sheetMeta.headerRowIndex === 2 || sheetMeta.headerRowIndex === 3);
+        const hasTitleRow = titleRow && titleRow.length > 0;
+
+        const recreatedRows = isReviewMode && hasTitleRow
+          ? googleService.normalizeRowsWithGrouping({
+            sheetId: sheetMeta.sheetId,
+            tab: sheetMeta.tab,
+            groupHeaders: titleRow,
+            detailHeaders: fullDetailHeaders.length > 0 ? fullDetailHeaders : fullHeaders,
+            rawRows: fullRows,
+            mapping: columnMap,
+            headerRowIndex: sheetMeta.headerRowIndex
+          })
+          : googleService.normalizeRows({
+            sheetId: sheetMeta.sheetId,
+            tab: sheetMeta.tab,
+            headers: fullHeaders,
+            rawRows: fullRows,
+            mapping: columnMap,
+            headerRowIndex: sheetMeta.headerRowIndex
+          });
 
         if (recreatedRows.length > 0) {
           setRows(recreatedRows);
@@ -241,7 +266,7 @@ const App: React.FC = () => {
         setError(`Không thể khôi phục dữ liệu: ${err.message}`);
       }
     }
-  }, [sheetMeta, fullHeaders, fullRows, columnMap, rows.length, loading]);
+  }, [sheetMeta, fullHeaders, fullDetailHeaders, titleRow, fullRows, columnMap, rows.length, loading]);
 
   // Auto-load sheet when URL and accessToken are available (e.g., after F5 refresh)
   // Chỉ chạy khi chưa có persisted data
@@ -494,13 +519,13 @@ const App: React.FC = () => {
     if (nextMeta) {
       setSheetMeta(nextMeta);
 
-      // ✅ Use nested mapping strategy for Review mode (idx=2)
-      // Pass both titleRow (Row 2 groups) and detailHeaders (Row 3 columns)
-      const data = idx === 2 && titleRow.length > 0
+      // ✅ Use nested mapping strategy for Review mode (idx=2 or idx=3)
+      // Pass both computedTitleRow (Row 2 groups) and detailHeaders (Row 3 columns)
+      const data = (idx === 2 || idx === 3) && computedTitleRow.length > 0
         ? googleService.normalizeRowsWithGrouping({
           sheetId: nextMeta.sheetId,
           tab: nextMeta.tab,
-          groupHeaders: titleRow,  // Row 2: 'REVIEW 1', 'REVIEW 2', etc.
+          groupHeaders: computedTitleRow,  // Row 2: 'REVIEW 1', 'REVIEW 2', etc.
           detailHeaders,           // Row 3: 'Code', 'Date', 'Reviewer', etc.
           rawRows,
           mapping: schema.mapping,
@@ -561,6 +586,7 @@ const App: React.FC = () => {
       // ✅ IMPORTANT: Use allRows to get fresh unprocessed data rows
       // Do not use fullRows which might have been trimmed or filtered
       let dataRowsToUse = fullRows;
+      let groupHeadersToUse = titleRow; // Default to current titleRow state
 
       // If we have allRows (raw data from API), extract and reconstruct data rows
       if (allRows.length > 0 && sheetMeta.headerRowIndex !== undefined) {
@@ -569,27 +595,66 @@ const App: React.FC = () => {
 
         console.log(`applyMapping: Got ${rawFromAll.length} raw rows from allRows, dataStartIdx=${dataStartIdx}`);
 
-        // ✅ Apply the same column filtering as applyHeaderRow did
-        // Check if headers were filtered (shorter than original)
-        const originalHeaderCount = allRows[sheetMeta.headerRowIndex]?.length || 0;
-        const currentHeaderCount = fullHeaders.length;
+        // ✅ For Review mode (headerRowIndex=2 or 3), reconstruct group headers from Row 2
+        if (sheetMeta.headerRowIndex === 2 || sheetMeta.headerRowIndex === 3) {
+          const row2Raw = allRows[1] || []; // Row 2 (index 1) contains group headers
 
-        if (currentHeaderCount < originalHeaderCount) {
-          console.log(`applyMapping: Applying column filter (${originalHeaderCount} → ${currentHeaderCount})`);
-          // Headers were filtered, so we need to filter data columns too
-          // Reconstruct which columns were kept based on filter logic (exclude DEFENSE/CONFLICT)
-          const originalHeaderRow = allRows[sheetMeta.headerRowIndex] || [];
+          // Fill forward Row 2 to handle merged cells
+          const fillForwardRow = (row: string[]): string[] => {
+            const filled: string[] = [];
+            let last = '';
+            for (let i = 0; i < row.length; i++) {
+              const cell = (row[i] || '').toString().trim();
+              if (cell) {
+                last = cell;
+                filled[i] = cell;
+              } else {
+                filled[i] = last || `Column_${i + 1}`;
+              }
+            }
+            return filled;
+          };
+
+          const row2Filled = fillForwardRow(row2Raw);
+
+          // Filter out DEFENSE and CONFLICT columns
           const columnsToKeep: number[] = [];
-
-          originalHeaderRow.forEach((h, i) => {
+          row2Filled.forEach((h, i) => {
             const header = (h || "").toString().toLowerCase();
             if (!header.includes('defense') && !header.includes('conflict')) {
               columnsToKeep.push(i);
             }
           });
 
+          // Reconstruct group headers with filter applied
+          groupHeadersToUse = columnsToKeep.map(i => row2Filled[i]);
+
+          console.log(`applyMapping: Reconstructed ${groupHeadersToUse.length} group headers from Row 2`);
+          console.log(`applyMapping: Group headers:`, groupHeadersToUse.slice(0, 10));
           console.log(`applyMapping: Keeping columns ${columnsToKeep.join(', ')} (filtered out DEFENSE/CONFLICT)`);
+
+          // Apply column filter to data rows
           rawFromAll = rawFromAll.map(row => columnsToKeep.map(i => row[i] || ''));
+        } else {
+          // ✅ For non-Review mode, apply the same column filtering as before
+          const originalHeaderCount = allRows[sheetMeta.headerRowIndex]?.length || 0;
+          const currentHeaderCount = fullHeaders.length;
+
+          if (currentHeaderCount < originalHeaderCount) {
+            console.log(`applyMapping: Applying column filter (${originalHeaderCount} → ${currentHeaderCount})`);
+            const originalHeaderRow = allRows[sheetMeta.headerRowIndex] || [];
+            const columnsToKeep: number[] = [];
+
+            originalHeaderRow.forEach((h, i) => {
+              const header = (h || "").toString().toLowerCase();
+              if (!header.includes('defense') && !header.includes('conflict')) {
+                columnsToKeep.push(i);
+              }
+            });
+
+            console.log(`applyMapping: Keeping columns ${columnsToKeep.join(', ')} (filtered out DEFENSE/CONFLICT)`);
+            rawFromAll = rawFromAll.map(row => columnsToKeep.map(i => row[i] || ''));
+          }
         }
 
         dataRowsToUse = rawFromAll;
@@ -597,11 +662,11 @@ const App: React.FC = () => {
 
       console.log('applyMapping proceeding with data...');
       setError(null);
-      const data = (sheetMeta.headerRowIndex === 2 || sheetMeta.headerRowIndex === 3) && titleRow.length > 0
+      const data = (sheetMeta.headerRowIndex === 2 || sheetMeta.headerRowIndex === 3) && groupHeadersToUse.length > 0
         ? googleService.normalizeRowsWithGrouping({
           sheetId: sheetMeta.sheetId,
           tab: sheetMeta.tab,
-          groupHeaders: titleRow,
+          groupHeaders: groupHeadersToUse,
           detailHeaders: fullDetailHeaders,
           rawRows: dataRowsToUse,
           mapping: columnMap,

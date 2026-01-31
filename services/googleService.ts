@@ -323,6 +323,7 @@ export class GoogleSyncService {
    * - Row 2: Merged headers (REVIEW 1, REVIEW 2, DEFENSE, CONFLICT)
    * - Row 3: Detail headers (Code, Count, Reviewer 1, Reviewer 2, Date, Slot...)
    * - Data starts from row 4 (index 3 in J1:BE range)
+   * ✅ CRITICAL: Uses normalizeRowsWithGrouping to expand each data row into multiple events
    */
   async loadSheetReview(url: string, tab: string, token: string): Promise<{
     rows: RowNormalized[];
@@ -364,33 +365,142 @@ export class GoogleSyncService {
       throw new Error(`Sheet không đủ dữ liệu (cần ít nhất ${minRows} hàng).`);
     }
 
-    // Get headers based on tab type
-    const headers = values[headerRowIndex];
-    const rawData = values.slice(headerRowIndex + 1);
+    // ✅ CRITICAL: Review1 uses FLAT structure (no grouping), other tabs use GROUPED structure
+    if (isReview1Tab) {
+      // Review1: Simple flat structure
+      // Row 4 (index 3): Headers (Code, Week Code, Day Code, Slot Code, Date, Room, Reviewer 1, Reviewer 2, Count)
+      // Row 5+ (index 4+): Data
+      let headers = values[headerRowIndex] || [];
+      let rawData = values.slice(headerRowIndex + 1);
 
-    console.log(`✅ ${isReview1Tab ? 'Review1' : 'Review'} mode: Range ${range}`);
-    if (!isReview1Tab) {
-      console.log(`✅ Row 2 (merged):`, values[1]?.slice(0, 5));
+      // Remove empty rows
+      rawData = rawData.filter(row => row.some(c => c && c.trim() !== ''));
+
+      // ✅ FIX: Normalize headers to match data row length
+      // Google Sheets API may truncate empty cells at the end of header row
+      // But data rows may have values in those columns (e.g., Reviewer 1, Reviewer 2)
+      const maxCols = Math.max(
+        headers.length,
+        ...rawData.map(row => row.length)
+      );
+
+      // Pad headers with default names if needed
+      if (headers.length < maxCols) {
+        console.warn(`⚠️ Headers truncated! Padding from ${headers.length} to ${maxCols} columns`);
+        const paddedHeaders = [...headers];
+        for (let i = headers.length; i < maxCols; i++) {
+          paddedHeaders.push(`Column_${i + 1}`);
+        }
+        headers = paddedHeaders;
+      }
+
+      // Also pad data rows to match header length
+      rawData = rawData.map(row => {
+        if (row.length < maxCols) {
+          const paddedRow = [...row];
+          for (let i = row.length; i < maxCols; i++) {
+            paddedRow.push('');
+          }
+          return paddedRow;
+        }
+        return row;
+      });
+
+      console.log(`✅ Review1 mode (FLAT): Range ${range}`);
+      console.log(`✅ Row 4 (headers):`, headers.slice(0, 10));
+      console.log(`✅ Data rows: ${rawData.length}`);
+
+      const schema = inferSchema(headers, rawData.slice(0, 5));
+
+      // ✅ DEBUG: Log mapping details
+      console.log('📊 Review1 Schema Mapping:', {
+        date: schema.mapping.date !== undefined ? `Column ${schema.mapping.date}: "${headers[schema.mapping.date]}"` : 'MISSING',
+        time: schema.mapping.time !== undefined ? `Column ${schema.mapping.time}: "${headers[schema.mapping.time]}"` : 'MISSING',
+        person: schema.mapping.person !== undefined ? `Column ${schema.mapping.person}: "${headers[schema.mapping.person]}"` : 'MISSING',
+        task: schema.mapping.task !== undefined ? `Column ${schema.mapping.task}: "${headers[schema.mapping.task]}"` : 'MISSING',
+        location: schema.mapping.location !== undefined ? `Column ${schema.mapping.location}: "${headers[schema.mapping.location]}"` : 'MISSING'
+      });
+      console.log('📋 Sample data (first row):', rawData[0]?.slice(0, 12));
+      console.log('📋 Sample DATE value:', rawData[0]?.[schema.mapping.date || 0]);
+      console.log('📋 Sample TIME value:', rawData[0]?.[schema.mapping.time || 0]);
+      console.log('📋 Sample PERSON value:', rawData[0]?.[schema.mapping.person || 0]);
+
+      // ✅ Use simple normalizeRows for Review1 (no grouping)
+      const normalized = this.normalizeRows({
+        sheetId,
+        tab: finalTabName,
+        headers,
+        rawRows: rawData,
+        mapping: schema.mapping,
+        headerRowIndex: headerRowIndex,
+        isDataMau: false
+      });
+
+      console.log(`✅ Normalized: ${rawData.length} rows → ${normalized.length} events (FLAT structure)`);
+
+      return {
+        rows: normalized,
+        schema,
+        headers,
+        rawRows: rawData,
+        allRows: values,
+        sheetId,
+        headerRowIndex: headerRowIndex
+      };
     }
-    console.log(`✅ Row ${headerRowIndex + 1} (headers):`, headers.slice(0, 10));
+
+    // ✅ CRITICAL FIX: Extract Row 2 (group headers) and Row 3 (detail headers) for grouped normalization
+    // Row 2: REVIEW 1, REVIEW 1, REVIEW 1, REVIEW 2, REVIEW 2, REVIEW 2, REVIEW 3, ...
+    // Row 3: Code, Count, Date, Slot, Room, Reviewer 1, Reviewer 2, ...
+    const row2 = this.fillForwardRow(values[1] || []); // Group headers with fill-forward
+    const row3 = values[2] || []; // Detail headers
+
+    // Filter out DEFENSE and CONFLICT columns
+    const columnsToKeep: number[] = [];
+    row2.forEach((h, i) => {
+      const header = (h || '').toString().toLowerCase();
+      if (!header.includes('defense') && !header.includes('conflict')) {
+        columnsToKeep.push(i);
+      }
+    });
+
+    const groupHeaders = columnsToKeep.map(i => row2[i]);
+    const detailHeaders = columnsToKeep.map(i => row3[i] || `Column_${i + 1}`);
+
+    // Extract data rows and apply column filter
+    let rawData = values.slice(headerRowIndex + 1).map(row =>
+      columnsToKeep.map(i => (row[i] || '').toString().trim())
+    );
+
+    // Remove empty rows
+    rawData = rawData.filter(row => row.some(c => c !== ''));
+
+    console.log(`✅ Review mode (GROUPED): Range ${range}`);
+    console.log(`✅ Row 2 (group headers):`, groupHeaders.slice(0, 10));
+    console.log(`✅ Row 3 (detail headers):`, detailHeaders.slice(0, 10));
     console.log(`✅ Data rows: ${rawData.length}`);
+    console.log(`✅ Filtered columns: ${columnsToKeep.length} (removed DEFENSE/CONFLICT)`);
 
-    const schema = inferSchema(headers, rawData.slice(0, 5));
+    const schema = inferSchema(detailHeaders, rawData.slice(0, 5));
 
-    const normalized = this.normalizeRows({
+    // ✅ CRITICAL: Use normalizeRowsWithGrouping to expand each row into multiple events
+    // Example: 4 data rows × 3 review groups = 12 events
+    const normalized = this.normalizeRowsWithGrouping({
       sheetId,
       tab: finalTabName,
-      headers,
+      groupHeaders,
+      detailHeaders,
       rawRows: rawData,
       mapping: schema.mapping,
-      headerRowIndex: headerRowIndex,
-      isDataMau: !isReview1Tab  // Only Data Mẫu tabs need special handling
+      headerRowIndex: headerRowIndex
     });
+
+    console.log(`✅ Normalized: ${rawData.length} rows → ${normalized.length} events (grouped by REVIEW)`);
 
     return {
       rows: normalized,
       schema,
-      headers,
+      headers: detailHeaders, // Return detail headers for UI mapping
       rawRows: rawData,
       allRows: values,  // Return full rows including Row 1, 2, 3 for header selection
       sheetId,
@@ -424,7 +534,14 @@ export class GoogleSyncService {
       const tIdx = headers.findIndex(h =>
         h?.toLowerCase().includes("giờ") ||
         h?.toLowerCase().includes("slot") ||
-        h?.toLowerCase().includes("time")
+        h?.toLowerCase().includes("time") ||
+        h?.toLowerCase().includes("tiết")
+      );
+      const pIdx = headers.findIndex(h =>
+        h?.toLowerCase().includes("reviewer") ||
+        h?.toLowerCase().includes("người") ||
+        h?.toLowerCase().includes("tên") ||
+        h?.toLowerCase().includes("giảng viên")
       );
 
       if (dIdx === -1 || tIdx === -1) {
@@ -436,9 +553,9 @@ export class GoogleSyncService {
       const manualMapping: ColumnMapping = {
         date: dIdx,
         time: tIdx,
-        person: headers.findIndex(h => h?.toLowerCase().includes("họ") || h?.toLowerCase().includes("tên")),
-        task: headers.findIndex(h => h?.toLowerCase().includes("nhiệm vụ") || h?.toLowerCase().includes("môn")),
-        location: headers.findIndex(h => h?.toLowerCase().includes("phòng"))
+        person: pIdx !== -1 ? pIdx : headers.findIndex(h => h?.toLowerCase().includes("họ") || h?.toLowerCase().includes("tên")),
+        task: headers.findIndex(h => h?.toLowerCase().includes("nhiệm vụ") || h?.toLowerCase().includes("môn") || h?.toLowerCase().includes("code")),
+        location: headers.findIndex(h => h?.toLowerCase().includes("phòng") || h?.toLowerCase().includes("room"))
       };
 
       return this.normalizeRows({
@@ -450,11 +567,26 @@ export class GoogleSyncService {
     }
 
     // Có mapping hợp lệ, tiến hành normalize
-    return rawRows
-      .filter((row: any) => {
-        const dateVal = row[mapping.date!];
-        return dateVal && dateVal.toString().trim() !== "";
-      })
+    console.log('🔍 normalizeRows: Starting normalization...', {
+      totalRows: rawRows.length,
+      dateIndex: mapping.date,
+      timeIndex: mapping.time,
+      personIndex: mapping.person,
+      sampleRow: rawRows[0]
+    });
+
+    const filteredRows = rawRows.filter((row: any) => {
+      const dateVal = row[mapping.date!];
+      const hasDate = dateVal && dateVal.toString().trim() !== "";
+      if (!hasDate) {
+        console.warn(`⚠️ Row filtered out - missing date at index ${mapping.date}:`, row.slice(0, 10));
+      }
+      return hasDate;
+    });
+
+    console.log(`🔍 After date filter: ${filteredRows.length}/${rawRows.length} rows remaining`);
+
+    return filteredRows
       .map((row: any, idx: number): RowNormalized | null => {
         try {
           const dateStr = row[mapping.date!].toString().trim();

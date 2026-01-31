@@ -43,13 +43,13 @@ const App: React.FC = () => {
   const [sheetMeta, setSheetMeta] = useState<{ sheetId: string; tab: string; headerRowIndex: number } | null>(null);
   const [headerRowIndex, setHeaderRowIndex] = useState<number>(0);
   const [mergedCells, setMergedCells] = useState<MergedCellGroup[]>([]);
-  
+
   // Firebase mapping hook - auto-loads mapping when available
-  const { 
-    mapping: savedMapping, 
-    loading: mappingLoading, 
+  const {
+    mapping: savedMapping,
+    loading: mappingLoading,
     saveMapping: saveFirebaseMapping,
-    getMapping: getFirebaseMapping 
+    getMapping: getFirebaseMapping
   } = useFirebaseMapping(sheetMeta?.sheetId);
 
   // Toast notification auto-hide
@@ -69,7 +69,7 @@ const App: React.FC = () => {
         image: firebaseUser.photoURL || ''
       });
       setPersonFilter(firebaseUser.displayName || firebaseUser.email || '');
-      
+
       // Use access token from Firebase context
       if (firebaseAccessToken) {
         setAccessToken(firebaseAccessToken);
@@ -415,7 +415,7 @@ const App: React.FC = () => {
     if (toSync.length === 0 || !sheetMeta) return;
     setSyncing(true);
     setError(null);
-    
+
     try {
       const backendUrl = import.meta.env.VITE_BACKEND_URL;
       let res: SyncResult;
@@ -424,7 +424,7 @@ const App: React.FC = () => {
       if (backendUrl && backendUrl !== 'http://localhost:5000') {
         try {
           console.log('Using Apps Script backend:', backendUrl);
-          
+
           // Convert to Apps Script event format
           const events = toSync.map(row => ({
             title: row.person || row.task || 'Event',
@@ -436,7 +436,7 @@ const App: React.FC = () => {
           }));
 
           const appsScriptResult = await syncEventsToCalendar(events, 'Schedule Teaching');
-          
+
           // Convert Apps Script response to SyncResult format
           res = {
             created: appsScriptResult.data?.success || 0,
@@ -493,22 +493,38 @@ const App: React.FC = () => {
   const filteredRows = useMemo(() => {
     if (!personFilter || personFilter.toLowerCase() === 'all') return rows;
     const f = personFilter.toLowerCase();
+
+    // 🔍 Detect sheet name to determine filter columns
+    const currentTab = sheetMeta?.tab?.toLowerCase() || '';
+    let filterKeywords: string[] = [];
+
+    // ✅ "Data mẫu" sheets (Sheet1, Review1) → Filter by "Reviewer"
+    if (currentTab.includes('sheet1') || currentTab.includes('review')) {
+      filterKeywords = ['reviewer', 'người đánh giá', 'đánh giá'];
+    }
+    // ✅ "test1" sheet → Filter by "Thành viên hội đồng"
+    else if (currentTab.includes('test')) {
+      filterKeywords = ['thành viên', 'hội đồng', 'member'];
+    }
+    // ⚠️ Fallback: Filter by "GVHD" (old behavior)
+    else {
+      filterKeywords = ['gvhd', 'giảng viên', 'hướng dẫn'];
+    }
+
     return rows.filter(r => {
-      // Search in all raw data columns for GVHD match
-      const gvhdColumns = Object.entries(r.raw).filter(([key]) =>
-        key.toLowerCase().includes('gvhd') ||
-        key.toLowerCase().includes('giảng viên') ||
-        key.toLowerCase().includes('hướng dẫn')
+      // Search in raw data columns for matching keywords
+      const targetColumns = Object.entries(r.raw).filter(([key]) =>
+        filterKeywords.some(keyword => key.toLowerCase().includes(keyword))
       );
 
-      if (gvhdColumns.length > 0) {
-        return gvhdColumns.some(([, value]) => (value as string).toLowerCase().includes(f));
+      if (targetColumns.length > 0) {
+        return targetColumns.some(([, value]) => (value as string).toLowerCase().includes(f));
       }
 
-      // Fallback to person/email if no GVHD column found
+      // Fallback to person/email if no matching column found
       return r.person.toLowerCase().includes(f) || r.email?.toLowerCase().includes(f);
     });
-  }, [rows, personFilter]);
+  }, [rows, personFilter, sheetMeta]);
 
   const handleMapChange = (key: keyof ColumnMapping) => (e: React.ChangeEvent<HTMLSelectElement>) => {
     const value = e.target.value;
@@ -540,30 +556,43 @@ const App: React.FC = () => {
     return Array.from({ length: maxCols }, (_, i) => `Column ${i + 1}`);
   }, [fullHeaders, fullRows]);
 
-  // Filter full table rows by GVHD
+  // Filter full table rows by dynamic column detection
   const filteredFullTableRows = useMemo(() => {
     if (!personFilter || personFilter.toLowerCase() === 'all') return fullRows;
 
     const f = personFilter.toLowerCase();
-    const gvhdColIndices: number[] = [];
 
-    // Find GVHD column indices
+    // 🔍 Detect sheet name to determine filter columns (same as filteredRows)
+    const currentTab = sheetMeta?.tab?.toLowerCase() || '';
+    let filterKeywords: string[] = [];
+
+    if (currentTab.includes('sheet1') || currentTab.includes('review')) {
+      filterKeywords = ['reviewer', 'người đánh giá', 'đánh giá'];
+    } else if (currentTab.includes('test')) {
+      filterKeywords = ['thành viên', 'hội đồng', 'member'];
+    } else {
+      filterKeywords = ['gvhd', 'giảng viên', 'hướng dẫn'];
+    }
+
+    const targetColIndices: number[] = [];
+
+    // Find column indices matching filter keywords
     fullTableColumns.forEach((header, index) => {
       const h = header.toLowerCase();
-      if (h.includes('gvhd') || h.includes('giảng viên') || h.includes('hướng dẫn')) {
-        gvhdColIndices.push(index);
+      if (filterKeywords.some(keyword => h.includes(keyword))) {
+        targetColIndices.push(index);
       }
     });
 
-    if (gvhdColIndices.length === 0) return fullRows;
+    if (targetColIndices.length === 0) return fullRows;
 
     return fullRows.filter(row => {
-      return gvhdColIndices.some(colIndex => {
+      return targetColIndices.some(colIndex => {
         const cellValue = (row[colIndex] || '').toString().toLowerCase();
         return cellValue.includes(f);
       });
     });
-  }, [fullRows, fullTableColumns, personFilter]);
+  }, [fullRows, fullTableColumns, personFilter, sheetMeta]);
 
   const headerOptions = useMemo(() => {
     return fullTableColumns.map((h, i) => ({
@@ -619,10 +648,10 @@ const App: React.FC = () => {
             </div>
             <h1 className="text-4xl font-extrabold text-slate-900 mb-3 tracking-tight">Schedule Sync</h1>
             <p className="text-slate-600 mb-8 font-normal leading-relaxed text-sm">Quản lý lịch đồng bộ từ Google Sheets sang Calendar một cách dễ dàng</p>
-            
+
             {/* Firebase Auth Button */}
             <GoogleLoginButton />
-            
+
             {error && (
               <div className="mt-6 p-4 bg-rose-50 border border-rose-200 rounded-xl">
                 <p className="text-rose-700 text-sm font-medium">{error}</p>

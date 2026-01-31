@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { useFirebase } from '../context/FirebaseContext';
-import { getMappingPreset, saveMappingPreset, ColumnMapping } from '../services/firestoreService';
+import { getMappingPreset, saveMappingPreset, type ColumnMapping } from '../services/firestoreService';
 
 interface UseMappingResult {
   mapping: ColumnMapping | null;

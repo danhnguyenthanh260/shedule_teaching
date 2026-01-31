@@ -38,6 +38,7 @@ const App: React.FC = () => {
   const [syncHistoryRefresh, setSyncHistoryRefresh] = useState(0); // Trigger để refresh history modal
   const [fullHeaders, setFullHeaders] = useState<string[]>([]);  // For group detection
   const [fullDetailHeaders, setFullDetailHeaders] = useState<string[]>([]);  // Actual column names for tier 2
+  const [titleRow, setTitleRow] = useState<string[]>([]); // ✅ Added titleRow state
   const [fullRows, setFullRows] = useState<string[][]>([]);
   const [allRows, setAllRows] = useState<string[][]>([]);
   const [showFullTable, setShowFullTable] = useState(false);
@@ -65,57 +66,57 @@ const App: React.FC = () => {
   // ✅ Restore toàn bộ state từ localStorage on mount
   useEffect(() => {
     const restored = persistStateService.restoreState();
-    
+
     if (restored.sheetUrl) {
       setSheetUrl(restored.sheetUrl);
       console.log('✓ Restored sheet URL:', restored.sheetUrl);
     }
-    
+
     if (restored.tabName) {
       setTabName(restored.tabName);
       console.log('✓ Restored tab name:', restored.tabName);
     }
-    
+
     if (restored.sheetMeta) {
       setSheetMeta(restored.sheetMeta);
       console.log('✓ Restored sheet meta:', restored.sheetMeta);
     }
-    
+
     if (restored.headerRowIndex !== undefined) {
       setHeaderRowIndex(restored.headerRowIndex);
       console.log('✓ Restored header row index:', restored.headerRowIndex);
     }
-    
+
     if (restored.columnMap) {
       setColumnMap(restored.columnMap);
       console.log('✓ Restored column map:', restored.columnMap);
     }
-    
+
     if (restored.personFilter) {
       setPersonFilter(restored.personFilter);
       console.log('✓ Restored person filter:', restored.personFilter);
     }
-    
+
     if (restored.allRows && restored.allRows.length > 0) {
       setAllRows(restored.allRows);
       console.log('✓ Restored all rows:', restored.allRows.length);
     }
-    
+
     if (restored.fullHeaders && restored.fullHeaders.length > 0) {
       setFullHeaders(restored.fullHeaders);
       console.log('✓ Restored full headers:', restored.fullHeaders.length);
     }
-    
+
     if (restored.fullDetailHeaders && restored.fullDetailHeaders.length > 0) {
       setFullDetailHeaders(restored.fullDetailHeaders);
       console.log('✓ Restored full detail headers:', restored.fullDetailHeaders.length);
     }
-    
+
     if (restored.fullRows && restored.fullRows.length > 0) {
       setFullRows(restored.fullRows);
       console.log('✓ Restored full rows:', restored.fullRows.length);
     }
-    
+
     if (restored.selectedIds && restored.selectedIds.length > 0) {
       setSelectedIds(new Set(restored.selectedIds));
       console.log('✓ Restored selected IDs:', restored.selectedIds.length);
@@ -227,10 +228,11 @@ const App: React.FC = () => {
           mapping: columnMap,
           headerRowIndex: sheetMeta.headerRowIndex
         });
-        
+
         if (recreatedRows.length > 0) {
           setRows(recreatedRows);
-          updateSelections(recreatedRows);
+          // ✅ Pass empty string để select ALL rows khi recreate từ persisted data
+          updateSelections(recreatedRows, '');
           console.log(`✅ Recreated ${recreatedRows.length} rows from persisted data`);
           setToastMessage(`✓ Đã khôi phục ${recreatedRows.length} dòng dữ liệu`);
         }
@@ -259,7 +261,7 @@ const App: React.FC = () => {
         setLoading(true);
         setResult(null);
         setError(null);
-        
+
         (async () => {
           try {
             const { rows: data, headers, rawRows, allRows: fetchedRows, schema, sheetId, headerRowIndex } = await googleService.loadSheetReview(sheetUrl, tabName, accessToken);
@@ -279,8 +281,13 @@ const App: React.FC = () => {
     }
   }, [sheetUrl, accessToken, loadingMode, rows.length, fullHeaders.length, sheetMeta]);
 
-  const updateSelections = (data: RowNormalized[]) => {
-    const filterLower = personFilter.toLowerCase();
+  const updateSelections = (data: RowNormalized[], filterValue?: string) => {
+    const filterLower = (filterValue !== undefined ? filterValue : personFilter).toLowerCase();
+    if (!filterLower || filterLower === '') {
+      // No filter → select all
+      setSelectedIds(new Set(data.map(r => r.id)));
+      return;
+    }
     const matches = data.filter(r =>
       r.person.toLowerCase().includes(filterLower) ||
       r.email?.toLowerCase().includes(filterLower)
@@ -377,30 +384,30 @@ const App: React.FC = () => {
     // DO NOT merge with Row 2 - keep them separate (Row 2 = title, Row 3 = headers)
     let detailHeaders: string[];
     let dataStartIndex: number;
-    let titleRow: string[] = [];  // For Review mode: Row 2 titles
+    let computedTitleRow: string[] = [];  // For Review mode: Row 2 titles (renamed)
 
-    if (idx === 2) {
+    if (idx === 2 || idx === 3) {
       // Review mode: ALWAYS use Row 3 (idx=2) as headers, Row 2 (idx=1) as titles
       detailHeaders = filledHeaders;  // Row 3
-      titleRow = rows[1] ? fillForwardHeaders(rows[1]) : [];  // Row 2
+      computedTitleRow = rows[idx - 1] ? fillForwardHeaders(rows[idx - 1]) : [];  // Row above header
       dataStartIndex = idx + 1;  // Data starts at Row 4
 
       // Filter out DEFENSE and CONFLICT from both
       const columnsToKeep: number[] = [];
-      titleRow.forEach((h, i) => {
+      computedTitleRow.forEach((h, i) => {
         const header = (h || "").toString().toLowerCase();
         if (!header.includes('defense') && !header.includes('conflict')) {
           columnsToKeep.push(i);
         }
       });
 
-      if (columnsToKeep.length < titleRow.length) {
-        titleRow = columnsToKeep.map(i => titleRow[i]);
+      if (columnsToKeep.length < computedTitleRow.length) {
+        computedTitleRow = columnsToKeep.map(i => computedTitleRow[i]);
         detailHeaders = columnsToKeep.map(i => detailHeaders[i]);
-        headers = titleRow;  // Use filtered titles for group display
+        headers = detailHeaders;  // Use detail headers for mapping/display
         console.log(`✅ Filtered out ${filledHeaders.length - columnsToKeep.length} DEFENSE/CONFLICT columns`);
       } else {
-        headers = titleRow;  // Use Row 2 titles for group display
+        headers = detailHeaders;  // Use detail headers for mapping/display
       }
     } else if (hasGroups && rows[idx + 1]) {
       // Row has groups → use filled row for grouping, next row for details
@@ -436,10 +443,10 @@ const App: React.FC = () => {
     let rawRows = rows.slice(dataStartIndex);
 
     // ✅ Apply column filter to data rows if we filtered headers
-    if (idx === 2 && titleRow.length > 0) {
+    if ((idx === 2 || idx === 3) && computedTitleRow.length > 0) {
       // Review mode: filter based on titleRow (Row 2)
-      const unfilteredTitleRow = rows[1] ? fillForwardHeaders(rows[1]) : [];
-      if (titleRow.length < unfilteredTitleRow.length) {
+      const unfilteredTitleRow = rows[idx - 1] ? fillForwardHeaders(rows[idx - 1]) : [];
+      if (computedTitleRow.length < unfilteredTitleRow.length) {
         const columnsToKeep: number[] = [];
         unfilteredTitleRow.forEach((h, i) => {
           const header = (h || "").toString().toLowerCase();
@@ -474,6 +481,7 @@ const App: React.FC = () => {
     setFullHeaders(headers);  // For group detection
     setFullDetailHeaders(detailHeaders);  // Actual column names for UI tier 2
     setFullRows(rawRows);
+    setTitleRow(computedTitleRow);
     setColumnMap({
       date: schema.mapping.date,
       time: schema.mapping.time,
@@ -515,7 +523,8 @@ const App: React.FC = () => {
       });
 
       setRows(sortedData);
-      updateSelections(sortedData);
+      // ✅ Pass empty string để select ALL rows khi apply header row
+      updateSelections(sortedData, '');
     } else {
       setRows([]);
       setSelectedIds(new Set());
@@ -525,12 +534,12 @@ const App: React.FC = () => {
 
   const applyMapping = async () => {
     try {
-      console.log('applyMapping called:', { 
-        sheetMeta, 
-        columnMap, 
-        fullHeaders: fullHeaders.length, 
+      console.log('applyMapping called:', {
+        sheetMeta,
+        columnMap,
+        fullHeaders: fullHeaders.length,
         fullRows: fullRows.length,
-        allRows: allRows.length 
+        allRows: allRows.length
       });
       console.log('First 3 rows of fullRows:', fullRows.slice(0, 3).map(r => r.slice(0, 5)));
       if (!sheetMeta) {
@@ -548,54 +557,64 @@ const App: React.FC = () => {
         console.error('Missing date or time mapping:', { date: columnMap.date, time: columnMap.time });
         return;
       }
-      
+
       // ✅ IMPORTANT: Use allRows to get fresh unprocessed data rows
       // Do not use fullRows which might have been trimmed or filtered
       let dataRowsToUse = fullRows;
-      
+
       // If we have allRows (raw data from API), extract and reconstruct data rows
       if (allRows.length > 0 && sheetMeta.headerRowIndex !== undefined) {
         const dataStartIdx = sheetMeta.headerRowIndex + 1;
         let rawFromAll = allRows.slice(dataStartIdx);
-        
+
         console.log(`applyMapping: Got ${rawFromAll.length} raw rows from allRows, dataStartIdx=${dataStartIdx}`);
-        
+
         // ✅ Apply the same column filtering as applyHeaderRow did
         // Check if headers were filtered (shorter than original)
         const originalHeaderCount = allRows[sheetMeta.headerRowIndex]?.length || 0;
         const currentHeaderCount = fullHeaders.length;
-        
+
         if (currentHeaderCount < originalHeaderCount) {
           console.log(`applyMapping: Applying column filter (${originalHeaderCount} → ${currentHeaderCount})`);
           // Headers were filtered, so we need to filter data columns too
           // Reconstruct which columns were kept based on filter logic (exclude DEFENSE/CONFLICT)
           const originalHeaderRow = allRows[sheetMeta.headerRowIndex] || [];
           const columnsToKeep: number[] = [];
-          
+
           originalHeaderRow.forEach((h, i) => {
             const header = (h || "").toString().toLowerCase();
             if (!header.includes('defense') && !header.includes('conflict')) {
               columnsToKeep.push(i);
             }
           });
-          
+
           console.log(`applyMapping: Keeping columns ${columnsToKeep.join(', ')} (filtered out DEFENSE/CONFLICT)`);
           rawFromAll = rawFromAll.map(row => columnsToKeep.map(i => row[i] || ''));
         }
-        
+
         dataRowsToUse = rawFromAll;
       }
-      
+
       console.log('applyMapping proceeding with data...');
       setError(null);
-      const data = googleService.normalizeRows({
-        sheetId: sheetMeta.sheetId,
-        tab: sheetMeta.tab,
-        headers: fullHeaders,
-        rawRows: dataRowsToUse,
-        mapping: columnMap,
-        headerRowIndex: sheetMeta.headerRowIndex
-      });
+      const data = (sheetMeta.headerRowIndex === 2 || sheetMeta.headerRowIndex === 3) && titleRow.length > 0
+        ? googleService.normalizeRowsWithGrouping({
+          sheetId: sheetMeta.sheetId,
+          tab: sheetMeta.tab,
+          groupHeaders: titleRow,
+          detailHeaders: fullDetailHeaders,
+          rawRows: dataRowsToUse,
+          mapping: columnMap,
+          headerRowIndex: sheetMeta.headerRowIndex
+        })
+        : googleService.normalizeRows({
+          sheetId: sheetMeta.sheetId,
+          tab: sheetMeta.tab,
+          headers: fullHeaders,
+          rawRows: dataRowsToUse,
+          mapping: columnMap,
+          headerRowIndex: sheetMeta.headerRowIndex
+        });
       console.log('Normalized data:', data.length, 'rows');
       console.log('First row:', data[0]);
       if (data.length === 0) {
@@ -605,7 +624,8 @@ const App: React.FC = () => {
       setRows(data);
       setPersonFilter(''); // Reset filter khi apply mapping
       console.log('After setRows, rows state should be updated');
-      updateSelections(data);
+      // ✅ Pass empty string để select all rows (không filter)
+      updateSelections(data, '');
 
       // 💾 Save mapping to Firebase for next time
       if (firebaseUser && sheetMeta) {
@@ -613,6 +633,7 @@ const App: React.FC = () => {
           await saveFirebaseMapping(sheetMeta.sheetId, columnMap);
           setToastMessage('✓ Đã lưu mapping cho lần sau');
           console.log('Saved mapping to Firebase:', columnMap);
+          S
         } catch (err) {
           console.error('Failed to save mapping to Firebase:', err);
         }
@@ -629,7 +650,7 @@ const App: React.FC = () => {
     setResult(null);
     setError(null);
     try {
-      const { rows: data, headers, rawRows, allRows: fetchedRows, schema, sheetId, headerRowIndex, mergedCells: merged } = await googleService.loadSheet(sheetUrl, tabName, accessToken);
+      const { rows: data, headers, rawRows, allRows: fetchedRows, schema, sheetId, headerRowIndex, mergedCells: merged, groupHeaders: loadedGroupHeaders, detailHeaders: loadedDetailHeaders } = await googleService.loadSheet(sheetUrl, tabName, accessToken);
       console.log('Loaded data:', {
         dataCount: data.length,
         headerCount: headers?.length,
@@ -637,7 +658,8 @@ const App: React.FC = () => {
         allRowsCount: fetchedRows?.length,
         firstHeader: headers?.[0],
         firstRow: rawRows?.[0],
-        mergedCells: merged
+        mergedCells: merged,
+        hasGrouping: !!(loadedGroupHeaders && loadedDetailHeaders)
       });
       setAllRows(fetchedRows || []);
       setShowFullTable(false);
@@ -646,7 +668,14 @@ const App: React.FC = () => {
       setMergedCells(merged);
 
       setRows(data);
-      setFullHeaders(headers || []);
+      // Data Mẫu: dùng groupHeaders (Row 2) và detailHeaders (Row 3) để Áp dụng sau này vẫn ra 12 mục
+      if (loadedGroupHeaders && loadedDetailHeaders) {
+        setFullHeaders(loadedDetailHeaders); // Use Data Headers (Date, Code...) for UI Mapping
+        setFullDetailHeaders(loadedDetailHeaders);
+      } else {
+        setFullHeaders(headers || []);
+        setFullDetailHeaders(headers || []);
+      }
       setFullRows(rawRows || []);
       setColumnMap({
         date: schema.mapping.date,
@@ -657,7 +686,8 @@ const App: React.FC = () => {
         email: schema.mapping.email
       });
 
-      updateSelections(data);
+      // ✅ Pass empty string để select ALL rows khi load sheet
+      updateSelections(data, '');
     } catch (err: any) {
       console.error('Load error:', err);
       setError(err.message);
@@ -1005,17 +1035,17 @@ const App: React.FC = () => {
                   }
                 }}
                 disabled={loadingMode !== null}
-                  className="flex-1 h-[42px] flex items-center justify-center bg-blue-600 hover:bg-blue-700 text-white font-semibold rounded-lg shadow-md hover:shadow-lg transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed active:scale-95 text-sm"
-                  title="Cấu trúc phẳng: Header dòng 1, range A1:BE"
-                >
-                  {loadingMode === 'test1' ? (
-                    <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin"></div>
-                  ) : (
-                    <span className="flex items-center gap-1">
-                      <span>📄</span> test1
-                    </span>
-                  )}
-                </button>
+                className="flex-1 h-[42px] flex items-center justify-center bg-blue-600 hover:bg-blue-700 text-white font-semibold rounded-lg shadow-md hover:shadow-lg transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed active:scale-95 text-sm"
+                title="Cấu trúc phẳng: Header dòng 1, range A1:BE"
+              >
+                {loadingMode === 'test1' ? (
+                  <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin"></div>
+                ) : (
+                  <span className="flex items-center gap-1">
+                    <span>📄</span> test1
+                  </span>
+                )}
+              </button>
               <button
                 onClick={async () => {
                   if (!sheetUrl || !accessToken || loadingMode) return;
@@ -1040,17 +1070,17 @@ const App: React.FC = () => {
                   }
                 }}
                 disabled={loadingMode !== null}
-                  className="flex-1 h-[42px] flex items-center justify-center bg-purple-600 hover:bg-purple-700 text-white font-semibold rounded-lg shadow-md hover:shadow-lg transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed active:scale-95 text-sm"
-                  title="Cấu trúc phức tạp: Header dòng 3, range J1:BE"
-                >
-                  {loadingMode === 'review' ? (
-                    <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin"></div>
-                  ) : (
-                    <span className="flex items-center gap-1">
-                      <span>📊</span> Review
-                    </span>
-                  )}
-                </button>
+                className="flex-1 h-[42px] flex items-center justify-center bg-purple-600 hover:bg-purple-700 text-white font-semibold rounded-lg shadow-md hover:shadow-lg transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed active:scale-95 text-sm"
+                title="Cấu trúc phức tạp: Header dòng 3, range J1:BE"
+              >
+                {loadingMode === 'review' ? (
+                  <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin"></div>
+                ) : (
+                  <span className="flex items-center gap-1">
+                    <span>📊</span> Review
+                  </span>
+                )}
+              </button>
             </div>
           </div>
         </div>

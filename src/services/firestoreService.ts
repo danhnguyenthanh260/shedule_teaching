@@ -8,19 +8,16 @@ import {
   updateDoc,
   Timestamp,
 } from 'firebase/firestore';
+// Dùng đúng kiểu mapping của app (types.ts) để tránh lỗi ts(2345)
+import type { ColumnMapping as AppColumnMapping } from '../../types';
 
-export interface ColumnMapping {
-  titleCol: number;
-  dateCol: number;
-  startTimeCol: number;
-  endTimeCol: number;
-  locationCol: number;
-}
+/** Re-export để hook và App dùng chung một kiểu (date, time, person, task, location, email) */
+export type ColumnMapping = AppColumnMapping;
 
 export interface UserMapping {
   userId: string;
   fileId: string;
-  mapping: ColumnMapping;
+  mapping: AppColumnMapping;
   createdAt: Timestamp;
   updatedAt: Timestamp;
 }
@@ -34,7 +31,7 @@ export interface UserMapping {
 export const saveMappingPreset = async (
   userId: string,
   fileId: string,
-  mapping: ColumnMapping
+  mapping: AppColumnMapping
 ): Promise<void> => {
   try {
     const mappingRef = doc(db, 'users', userId, 'mappings', fileId);
@@ -60,7 +57,7 @@ export const saveMappingPreset = async (
 export const getMappingPreset = async (
   userId: string,
   fileId: string
-): Promise<ColumnMapping | null> => {
+): Promise<AppColumnMapping | null> => {
   try {
     const mappingRef = doc(db, 'users', userId, 'mappings', fileId);
     const docSnap = await getDoc(mappingRef);
@@ -100,7 +97,7 @@ export const getUserMappings = async (userId: string): Promise<UserMapping[]> =>
 export const updateMappingPreset = async (
   userId: string,
   fileId: string,
-  mapping: ColumnMapping
+  mapping: AppColumnMapping
 ): Promise<void> => {
   try {
     const mappingRef = doc(db, 'users', userId, 'mappings', fileId);

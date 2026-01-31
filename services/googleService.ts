@@ -1,4 +1,4 @@
-﻿import { RowNormalized, InferredSchema, SyncResult, ColumnMapping } from '../types';
+import { RowNormalized, InferredSchema, SyncResult, ColumnMapping } from '../types';
 import { inferSchema } from '../lib/inference';
 import { parseVNTime, generateRowId } from '../lib/utils';
 import { parseHeadersFromSheet, parseMergedCells, MergedCellGroup } from '../lib/headerParser';
@@ -120,8 +120,25 @@ export class GoogleSyncService {
     }
   }
 
+  /** Fill forward empty cells (merged cell behavior) for Row 2 group headers */
+  private fillForwardRow(row: string[]): string[] {
+    const filled: string[] = [];
+    let last = '';
+    for (let i = 0; i < row.length; i++) {
+      const cell = (row[i] || '').toString().trim();
+      if (cell) {
+        last = cell;
+        filled[i] = cell;
+      } else {
+        filled[i] = last || `Column_${i + 1}`;
+      }
+    }
+    return filled;
+  }
+
   /**
    * 1. LOAD SHEET: Tự động nhận diện cấu trúc phẳng (test1) hoặc phức tạp (Data mẫu)
+   * Data Mẫu: Row 2 = groups (REVIEW 1, REVIEW 2, REVIEW 3), Row 3 = detail headers → 1 data row = 3 events (12 items cho 4 dòng)
    */
   async loadSheet(url: string, tab: string, token: string): Promise<{
     rows: RowNormalized[];
@@ -132,6 +149,8 @@ export class GoogleSyncService {
     sheetId: string;
     headerRowIndex: number;
     mergedCells?: MergedCellGroup[];
+    groupHeaders?: string[];
+    detailHeaders?: string[];
   }> {
     const sheetId = this.extractSheetId(url);
     if (!sheetId) throw new Error("URL Sheet không hợp lệ.");
@@ -164,33 +183,71 @@ export class GoogleSyncService {
       isDataMau: detection.isDataMau
     });
 
-    const headers = values[detection.headerRowIndex];
-    const rawData = values.slice(detection.headerRowIndex + 1);
     const headerRowIndex = detection.headerRowIndex;
     const isDataMau = detection.isDataMau;
 
-    console.log(`✅ Headers detected:`, headers.slice(0, 10));
-    console.log(`✅ Raw data rows: ${rawData.length}`);
+    let headers: string[];
+    let rawData: string[][];
+    let normalized: RowNormalized[];
+    let schema: InferredSchema;
+    let groupHeaders: string[] | undefined;
+    let detailHeaders: string[] | undefined;
 
-    const schema = inferSchema(headers, rawData.slice(0, 5));
-    const normalized = this.normalizeRows({
-      sheetId,
-      tab: finalTabName,
-      headers,
-      rawRows: rawData,
-      mapping: schema.mapping,
-      headerRowIndex,
-      isDataMau
-    });
+    if (isDataMau && values.length >= 4) {
+      // Data Mẫu: Row 2 = groups (REVIEW 1, REVIEW 2, REVIEW 3), Row 3 = detail → mỗi dòng data = 3 events
+      const row2 = this.fillForwardRow(values[1] || []);
+      const row3 = values[2] || [];
+      const columnsToKeep: number[] = [];
+      row2.forEach((h, i) => {
+        const header = (h || '').toString().toLowerCase();
+        if (!header.includes('defense') && !header.includes('conflict')) {
+          columnsToKeep.push(i);
+        }
+      });
+      groupHeaders = columnsToKeep.map(i => row2[i]);
+      detailHeaders = columnsToKeep.map(i => row3[i] || `Column_${i + 1}`);
+      rawData = values.slice(3).map(row => columnsToKeep.map(i => (row[i] || '').toString().trim()));
+      rawData = rawData.filter(row => row.some(c => c !== ''));
+      headers = groupHeaders;
+      schema = inferSchema(detailHeaders, rawData.slice(0, 5));
+      normalized = this.normalizeRowsWithGrouping({
+        sheetId,
+        tab: finalTabName,
+        groupHeaders,
+        detailHeaders,
+        rawRows: rawData,
+        mapping: schema.mapping,
+        headerRowIndex
+      });
+      console.log(`✅ Data Mẫu: ${rawData.length} dòng → ${normalized.length} sự kiện (REVIEW 1/2/3)`);
+    } else {
+      headers = values[detection.headerRowIndex];
+      rawData = values.slice(detection.headerRowIndex + 1);
+      schema = inferSchema(headers, rawData.slice(0, 5));
+      normalized = this.normalizeRows({
+        sheetId,
+        tab: finalTabName,
+        headers,
+        rawRows: rawData,
+        mapping: schema.mapping,
+        headerRowIndex,
+        isDataMau
+      });
+    }
+
+    console.log(`✅ Headers detected:`, (detailHeaders || headers).slice(0, 10));
+    console.log(`✅ Raw data rows: ${rawData.length}`);
 
     return {
       rows: normalized,
       schema,
-      headers,
+      headers: detailHeaders || headers,
       rawRows: rawData,
       allRows: values,
       sheetId,
-      headerRowIndex
+      headerRowIndex,
+      groupHeaders,
+      detailHeaders
     };
   }
 
@@ -483,10 +540,15 @@ export class GoogleSyncService {
           }
         });
 
-        // Find reviewer, date, slot, room in this group using flexible matching
-        const findValueInGroup = (data: Record<string, string>, keywords: string[]): string => {
+        // Find value by header keywords; optional exclude to avoid wrong column (e.g. Date vs Day Of Week)
+        const findValueInGroup = (
+          data: Record<string, string>,
+          keywords: string[],
+          excludeKeywords: string[] = []
+        ): string => {
           for (const [key, val] of Object.entries(data)) {
             const keyLower = key.toLowerCase();
+            if (excludeKeywords.some(ex => keyLower.includes(ex.toLowerCase()))) continue;
             if (keywords.some(kw => keyLower.includes(kw.toLowerCase()))) {
               return val;
             }
@@ -494,10 +556,21 @@ export class GoogleSyncService {
           return '';
         };
 
-        const reviewer = findValueInGroup(groupData, ['reviewer', 'người đánh giá', 'đánh giá']);
-        const date = findValueInGroup(groupData, ['date', 'ngày']);
+        // Date: chỉ lấy cột "Date" (30/01/2026), KHÔNG lấy "Day Of Week" (Thu)
+        let date = findValueInGroup(
+          groupData,
+          ['date', 'ngày'],
+          ['day of week', 'week', 'thứ'] // loại trừ cột ngày trong tuần
+        );
+        // Chỉ chấp nhận giá trị giống ngày (có / hoặc - và số), bỏ qua "Thu", "1", "NVH F.01"
+        const looksLikeDate = (v: string) => /^\d{1,2}[\/\-\.]\d{1,2}[\/\-\.]\d{2,4}$/.test((v || '').trim());
+        if (date && !looksLikeDate(date)) date = '';
+        // Slot: số 1-5 (map tới 07:00-09:15, ...)
         const slot = findValueInGroup(groupData, ['slot', 'tiết', 'time', 'giờ']);
+        // Room: NVH G.02, NVH F.01... (không lấy tên người)
         const room = findValueInGroup(groupData, ['room', 'phòng']);
+        // Reviewer: Reviewer 1, Reviewer 2 hoặc tên GV
+        const reviewer = findValueInGroup(groupData, ['reviewer 1', 'reviewer 2', 'reviewer', 'người đánh giá', 'đánh giá']);
         const code = findValueInGroup(groupData, ['code', 'mã']);
         const count = findValueInGroup(groupData, ['count', 'số lượng']);
 

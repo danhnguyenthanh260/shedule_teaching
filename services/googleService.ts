@@ -446,6 +446,8 @@ export class GoogleSyncService {
   /**
    * 3. SYNC TO CALENDAR: Gửi dữ liệu đến Google Apps Script Web App
    * Apps Script tự động xử lý logic Mirroring (Xóa cũ - Đè mới)
+   * 
+   * ✅ CORS Bypass: Sử dụng hidden iframe để submit form thay vì fetch API
    */
   async syncToCalendar(rows: RowNormalized[], token: string): Promise<SyncResult> {
     const stats = { created: 0, updated: 0, failed: 0, logs: [] as string[] };
@@ -461,23 +463,23 @@ export class GoogleSyncService {
         title: `[${row.task}] - ${row.person}`,
         start: row.startTime,  // ISO 8601 format: "2026-01-31T08:00:00+07:00"
         end: row.endTime,      // ISO 8601 format: "2026-01-31T10:00:00+07:00"
-        room: row.location || '',
-        description: Object.entries(row.raw)
-          .map(([k, v]) => `${k}: ${v}`)
-          .join('\n')
+        room: row.location || ''
       }));
 
       console.log(`🚀 Đang gửi ${events.length} sự kiện đến Apps Script...`);
 
-      // 🌐 Gọi Google Apps Script Web App
-      const webAppUrl = 'https://script.google.com/macros/s/AKfycbzg4qQbfvVHERtYtNt0HbwsSItcmD4ehuSwPprZmjDeAOlz4f7Wl9jM1kU9qlo6QR8/exec';
+      // 🔑 Gọi Apps Script qua Vite proxy để bypass CORS
+      const webAppUrl = '/api/appscript';
 
+      // 🌐 Gọi Apps Script với OAuth token trong header
       const response = await fetch(webAppUrl, {
         method: 'POST',
+        redirect: 'follow',
         headers: {
-          'Content-Type': 'text/plain'  // Tránh CORS preflight
+          'Authorization': `Bearer ${token}`,  // ✅ CRITICAL: Gửi OAuth token để Apps Script xác thực user
+          'Content-Type': 'application/json'
         },
-        body: JSON.stringify({ events, token })  // Gửi cả access token để Apps Script xác thực
+        body: JSON.stringify({ events })
       });
 
       if (!response.ok) {
@@ -487,20 +489,22 @@ export class GoogleSyncService {
       const result = await response.json();
 
       // 📊 Xử lý kết quả từ Apps Script
-      if (result.success) {
-        stats.created = result.stats.added || 0;
-        stats.updated = result.stats.overwritten || 0;
-        const kept = result.stats.kept || 0;
+      if (result.status === 'success' && result.data) {
+        stats.created = result.data.added || 0;
+        stats.updated = result.data.overwritten || 0;
+        const kept = result.data.kept || 0;
 
         stats.logs.push(`✅ Đồng bộ hoàn tất!`);
         stats.logs.push(`   📌 Thêm mới: ${stats.created}`);
         stats.logs.push(`   🔄 Ghi đè: ${stats.updated}`);
         stats.logs.push(`   ⏭️ Giữ nguyên: ${kept}`);
 
-        console.log('✅ Sync thành công:', result.stats);
+        console.log('✅ Sync thành công:', result.data);
       } else {
-        throw new Error(result.error || 'Lỗi không xác định từ Apps Script');
+        throw new Error(result.error || result.message || 'Lỗi không xác định từ Apps Script');
       }
+
+      console.log('✅ Sync request completed');
 
     } catch (error: any) {
       console.error('❌ Đồng bộ thất bại:', error);

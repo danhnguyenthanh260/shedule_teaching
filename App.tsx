@@ -300,9 +300,7 @@ const App: React.FC = () => {
 
       // ✅ Use nested mapping strategy for Review mode (idx=2)
       // Pass both titleRow (Row 2 groups) and detailHeaders (Row 3 columns)
-      console.log(`🔍 Checking grouping condition: idx=${idx}, titleRow.length=${titleRow.length}`);
-      console.log(`🔍 titleRow:`, titleRow.slice(0, 5));
-      console.log(`🔍 detailHeaders:`, detailHeaders.slice(0, 5));
+
 
       const data = idx === 2 && titleRow.length > 0
         ? googleService.normalizeRowsWithGrouping({
@@ -323,7 +321,7 @@ const App: React.FC = () => {
           headerRowIndex: idx
         });
 
-      console.log(`✅ Used ${idx === 2 && titleRow.length > 0 ? 'normalizeRowsWithGrouping' : 'normalizeRows'}, generated ${data.length} events`);
+
 
       // ✅ Sort by date first (30/1, 31/1, 1/2...), then by time within same date
       const sortedData = data.sort((a, b) => {
@@ -361,7 +359,7 @@ const App: React.FC = () => {
 
   const applyMapping = async () => {
     try {
-      console.log('applyMapping called:', { sheetMeta, columnMap, fullHeaders: fullHeaders.length, fullRows: fullRows.length });
+
       if (!sheetMeta) {
         setError('Vui lòng tải dữ liệu trước (sheetMeta không tồn tại)');
         console.error('sheetMeta is null');
@@ -381,7 +379,7 @@ const App: React.FC = () => {
       setError(null);
 
       // ✅ Check if grouping is needed (same logic as applyHeaderRow)
-      console.log(`🔍 applyMapping: Checking grouping - headerRowIndex=${sheetMeta.headerRowIndex}, titleRow.length=${titleRow.length}`);
+
       const data = sheetMeta.headerRowIndex === 2 && titleRow.length > 0
         ? googleService.normalizeRowsWithGrouping({
           sheetId: sheetMeta.sheetId,
@@ -401,9 +399,7 @@ const App: React.FC = () => {
           headerRowIndex: sheetMeta.headerRowIndex
         });
 
-      console.log(`✅ applyMapping: Used ${sheetMeta.headerRowIndex === 2 && titleRow.length > 0 ? 'normalizeRowsWithGrouping' : 'normalizeRows'}, generated ${data.length} events`);
-      console.log('Normalized data:', data.length, 'rows');
-      console.log('First row:', data[0]);
+
       if (data.length === 0) {
         setError('Không tìm thấy dòng nào hợp lệ với ngày và thời gian');
       }
@@ -429,10 +425,10 @@ const App: React.FC = () => {
         return new Date(a.startTime).getTime() - new Date(b.startTime).getTime();
       });
 
-      console.log('Setting rows state to:', sortedData);
+
       setRows(sortedData);
       setPersonFilter(''); // Reset filter khi apply mapping
-      console.log('After setRows, rows state should be updated');
+
       updateSelections(sortedData);
 
       // 💾 Save mapping to Firebase for next time
@@ -494,6 +490,7 @@ const App: React.FC = () => {
     }
   };
   const handleSync = async () => {
+
     const toSync = rows.filter(r => selectedIds.has(r.id));
     if (toSync.length === 0 || !sheetMeta) return;
 
@@ -519,22 +516,29 @@ const App: React.FC = () => {
             guests: row.email
           }));
 
+
+
           const appsScriptResult = await syncEventsToCalendar(events, 'Schedule Teaching');
 
+
           // Convert Apps Script response to SyncResult format
+          // Note: Apps Script doesn't distinguish between created/updated, only returns success count
+          const successCount = appsScriptResult.data?.success || 0;
           res = {
-            created: appsScriptResult.data?.success || 0,
-            updated: 0,
+            created: successCount,  // Apps Script combines created + updated
+            updated: 0,  // Backend doesn't track this separately
             failed: appsScriptResult.data?.failed || 0,
             logs: appsScriptResult.data?.errors?.map(e => e.message) || []
           };
 
-          setToastMessage(`✓ Đã đồng bộ ${res.created}/${toSync.length} sự kiện`);
+          setToastMessage(`✓ Đã đồng bộ ${successCount}/${toSync.length} sự kiện`);
         } catch (appsScriptError: any) {
           console.error('Apps Script sync failed, falling back to Calendar API:', appsScriptError);
           // Fallback to direct Calendar API if Apps Script fails
           if (accessToken) {
+
             res = await googleService.syncToCalendar(toSync, accessToken);
+
             setToastMessage('✓ Đã đồng bộ qua Calendar API (fallback)');
           } else {
             throw new Error('Không có access token để sử dụng Calendar API');
@@ -546,33 +550,44 @@ const App: React.FC = () => {
         if (!accessToken) {
           throw new Error('Cần access token để sử dụng Calendar API');
         }
+
         res = await googleService.syncToCalendar(toSync, accessToken);
+
         setToastMessage('✓ Đã đồng bộ qua Calendar API');
       }
 
+
       setResult(res);
 
-      // 💾 Save sync history to Firestore (non-blocking)
+      // 💾 Save sync history to Firestore (non-blocking - use Promise without await)
       if (firebaseUser && sheetMeta) {
-        try {
-          const { firestoreSyncHistoryService } = await import('./services/firestoreSyncHistoryService');
-          await firestoreSyncHistoryService.saveSyncResult(
-            firebaseUser.uid,
-            sheetMeta.sheetId,
-            sheetMeta.tab,
-            toSync.length,
-            res.created,
-            res.updated,
-            res.failed
-          );
-        } catch (historyError) {
-          console.error('Failed to save sync history:', historyError);
-        }
+
+        import('./services/firestoreSyncHistoryService')
+          .then(({ firestoreSyncHistoryService }) => {
+            return firestoreSyncHistoryService.saveSyncResult(
+              firebaseUser.uid,
+              sheetMeta.sheetId,
+              sheetMeta.tab,
+              toSync.length,
+              res.created,
+              res.updated,
+              res.failed
+            );
+          })
+          .then(() => {
+
+          })
+          .catch(historyError => {
+            console.error('⚠️ Failed to save sync history (non-critical):', historyError);
+          });
       }
+
+
     } catch (err: any) {
-      console.error('Sync error:', err);
+      console.error('❌ Sync error:', err);
       setError(err.message);
     } finally {
+
       setSyncing(false);
     }
   };
@@ -968,8 +983,7 @@ const App: React.FC = () => {
             <div>
               <h4 className="font-bold text-emerald-900 text-base">✓ Đồng bộ hoàn tất!</h4>
               <p className="text-emerald-700 text-sm font-medium mt-1">
-                Thêm: <span className="font-bold">{result.created}</span> |
-                Cập nhật: <span className="font-bold">{result.updated}</span> |
+                Thành công: <span className="font-bold">{result.created}</span> |
                 Lỗi: <span className="font-bold">{result.failed}</span>
               </p>
             </div>

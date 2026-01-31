@@ -1,4 +1,4 @@
-﻿import { RowNormalized, InferredSchema, SyncResult, ColumnMapping } from '../types';
+import { RowNormalized, InferredSchema, SyncResult, ColumnMapping } from '../types';
 import { inferSchema } from '../lib/inference';
 import { parseVNTime, generateRowId } from '../lib/utils';
 import { parseHeadersFromSheet, parseMergedCells, MergedCellGroup } from '../lib/headerParser';
@@ -120,8 +120,25 @@ export class GoogleSyncService {
     }
   }
 
+  /** Fill forward empty cells (merged cell behavior) for Row 2 group headers */
+  private fillForwardRow(row: string[]): string[] {
+    const filled: string[] = [];
+    let last = '';
+    for (let i = 0; i < row.length; i++) {
+      const cell = (row[i] || '').toString().trim();
+      if (cell) {
+        last = cell;
+        filled[i] = cell;
+      } else {
+        filled[i] = last || `Column_${i + 1}`;
+      }
+    }
+    return filled;
+  }
+
   /**
    * 1. LOAD SHEET: Tự động nhận diện cấu trúc phẳng (test1) hoặc phức tạp (Data mẫu)
+   * Data Mẫu: Row 2 = groups (REVIEW 1, REVIEW 2, REVIEW 3), Row 3 = detail headers → 1 data row = 3 events (12 items cho 4 dòng)
    */
   async loadSheet(url: string, tab: string, token: string): Promise<{
     rows: RowNormalized[];
@@ -132,6 +149,8 @@ export class GoogleSyncService {
     sheetId: string;
     headerRowIndex: number;
     mergedCells?: MergedCellGroup[];
+    groupHeaders?: string[];
+    detailHeaders?: string[];
   }> {
     const sheetId = this.extractSheetId(url);
     if (!sheetId) throw new Error("URL Sheet không hợp lệ.");
@@ -164,33 +183,71 @@ export class GoogleSyncService {
       isDataMau: detection.isDataMau
     });
 
-    const headers = values[detection.headerRowIndex];
-    const rawData = values.slice(detection.headerRowIndex + 1);
     const headerRowIndex = detection.headerRowIndex;
     const isDataMau = detection.isDataMau;
 
-    console.log(`✅ Headers detected:`, headers.slice(0, 10));
-    console.log(`✅ Raw data rows: ${rawData.length}`);
+    let headers: string[];
+    let rawData: string[][];
+    let normalized: RowNormalized[];
+    let schema: InferredSchema;
+    let groupHeaders: string[] | undefined;
+    let detailHeaders: string[] | undefined;
 
-    const schema = inferSchema(headers, rawData.slice(0, 5));
-    const normalized = this.normalizeRows({
-      sheetId,
-      tab: finalTabName,
-      headers,
-      rawRows: rawData,
-      mapping: schema.mapping,
-      headerRowIndex,
-      isDataMau
-    });
+    if (isDataMau && values.length >= 4) {
+      // Data Mẫu: Row 2 = groups (REVIEW 1, REVIEW 2, REVIEW 3), Row 3 = detail → mỗi dòng data = 3 events
+      const row2 = this.fillForwardRow(values[1] || []);
+      const row3 = values[2] || [];
+      const columnsToKeep: number[] = [];
+      row2.forEach((h, i) => {
+        const header = (h || '').toString().toLowerCase();
+        if (!header.includes('defense') && !header.includes('conflict')) {
+          columnsToKeep.push(i);
+        }
+      });
+      groupHeaders = columnsToKeep.map(i => row2[i]);
+      detailHeaders = columnsToKeep.map(i => row3[i] || `Column_${i + 1}`);
+      rawData = values.slice(3).map(row => columnsToKeep.map(i => (row[i] || '').toString().trim()));
+      rawData = rawData.filter(row => row.some(c => c !== ''));
+      headers = groupHeaders;
+      schema = inferSchema(detailHeaders, rawData.slice(0, 5));
+      normalized = this.normalizeRowsWithGrouping({
+        sheetId,
+        tab: finalTabName,
+        groupHeaders,
+        detailHeaders,
+        rawRows: rawData,
+        mapping: schema.mapping,
+        headerRowIndex
+      });
+      console.log(`✅ Data Mẫu: ${rawData.length} dòng → ${normalized.length} sự kiện (REVIEW 1/2/3)`);
+    } else {
+      headers = values[detection.headerRowIndex];
+      rawData = values.slice(detection.headerRowIndex + 1);
+      schema = inferSchema(headers, rawData.slice(0, 5));
+      normalized = this.normalizeRows({
+        sheetId,
+        tab: finalTabName,
+        headers,
+        rawRows: rawData,
+        mapping: schema.mapping,
+        headerRowIndex,
+        isDataMau
+      });
+    }
+
+    console.log(`✅ Headers detected:`, (detailHeaders || headers).slice(0, 10));
+    console.log(`✅ Raw data rows: ${rawData.length}`);
 
     return {
       rows: normalized,
       schema,
-      headers,
+      headers: detailHeaders || headers,
       rawRows: rawData,
       allRows: values,
       sheetId,
-      headerRowIndex
+      headerRowIndex,
+      groupHeaders,
+      detailHeaders
     };
   }
 
@@ -266,6 +323,7 @@ export class GoogleSyncService {
    * - Row 2: Merged headers (REVIEW 1, REVIEW 2, DEFENSE, CONFLICT)
    * - Row 3: Detail headers (Code, Count, Reviewer 1, Reviewer 2, Date, Slot...)
    * - Data starts from row 4 (index 3 in J1:BE range)
+   * ✅ CRITICAL: Uses normalizeRowsWithGrouping to expand each data row into multiple events
    */
   async loadSheetReview(url: string, tab: string, token: string): Promise<{
     rows: RowNormalized[];
@@ -307,33 +365,142 @@ export class GoogleSyncService {
       throw new Error(`Sheet không đủ dữ liệu (cần ít nhất ${minRows} hàng).`);
     }
 
-    // Get headers based on tab type
-    const headers = values[headerRowIndex];
-    const rawData = values.slice(headerRowIndex + 1);
+    // ✅ CRITICAL: Review1 uses FLAT structure (no grouping), other tabs use GROUPED structure
+    if (isReview1Tab) {
+      // Review1: Simple flat structure
+      // Row 4 (index 3): Headers (Code, Week Code, Day Code, Slot Code, Date, Room, Reviewer 1, Reviewer 2, Count)
+      // Row 5+ (index 4+): Data
+      let headers = values[headerRowIndex] || [];
+      let rawData = values.slice(headerRowIndex + 1);
 
-    console.log(`✅ ${isReview1Tab ? 'Review1' : 'Review'} mode: Range ${range}`);
-    if (!isReview1Tab) {
-      console.log(`✅ Row 2 (merged):`, values[1]?.slice(0, 5));
+      // Remove empty rows
+      rawData = rawData.filter(row => row.some(c => c && c.trim() !== ''));
+
+      // ✅ FIX: Normalize headers to match data row length
+      // Google Sheets API may truncate empty cells at the end of header row
+      // But data rows may have values in those columns (e.g., Reviewer 1, Reviewer 2)
+      const maxCols = Math.max(
+        headers.length,
+        ...rawData.map(row => row.length)
+      );
+
+      // Pad headers with default names if needed
+      if (headers.length < maxCols) {
+        console.warn(`⚠️ Headers truncated! Padding from ${headers.length} to ${maxCols} columns`);
+        const paddedHeaders = [...headers];
+        for (let i = headers.length; i < maxCols; i++) {
+          paddedHeaders.push(`Column_${i + 1}`);
+        }
+        headers = paddedHeaders;
+      }
+
+      // Also pad data rows to match header length
+      rawData = rawData.map(row => {
+        if (row.length < maxCols) {
+          const paddedRow = [...row];
+          for (let i = row.length; i < maxCols; i++) {
+            paddedRow.push('');
+          }
+          return paddedRow;
+        }
+        return row;
+      });
+
+      console.log(`✅ Review1 mode (FLAT): Range ${range}`);
+      console.log(`✅ Row 4 (headers):`, headers.slice(0, 10));
+      console.log(`✅ Data rows: ${rawData.length}`);
+
+      const schema = inferSchema(headers, rawData.slice(0, 5));
+
+      // ✅ DEBUG: Log mapping details
+      console.log('📊 Review1 Schema Mapping:', {
+        date: schema.mapping.date !== undefined ? `Column ${schema.mapping.date}: "${headers[schema.mapping.date]}"` : 'MISSING',
+        time: schema.mapping.time !== undefined ? `Column ${schema.mapping.time}: "${headers[schema.mapping.time]}"` : 'MISSING',
+        person: schema.mapping.person !== undefined ? `Column ${schema.mapping.person}: "${headers[schema.mapping.person]}"` : 'MISSING',
+        task: schema.mapping.task !== undefined ? `Column ${schema.mapping.task}: "${headers[schema.mapping.task]}"` : 'MISSING',
+        location: schema.mapping.location !== undefined ? `Column ${schema.mapping.location}: "${headers[schema.mapping.location]}"` : 'MISSING'
+      });
+      console.log('📋 Sample data (first row):', rawData[0]?.slice(0, 12));
+      console.log('📋 Sample DATE value:', rawData[0]?.[schema.mapping.date || 0]);
+      console.log('📋 Sample TIME value:', rawData[0]?.[schema.mapping.time || 0]);
+      console.log('📋 Sample PERSON value:', rawData[0]?.[schema.mapping.person || 0]);
+
+      // ✅ Use simple normalizeRows for Review1 (no grouping)
+      const normalized = this.normalizeRows({
+        sheetId,
+        tab: finalTabName,
+        headers,
+        rawRows: rawData,
+        mapping: schema.mapping,
+        headerRowIndex: headerRowIndex,
+        isDataMau: false
+      });
+
+      console.log(`✅ Normalized: ${rawData.length} rows → ${normalized.length} events (FLAT structure)`);
+
+      return {
+        rows: normalized,
+        schema,
+        headers,
+        rawRows: rawData,
+        allRows: values,
+        sheetId,
+        headerRowIndex: headerRowIndex
+      };
     }
-    console.log(`✅ Row ${headerRowIndex + 1} (headers):`, headers.slice(0, 10));
+
+    // ✅ CRITICAL FIX: Extract Row 2 (group headers) and Row 3 (detail headers) for grouped normalization
+    // Row 2: REVIEW 1, REVIEW 1, REVIEW 1, REVIEW 2, REVIEW 2, REVIEW 2, REVIEW 3, ...
+    // Row 3: Code, Count, Date, Slot, Room, Reviewer 1, Reviewer 2, ...
+    const row2 = this.fillForwardRow(values[1] || []); // Group headers with fill-forward
+    const row3 = values[2] || []; // Detail headers
+
+    // Filter out DEFENSE and CONFLICT columns
+    const columnsToKeep: number[] = [];
+    row2.forEach((h, i) => {
+      const header = (h || '').toString().toLowerCase();
+      if (!header.includes('defense') && !header.includes('conflict')) {
+        columnsToKeep.push(i);
+      }
+    });
+
+    const groupHeaders = columnsToKeep.map(i => row2[i]);
+    const detailHeaders = columnsToKeep.map(i => row3[i] || `Column_${i + 1}`);
+
+    // Extract data rows and apply column filter
+    let rawData = values.slice(headerRowIndex + 1).map(row =>
+      columnsToKeep.map(i => (row[i] || '').toString().trim())
+    );
+
+    // Remove empty rows
+    rawData = rawData.filter(row => row.some(c => c !== ''));
+
+    console.log(`✅ Review mode (GROUPED): Range ${range}`);
+    console.log(`✅ Row 2 (group headers):`, groupHeaders.slice(0, 10));
+    console.log(`✅ Row 3 (detail headers):`, detailHeaders.slice(0, 10));
     console.log(`✅ Data rows: ${rawData.length}`);
+    console.log(`✅ Filtered columns: ${columnsToKeep.length} (removed DEFENSE/CONFLICT)`);
 
-    const schema = inferSchema(headers, rawData.slice(0, 5));
+    const schema = inferSchema(detailHeaders, rawData.slice(0, 5));
 
-    const normalized = this.normalizeRows({
+    // ✅ CRITICAL: Use normalizeRowsWithGrouping to expand each row into multiple events
+    // Example: 4 data rows × 3 review groups = 12 events
+    const normalized = this.normalizeRowsWithGrouping({
       sheetId,
       tab: finalTabName,
-      headers,
+      groupHeaders,
+      detailHeaders,
       rawRows: rawData,
       mapping: schema.mapping,
-      headerRowIndex: headerRowIndex,
-      isDataMau: !isReview1Tab  // Only Data Mẫu tabs need special handling
+      headerRowIndex: headerRowIndex
     });
+
+    console.log(`✅ Normalized: ${rawData.length} rows → ${normalized.length} events (grouped by REVIEW)`);
 
     return {
       rows: normalized,
       schema,
-      headers,
+      headers: detailHeaders, // Return detail headers for UI mapping
       rawRows: rawData,
       allRows: values,  // Return full rows including Row 1, 2, 3 for header selection
       sheetId,
@@ -367,7 +534,14 @@ export class GoogleSyncService {
       const tIdx = headers.findIndex(h =>
         h?.toLowerCase().includes("giờ") ||
         h?.toLowerCase().includes("slot") ||
-        h?.toLowerCase().includes("time")
+        h?.toLowerCase().includes("time") ||
+        h?.toLowerCase().includes("tiết")
+      );
+      const pIdx = headers.findIndex(h =>
+        h?.toLowerCase().includes("reviewer") ||
+        h?.toLowerCase().includes("người") ||
+        h?.toLowerCase().includes("tên") ||
+        h?.toLowerCase().includes("giảng viên")
       );
 
       if (dIdx === -1 || tIdx === -1) {
@@ -379,9 +553,9 @@ export class GoogleSyncService {
       const manualMapping: ColumnMapping = {
         date: dIdx,
         time: tIdx,
-        person: headers.findIndex(h => h?.toLowerCase().includes("họ") || h?.toLowerCase().includes("tên")),
-        task: headers.findIndex(h => h?.toLowerCase().includes("nhiệm vụ") || h?.toLowerCase().includes("môn")),
-        location: headers.findIndex(h => h?.toLowerCase().includes("phòng"))
+        person: pIdx !== -1 ? pIdx : headers.findIndex(h => h?.toLowerCase().includes("họ") || h?.toLowerCase().includes("tên")),
+        task: headers.findIndex(h => h?.toLowerCase().includes("nhiệm vụ") || h?.toLowerCase().includes("môn") || h?.toLowerCase().includes("code")),
+        location: headers.findIndex(h => h?.toLowerCase().includes("phòng") || h?.toLowerCase().includes("room"))
       };
 
       return this.normalizeRows({
@@ -393,11 +567,26 @@ export class GoogleSyncService {
     }
 
     // Có mapping hợp lệ, tiến hành normalize
-    return rawRows
-      .filter((row: any) => {
-        const dateVal = row[mapping.date!];
-        return dateVal && dateVal.toString().trim() !== "";
-      })
+    console.log('🔍 normalizeRows: Starting normalization...', {
+      totalRows: rawRows.length,
+      dateIndex: mapping.date,
+      timeIndex: mapping.time,
+      personIndex: mapping.person,
+      sampleRow: rawRows[0]
+    });
+
+    const filteredRows = rawRows.filter((row: any) => {
+      const dateVal = row[mapping.date!];
+      const hasDate = dateVal && dateVal.toString().trim() !== "";
+      if (!hasDate) {
+        console.warn(`⚠️ Row filtered out - missing date at index ${mapping.date}:`, row.slice(0, 10));
+      }
+      return hasDate;
+    });
+
+    console.log(`🔍 After date filter: ${filteredRows.length}/${rawRows.length} rows remaining`);
+
+    return filteredRows
       .map((row: any, idx: number): RowNormalized | null => {
         try {
           const dateStr = row[mapping.date!].toString().trim();
@@ -444,181 +633,217 @@ export class GoogleSyncService {
   }
 
   /**
-   * 3. SYNC TO CALENDAR: Đồng bộ tuyệt đối với logic Keep/Overwrite thông minh
+   * 2b. FLATTEN ROW: Decompose a row with grouped columns into multiple events
+   * Used for sheets with structure: Row 2 = Groups ('REVIEW 1', 'REVIEW 2'), Row 3 = Details ('Code', 'Date', 'Reviewer')
    */
-  async syncToCalendar(rows: RowNormalized[], token: string): Promise<SyncResult> {
+  private flattenRow(params: {
+    sheetId: string;
+    tab: string;
+    rowIndex: number;
+    groupHeaders: string[]; // Row 2: ['REVIEW 1', 'REVIEW 1', ..., 'REVIEW 2', ...]
+    detailHeaders: string[]; // Row 3: ['Code', 'Count', 'Date', 'Slot', 'Room', 'Reviewer', ...]
+    rawRow: string[];
+    headerRowIndex: number;
+  }): RowNormalized[] {
+    const { sheetId, tab, rowIndex, groupHeaders, detailHeaders, rawRow, headerRowIndex } = params;
+    const events: RowNormalized[] = [];
+
+    // Group columns by group name
+    const groups = new Map<string, number[]>(); // 'REVIEW 1' => [0, 1, 2, 3, 4, 5]
+    groupHeaders.forEach((group, colIndex) => {
+      const groupName = (group || '').trim();
+      // Skip generic columns or empty groups
+      if (!groupName || groupName.match(/^Column_?\d+$/i)) return;
+
+      if (!groups.has(groupName)) groups.set(groupName, []);
+      groups.get(groupName)!.push(colIndex);
+    });
+
+    // For each group, extract values and create event
+    groups.forEach((colIndices, groupName) => {
+      try {
+        // Extract values for this group
+        const groupData: Record<string, string> = {};
+        colIndices.forEach(colIndex => {
+          const header = detailHeaders[colIndex];
+          const value = (rawRow[colIndex] || '').toString().trim();
+          if (header && value) {
+            groupData[header] = value;
+          }
+        });
+
+        // Find value by header keywords; optional exclude to avoid wrong column (e.g. Date vs Day Of Week)
+        const findValueInGroup = (
+          data: Record<string, string>,
+          keywords: string[],
+          excludeKeywords: string[] = []
+        ): string => {
+          for (const [key, val] of Object.entries(data)) {
+            const keyLower = key.toLowerCase();
+            if (excludeKeywords.some(ex => keyLower.includes(ex.toLowerCase()))) continue;
+            if (keywords.some(kw => keyLower.includes(kw.toLowerCase()))) {
+              return val;
+            }
+          }
+          return '';
+        };
+
+        // Date: chỉ lấy cột "Date" (30/01/2026), KHÔNG lấy "Day Of Week" (Thu)
+        let date = findValueInGroup(
+          groupData,
+          ['date', 'ngày'],
+          ['day of week', 'week', 'thứ'] // loại trừ cột ngày trong tuần
+        );
+        // Chỉ chấp nhận giá trị giống ngày (có / hoặc - và số), bỏ qua "Thu", "1", "NVH F.01"
+        const looksLikeDate = (v: string) => /^\d{1,2}[\/\-\.]\d{1,2}[\/\-\.]\d{2,4}$/.test((v || '').trim());
+        if (date && !looksLikeDate(date)) date = '';
+        // Slot: số 1-5 (map tới 07:00-09:15, ...)
+        const slot = findValueInGroup(groupData, ['slot', 'tiết', 'time', 'giờ']);
+        // Room: NVH G.02, NVH F.01... (không lấy tên người)
+        const room = findValueInGroup(groupData, ['room', 'phòng']);
+        // Reviewer: Reviewer 1, Reviewer 2 hoặc tên GV
+        const reviewer = findValueInGroup(groupData, ['reviewer 1', 'reviewer 2', 'reviewer', 'người đánh giá', 'đánh giá']);
+        const code = findValueInGroup(groupData, ['code', 'mã']);
+        const count = findValueInGroup(groupData, ['count', 'số lượng']);
+
+        // ✅ FIX: Only require date (not reviewer) to create event
+        // Reviewer can be empty - many review slots don't have reviewers assigned yet
+        if (date && date.trim() !== '') {
+          const { start, end } = parseVNTime(date, slot || '');
+
+          events.push({
+            id: `${sheetId}_${tab}_row${rowIndex + headerRowIndex + 1}_${groupName}`,
+            groupName,
+            sourceRowId: `${sheetId}_${tab}_row${rowIndex + headerRowIndex + 1}`,
+            person: reviewer || 'Chưa phân công', // ✅ Default value if reviewer not assigned
+            date,
+            startTime: start,
+            endTime: end,
+            task: code || count || groupName,
+            location: room || 'Chưa xác định',
+            raw: groupData,
+            status: 'pending'
+          });
+        }
+      } catch (e) {
+        console.warn(`⚠️ Bỏ qua ${groupName} trong dòng ${rowIndex + 1}:`, e);
+      }
+    });
+
+    return events;
+  }
+
+  /**
+   * 2c. NORMALIZE ROWS with optional nested mapping support
+   */
+  normalizeRowsWithGrouping(params: {
+    sheetId: string;
+    tab: string;
+    groupHeaders?: string[]; // Row 2: groups like 'REVIEW 1', 'REVIEW 2'
+    detailHeaders: string[]; // Row 3: detail columns like 'Code', 'Date', 'Reviewer'
+    rawRows: string[][];
+    mapping: ColumnMapping;
+    headerRowIndex: number;
+  }): RowNormalized[] {
+    const { groupHeaders, detailHeaders, rawRows, headerRowIndex } = params;
+
+    // If no groupHeaders, use legacy normalization (1 row = 1 event)
+    if (!groupHeaders || groupHeaders.length === 0) {
+      return this.normalizeRows({
+        ...params,
+        headers: detailHeaders
+      });
+    }
+
+    // Flatten: each row becomes multiple events (one per review group)
+    const allEvents: RowNormalized[] = [];
+    rawRows.forEach((rawRow, rowIndex) => {
+      const events = this.flattenRow({
+        sheetId: params.sheetId,
+        tab: params.tab,
+        rowIndex,
+        groupHeaders,
+        detailHeaders,
+        rawRow,
+        headerRowIndex
+      });
+      allEvents.push(...events);
+    });
+
+    return allEvents;
+  }
+
+  /**
+   * 3. SYNC TO CALENDAR: Gửi dữ liệu đến Google Apps Script Web App
+   * Apps Script tự động xử lý logic Mirroring (Xóa cũ - Đè mới)
+   * 
+   * ✅ CORS Bypass: Sử dụng hidden iframe để submit form thay vì fetch API
+   */
+  async syncToCalendar(
+    rows: RowNormalized[],
+    token: string
+  ): Promise<SyncResult> {
+
     const stats = { created: 0, updated: 0, failed: 0, logs: [] as string[] };
 
     if (!rows || rows.length === 0) {
+      stats.logs.push('⚠️ Không có dữ liệu để đồng bộ');
       return stats;
     }
 
-    for (const row of rows) {
-      try {
-        const newStartTime = new Date(row.startTime);
-        const newEndTime = new Date(row.endTime);
-        const nStart = newStartTime.getTime();
-        const nEnd = newEndTime.getTime();
+    try {
+      // 📦 Chuẩn bị payload gửi đến Apps Script
+      const events = rows.map(row => ({
+        title: `[${row.task}] - ${row.person}`,
+        start: row.startTime,  // ISO 8601 format: "2026-01-31T08:00:00+07:00"
+        end: row.endTime,      // ISO 8601 format: "2026-01-31T10:00:00+07:00"
+        room: row.location || ''
+      }));
 
-        // 📅 BƯỚC 1: QUÉT DIỆN RỘNG - Lấy tất cả events trong cùng ngày
-        const eventDate = new Date(row.startTime);
-        const dayStart = new Date(eventDate);
-        dayStart.setHours(0, 0, 0, 0);
-        const dayEnd = new Date(eventDate);
-        dayEnd.setHours(23, 59, 59, 999);
+      console.log(`🚀 Đang gửi ${events.length} sự kiện đến Apps Script...`);
 
-        const tMin = dayStart.toISOString();
-        const tMax = dayEnd.toISOString();
+      // 🔑 Gọi Apps Script qua Vite proxy để bypass CORS
+      const webAppUrl = '/api/appscript';
 
-        const searchUrl = `https://www.googleapis.com/calendar/v3/calendars/primary/events?timeMin=${tMin}&timeMax=${tMax}&singleEvents=true`;
-        const searchRes = await this.fetchWithAuth(searchUrl, token);
-        const existingEvents = searchRes.items || [];
+      // 🌐 Gọi Apps Script với OAuth token trong header
+      const response = await fetch(webAppUrl, {
+        method: 'POST',
+        redirect: 'follow',
+        headers: {
+          'Authorization': `Bearer ${token}`,  // ✅ CRITICAL: Gửi OAuth token để Apps Script xác thực user
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({ events })
+      });
 
-        // 🎯 BƯỚC 2: PHÂN LOẠI CÁC SỰ KIỆN
-        const targetSummary = `[${row.task}] - ${row.person}`;
-
-        // Tìm event trùng CHÍNH XÁC (cùng tên, người, giờ)
-        const exactMatch = existingEvents.find((e: any) => {
-          if (!e.start?.dateTime || !e.end?.dateTime) return false;
-
-          const existingStart = new Date(e.start.dateTime).getTime();
-          const existingEnd = new Date(e.end.dateTime).getTime();
-
-          return e.summary === targetSummary &&
-            existingStart === nStart &&
-            existingEnd === nEnd;
-        });
-
-        // ✅ LOGIC KEEP: Nếu tìm thấy event hoàn toàn giống nhau
-        if (exactMatch) {
-          stats.logs.push(`⏭️ Giữ nguyên: ${row.task} - ${row.person} (đã tồn tại đúng giờ)`);
-          continue; // Bỏ qua, không cần xóa hay tạo lại
-        }
-
-        // Tìm event cùng TÊN nhưng KHÁC GIỜ (Slot Shift)
-        const sameTaskDifferentTime = existingEvents.find((e: any) => {
-          if (!e.start?.dateTime) return false;
-          const existingStart = new Date(e.start.dateTime).getTime();
-          return e.summary === targetSummary && existingStart !== nStart;
-        });
-
-        // Tìm event KHÁC TÊN nhưng TRÙNG GIỜ (Time Conflict)
-        const differentTaskSameTime = existingEvents.filter((e: any) => {
-          if (!e.start?.dateTime || !e.end?.dateTime) return false;
-
-          const existingStart = new Date(e.start.dateTime).getTime();
-          const existingEnd = new Date(e.end.dateTime).getTime();
-
-          // Kiểm tra overlap thời gian
-          const hasOverlap = nStart < existingEnd && nEnd > existingStart;
-          return hasOverlap && e.summary !== targetSummary;
-        });
-
-        // 🔄 LOGIC OVERWRITE: Xử lý các trường hợp cần ghi đè
-        const eventsToDelete: any[] = [];
-
-        if (sameTaskDifferentTime) {
-          // Trường hợp 1: DỊCH CHUYỂN SLOT
-          const oldTime = new Date(sameTaskDifferentTime.start.dateTime).toLocaleTimeString('vi-VN', {
-            hour: '2-digit',
-            minute: '2-digit',
-            timeZone: 'Asia/Ho_Chi_Minh'
-          });
-          const newTime = newStartTime.toLocaleTimeString('vi-VN', {
-            hour: '2-digit',
-            minute: '2-digit',
-            timeZone: 'Asia/Ho_Chi_Minh'
-          });
-
-          const userConfirmed = window.confirm(
-            `⚠️ DỊCH CHUYỂN SLOT\n\n` +
-            `Nhiệm vụ: ${row.task}\n` +
-            `Người thực hiện: ${row.person}\n\n` +
-            `Giờ cũ: ${oldTime}\n` +
-            `Giờ mới: ${newTime}\n\n` +
-            `Bạn có muốn cập nhật theo giờ mới từ Sheet không?`
-          );
-
-          if (!userConfirmed) {
-            stats.failed++;
-            stats.logs.push(`❌ Người dùng hủy (dịch slot): ${row.task}`);
-            continue;
-          }
-
-          eventsToDelete.push(sameTaskDifferentTime);
-          stats.logs.push(`🔄 Dịch slot: ${row.task} (${oldTime} → ${newTime})`);
-        }
-
-        if (differentTaskSameTime.length > 0) {
-          // Trường hợp 2: XUNG ĐỘT CA
-          const conflictNames = differentTaskSameTime.map((e: any) => {
-            const time = new Date(e.start.dateTime).toLocaleTimeString('vi-VN', {
-              hour: '2-digit',
-              minute: '2-digit',
-              timeZone: 'Asia/Ho_Chi_Minh'
-            });
-            return `  • ${e.summary} (${time})`;
-          }).join('\n');
-
-          const userConfirmed = window.confirm(
-            `⚠️ XUNG ĐỘT CA\n\n` +
-            `Lịch mới từ Sheet:\n` +
-            `  • ${targetSummary}\n` +
-            `  • Giờ: ${newStartTime.toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit', timeZone: 'Asia/Ho_Chi_Minh' })}\n\n` +
-            `Trùng với các sự kiện sau:\n${conflictNames}\n\n` +
-            `Bạn có muốn XÓA các sự kiện cũ và TẠO MỚI theo Sheet không?`
-          );
-
-          if (!userConfirmed) {
-            stats.failed++;
-            stats.logs.push(`❌ Người dùng hủy (xung đột): ${row.task}`);
-            continue;
-          }
-
-          eventsToDelete.push(...differentTaskSameTime);
-          stats.logs.push(`⚔️ Ghi đè xung đột: ${row.task} (xóa ${differentTaskSameTime.length} event cũ)`);
-        }
-
-        // 🗑️ XÓA CÁC EVENTS CẦN GHI ĐÈ
-        for (const eventToDelete of eventsToDelete) {
-          try {
-            await this.fetchWithAuth(
-              `https://www.googleapis.com/calendar/v3/calendars/primary/events/${eventToDelete.id}`,
-              token,
-              { method: 'DELETE' }
-            );
-          } catch (deleteError) {
-            console.warn('⚠️ Không thể xóa event:', deleteError);
-          }
-        }
-
-        // ➕ TẠO EVENT MỚI
-        const payload = {
-          summary: targetSummary,
-          location: row.location,
-          description: Object.entries(row.raw)
-            .map(([k, v]) => `${k}: ${v}`)
-            .join('\n'),
-          start: { dateTime: row.startTime, timeZone: 'Asia/Ho_Chi_Minh' },
-          end: { dateTime: row.endTime, timeZone: 'Asia/Ho_Chi_Minh' },
-        };
-
-        await this.fetchWithAuth(
-          `https://www.googleapis.com/calendar/v3/calendars/primary/events`,
-          token,
-          { method: 'POST', body: JSON.stringify(payload) }
-        );
-
-        stats.created++;
-
-        if (eventsToDelete.length === 0) {
-          stats.logs.push(`✅ Tạo mới: ${row.task} - ${row.person}`);
-        }
-
-      } catch (e: any) {
-        stats.failed++;
-        stats.logs.push(`❌ ${row.task}: ${e.message}`);
+      if (!response.ok) {
+        throw new Error(`Apps Script lỗi ${response.status}: ${response.statusText}`);
       }
+
+      const result = await response.json();
+
+      // 📊 Xử lý kết quả từ Apps Script
+      if (result.status === 'success' && result.data) {
+        stats.created = result.data.added || 0;
+        stats.updated = result.data.overwritten || 0;
+        const kept = result.data.kept || 0;
+
+        stats.logs.push(`✅ Đồng bộ hoàn tất!`);
+        stats.logs.push(`   📌 Thêm mới: ${stats.created}`);
+        stats.logs.push(`   🔄 Ghi đè: ${stats.updated}`);
+        stats.logs.push(`   ⏭️ Giữ nguyên: ${kept}`);
+
+        console.log('✅ Sync thành công:', result.data);
+      } else {
+        throw new Error(result.error || result.message || 'Lỗi không xác định từ Apps Script');
+      }
+
+      console.log('✅ Sync request completed');
+
+    } catch (error: any) {
+      console.error('❌ Đồng bộ thất bại:', error);
+      stats.failed = rows.length;
+      stats.logs.push(`❌ Lỗi: ${error.message}`);
     }
 
     return stats;

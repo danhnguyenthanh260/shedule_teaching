@@ -64,7 +64,7 @@ import { parseExcelFile, parseDateTime, analyzeMergeStructure } from './utils';
 
 export async function Example3_DirectUtilityUsage() {
   // Parse Excel
-  const file = /* ... get file ... */;
+  const file = /* ... get file ... */ as File;
   const sheets = await parseExcelFile(file);
 
   // Process each sheet
@@ -143,11 +143,11 @@ import {
   getMergedCells,
   expandMergedDataRows,
   getHeaderFromMergedCells,
-  analyzeMergeStructure
+  analyzeMergeStructure as analyzeMerge
 } from './utils/mergedCellsHandler';
 
 export function Example5_MergedCellsAnalysis() {
-  const file = /* ... get file ... */;
+  const file = /* ... get file ... */ as File;
   const reader = new FileReader();
 
   reader.onload = (e) => {
@@ -156,7 +156,7 @@ export function Example5_MergedCellsAnalysis() {
     const worksheet = workbook.Sheets[workbook.SheetNames[0]];
 
     // Get merge analysis
-    const analysis = analyzeMergeStructure(worksheet);
+    const analysis = analyzeMerge(worksheet);
     console.log('Merge Analysis:', analysis);
 
     // Get merged cells info
@@ -184,7 +184,7 @@ export function Example5_MergedCellsAnalysis() {
 // EXAMPLE 6: Advanced - Custom Sheet Processing
 // ============================================
 export async function Example6_CustomSheetProcessing() {
-  const file = /* ... get file ... */;
+  const file = /* ... get file ... */ as File;
   const sheets = await parseExcelFile(file);
 
   sheets.forEach(sheet => {

@@ -6,6 +6,11 @@ import { googleService } from './services/googleService';
 import { syncHistoryService } from './services/syncHistoryService';
 import { MergedCellGroup } from './lib/headerParser';
 import Layout from './components/Layout';
+import { useFirebase } from './src/context/FirebaseContext';
+import { GoogleLoginButton, UserProfile as FirebaseUserProfile } from './src/components/FirebaseAuth';
+import { useFirebaseMapping } from './src/hooks/useFirebaseMapping';
+import { syncEventsToCalendar } from './src/services/appsScriptService';
+import { persistStateService } from './lib/persistState';
 
 // Khai báo kiểu cho SDK Google
 declare global {
@@ -15,6 +20,8 @@ declare global {
 }
 
 const App: React.FC = () => {
+  // Firebase Auth & Mapping
+  const { user: firebaseUser, accessToken: firebaseAccessToken, logout } = useFirebase();
   const [user, setUser] = useState<UserProfile | null>(null);
   const [accessToken, setAccessToken] = useState<string | null>(null);
   const [sheetUrl, setSheetUrl] = useState('');
@@ -27,9 +34,11 @@ const App: React.FC = () => {
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [result, setResult] = useState<SyncResult | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [tokenClient, setTokenClient] = useState<any>(null);
+  const [toastMessage, setToastMessage] = useState<string | null>(null);
+  const [syncHistoryRefresh, setSyncHistoryRefresh] = useState(0); // Trigger để refresh history modal
   const [fullHeaders, setFullHeaders] = useState<string[]>([]);  // For group detection
   const [fullDetailHeaders, setFullDetailHeaders] = useState<string[]>([]);  // Actual column names for tier 2
+  const [titleRow, setTitleRow] = useState<string[]>([]); // ✅ Added titleRow state
   const [fullRows, setFullRows] = useState<string[][]>([]);
   const [allRows, setAllRows] = useState<string[][]>([]);
   const [showFullTable, setShowFullTable] = useState(false);
@@ -38,100 +47,272 @@ const App: React.FC = () => {
   const [headerRowIndex, setHeaderRowIndex] = useState<number>(0);
   const [mergedCells, setMergedCells] = useState<MergedCellGroup[]>([]);
 
-  // Get redirect URI (env override -> dynamic)
-  const getRedirectUri = (): string => {
-    const envRedirect = (import.meta as any).env?.VITE_REDIRECT_URI?.trim();
-    if (envRedirect) return envRedirect;
+  // Firebase mapping hook - auto-loads mapping when available
+  const {
+    mapping: savedMapping,
+    loading: mappingLoading,
+    saveMapping: saveFirebaseMapping,
+    getMapping: getFirebaseMapping
+  } = useFirebaseMapping(sheetMeta?.sheetId);
 
-    const isDevelopment = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
-    if (isDevelopment) {
-      return 'http://localhost:3000/callback.html';
-    }
-    // For production (Vercel)
-    return `${window.location.protocol}//${window.location.host}/callback.html`;
-  };
-
-  // Restore session từ localStorage khi app load
+  // Toast notification auto-hide
   useEffect(() => {
-    const savedToken = localStorage.getItem('accessToken');
-    const savedUser = localStorage.getItem('user');
+    if (toastMessage) {
+      const timer = setTimeout(() => setToastMessage(null), 3000);
+      return () => clearTimeout(timer);
+    }
+  }, [toastMessage]);
 
-    if (savedToken && savedUser) {
-      try {
-        setAccessToken(savedToken);
-        setUser(JSON.parse(savedUser));
-        setPersonFilter(JSON.parse(savedUser).name);
-      } catch (err) {
-        console.error('Failed to restore session:', err);
-        localStorage.removeItem('accessToken');
-        localStorage.removeItem('user');
-      }
+  // ✅ Restore toàn bộ state từ localStorage on mount
+  useEffect(() => {
+    const restored = persistStateService.restoreState();
+
+    if (restored.sheetUrl) {
+      setSheetUrl(restored.sheetUrl);
+      console.log('✓ Restored sheet URL:', restored.sheetUrl);
+    }
+
+    if (restored.tabName) {
+      setTabName(restored.tabName);
+      console.log('✓ Restored tab name:', restored.tabName);
+    }
+
+    if (restored.sheetMeta) {
+      setSheetMeta(restored.sheetMeta);
+      console.log('✓ Restored sheet meta:', restored.sheetMeta);
+    }
+
+    if (restored.headerRowIndex !== undefined) {
+      setHeaderRowIndex(restored.headerRowIndex);
+      console.log('✓ Restored header row index:', restored.headerRowIndex);
+    }
+
+    if (restored.columnMap) {
+      setColumnMap(restored.columnMap);
+      console.log('✓ Restored column map:', restored.columnMap);
+    }
+
+    if (restored.personFilter) {
+      setPersonFilter(restored.personFilter);
+      console.log('✓ Restored person filter:', restored.personFilter);
+    }
+
+    if (restored.allRows && restored.allRows.length > 0) {
+      setAllRows(restored.allRows);
+      console.log('✓ Restored all rows:', restored.allRows.length);
+    }
+
+    if (restored.fullHeaders && restored.fullHeaders.length > 0) {
+      setFullHeaders(restored.fullHeaders);
+      console.log('✓ Restored full headers:', restored.fullHeaders.length);
+    }
+
+    if (restored.fullDetailHeaders && restored.fullDetailHeaders.length > 0) {
+      setFullDetailHeaders(restored.fullDetailHeaders);
+      console.log('✓ Restored full detail headers:', restored.fullDetailHeaders.length);
+    }
+
+    if (restored.titleRow && restored.titleRow.length > 0) {
+      setTitleRow(restored.titleRow);
+      console.log('✓ Restored title row:', restored.titleRow.length);
+    }
+
+    if (restored.fullRows && restored.fullRows.length > 0) {
+      setFullRows(restored.fullRows);
+      console.log('✓ Restored full rows:', restored.fullRows.length);
+    }
+
+    if (restored.selectedIds && restored.selectedIds.length > 0) {
+      setSelectedIds(new Set(restored.selectedIds));
+      console.log('✓ Restored selected IDs:', restored.selectedIds.length);
     }
   }, []);
 
+  // ✅ Auto-save state khi thay đổi
   useEffect(() => {
-    const script = document.createElement('script');
-    script.src = 'https://accounts.google.com/gsi/client';
-    script.async = true;
-    script.defer = true;
-    script.onload = () => {
-      // The Google script has loaded, now we can initialize the client.
-      if (window.google) {
-        const client = window.google.accounts.oauth2.initTokenClient({
-          client_id: (import.meta as any).env?.VITE_GOOGLE_CLIENT_ID || 'YOUR_CLIENT_ID_HERE',
-          scope: 'https://www.googleapis.com/auth/spreadsheets.readonly https://www.googleapis.com/auth/calendar.events https://www.googleapis.com/auth/userinfo.profile https://www.googleapis.com/auth/userinfo.email',
-          redirect_uri: getRedirectUri(),
-          callback: (response: any) => {
-            if (response.error) {
-              setError('Lỗi đăng nhập: ' + response.error);
-              return;
-            }
-            setAccessToken(response.access_token);
-            fetchUserProfile(response.access_token);
-          },
-        });
-        setTokenClient(client);
-      }
-    };
-    document.body.appendChild(script);
+    persistStateService.saveState({ sheetUrl });
+  }, [sheetUrl]);
 
-    return () => {
-      document.body.removeChild(script);
-    };
-  }, []);
+  useEffect(() => {
+    persistStateService.saveState({ tabName });
+  }, [tabName]);
 
-  const fetchUserProfile = async (token: string) => {
-    try {
-      const res = await fetch('https://www.googleapis.com/oauth2/v3/userinfo', {
-        headers: { Authorization: `Bearer ${token}` }
+  useEffect(() => {
+    persistStateService.saveState({ sheetMeta });
+  }, [sheetMeta]);
+
+  useEffect(() => {
+    persistStateService.saveState({ headerRowIndex });
+  }, [headerRowIndex]);
+
+  useEffect(() => {
+    persistStateService.saveState({ columnMap });
+  }, [columnMap]);
+
+  useEffect(() => {
+    persistStateService.saveState({ personFilter });
+  }, [personFilter]);
+
+  useEffect(() => {
+    if (allRows.length > 0) {
+      persistStateService.saveState({ allRows });
+    }
+  }, [allRows]);
+
+  useEffect(() => {
+    if (fullHeaders.length > 0) {
+      persistStateService.saveState({ fullHeaders });
+    }
+  }, [fullHeaders]);
+
+  useEffect(() => {
+    if (fullDetailHeaders.length > 0) {
+      persistStateService.saveState({ fullDetailHeaders });
+    }
+  }, [fullDetailHeaders]);
+
+  useEffect(() => {
+    if (titleRow.length > 0) {
+      persistStateService.saveState({ titleRow });
+    }
+  }, [titleRow]);
+
+  useEffect(() => {
+    if (fullRows.length > 0) {
+      persistStateService.saveState({ fullRows });
+    }
+  }, [fullRows]);
+
+  useEffect(() => {
+    if (selectedIds.size > 0) {
+      persistStateService.saveState({ selectedIds: Array.from(selectedIds) });
+    }
+  }, [selectedIds]);
+
+  // Sync Firebase user with local user state and get access token
+  useEffect(() => {
+    if (firebaseUser) {
+      setUser({
+        name: firebaseUser.displayName || firebaseUser.email || 'User',
+        email: firebaseUser.email || '',
+        image: firebaseUser.photoURL || ''
       });
-      const profile = await res.json();
-      const userProfile = {
-        name: profile.name,
-        email: profile.email,
-        image: profile.picture
-      };
-      setUser(userProfile);
-      setPersonFilter(profile.name);
+      setPersonFilter(firebaseUser.displayName || firebaseUser.email || '');
 
-      // 💾 Lưu vào localStorage để persist qua F5
-      localStorage.setItem('accessToken', token);
-      localStorage.setItem('user', JSON.stringify(userProfile));
-    } catch (e) {
-      setError('Không thể lấy thông tin profile.');
-    }
-  };
-
-  const handleLogin = () => {
-    if (tokenClient) {
-      tokenClient.requestAccessToken();
+      // Use access token from Firebase context
+      if (firebaseAccessToken) {
+        setAccessToken(firebaseAccessToken);
+      }
     } else {
-      setError('Google SDK chưa sẵn sàng. Hãy thử lại sau giây lát.');
+      setUser(null);
+      setAccessToken(null);
     }
-  };
+  }, [firebaseUser, firebaseAccessToken]);
 
-  const updateSelections = (data: RowNormalized[]) => {
-    const filterLower = personFilter.toLowerCase();
+  // Auto-load saved mapping when sheet changes
+  useEffect(() => {
+    if (savedMapping && sheetMeta && Object.keys(savedMapping).length > 0) {
+      setColumnMap(savedMapping);
+      setToastMessage('✓ Đã tải mapping đã lưu từ lần trước');
+      console.log('Auto-loaded saved mapping:', savedMapping);
+    }
+  }, [savedMapping, sheetMeta?.sheetId]);
+
+  // ✅ Tái tạo rows từ persisted data khi có đủ thông tin (sau F5)
+  useEffect(() => {
+    if (
+      sheetMeta &&
+      fullHeaders.length > 0 &&
+      fullRows.length > 0 &&
+      columnMap.date !== undefined &&
+      columnMap.time !== undefined &&
+      rows.length === 0 && // Chỉ tái tạo khi rows chưa có
+      !loading // Không tái tạo khi đang load
+    ) {
+      console.log('🔄 Recreating rows from persisted data...');
+      try {
+        // ✅ Check if Review mode (headerRowIndex=2 or 3) and titleRow is available
+        const isReviewMode = (sheetMeta.headerRowIndex === 2 || sheetMeta.headerRowIndex === 3);
+        const hasTitleRow = titleRow && titleRow.length > 0;
+
+        const recreatedRows = isReviewMode && hasTitleRow
+          ? googleService.normalizeRowsWithGrouping({
+            sheetId: sheetMeta.sheetId,
+            tab: sheetMeta.tab,
+            groupHeaders: titleRow,
+            detailHeaders: fullDetailHeaders.length > 0 ? fullDetailHeaders : fullHeaders,
+            rawRows: fullRows,
+            mapping: columnMap,
+            headerRowIndex: sheetMeta.headerRowIndex
+          })
+          : googleService.normalizeRows({
+            sheetId: sheetMeta.sheetId,
+            tab: sheetMeta.tab,
+            headers: fullHeaders,
+            rawRows: fullRows,
+            mapping: columnMap,
+            headerRowIndex: sheetMeta.headerRowIndex
+          });
+
+        if (recreatedRows.length > 0) {
+          setRows(recreatedRows);
+          // ✅ Pass empty string để select ALL rows khi recreate từ persisted data
+          updateSelections(recreatedRows, '');
+          console.log(`✅ Recreated ${recreatedRows.length} rows from persisted data`);
+          setToastMessage(`✓ Đã khôi phục ${recreatedRows.length} dòng dữ liệu`);
+        }
+      } catch (err: any) {
+        console.error('Error recreating rows:', err);
+        setError(`Không thể khôi phục dữ liệu: ${err.message}`);
+      }
+    }
+  }, [sheetMeta, fullHeaders, fullDetailHeaders, titleRow, fullRows, columnMap, rows.length, loading]);
+
+  // Auto-load sheet when URL and accessToken are available (e.g., after F5 refresh)
+  // Chỉ chạy khi chưa có persisted data
+  useEffect(() => {
+    if (
+      sheetUrl &&
+      accessToken &&
+      !loadingMode &&
+      rows.length === 0 &&
+      fullHeaders.length === 0 && // Chưa có persisted headers
+      !sheetMeta // Chưa có persisted meta
+    ) {
+      console.log('Auto-loading sheet after refresh (no persisted data)...');
+      // Trigger Review mode load (more common)
+      setTimeout(() => {
+        setLoadingMode('review');
+        setLoading(true);
+        setResult(null);
+        setError(null);
+
+        (async () => {
+          try {
+            const { rows: data, headers, rawRows, allRows: fetchedRows, schema, sheetId, headerRowIndex } = await googleService.loadSheetReview(sheetUrl, tabName, accessToken);
+            setAllRows(fetchedRows || []);
+            setShowFullTable(false);
+            setSheetMeta({ sheetId, tab: tabName, headerRowIndex });
+            applyHeaderRow(headerRowIndex, fetchedRows, { sheetId, tab: tabName });
+          } catch (err: any) {
+            console.error('Auto-load error:', err);
+            setError(err.message);
+          } finally {
+            setLoading(false);
+            setLoadingMode(null);
+          }
+        })();
+      }, 500); // Small delay to ensure state is settled
+    }
+  }, [sheetUrl, accessToken, loadingMode, rows.length, fullHeaders.length, sheetMeta]);
+
+  const updateSelections = (data: RowNormalized[], filterValue?: string) => {
+    const filterLower = (filterValue !== undefined ? filterValue : personFilter).toLowerCase();
+    if (!filterLower || filterLower === '') {
+      // No filter → select all
+      setSelectedIds(new Set(data.map(r => r.id)));
+      return;
+    }
     const matches = data.filter(r =>
       r.person.toLowerCase().includes(filterLower) ||
       r.email?.toLowerCase().includes(filterLower)
@@ -228,30 +409,30 @@ const App: React.FC = () => {
     // DO NOT merge with Row 2 - keep them separate (Row 2 = title, Row 3 = headers)
     let detailHeaders: string[];
     let dataStartIndex: number;
-    let titleRow: string[] = [];  // For Review mode: Row 2 titles
+    let computedTitleRow: string[] = [];  // For Review mode: Row 2 titles (renamed)
 
-    if (idx === 2) {
+    if (idx === 2 || idx === 3) {
       // Review mode: ALWAYS use Row 3 (idx=2) as headers, Row 2 (idx=1) as titles
       detailHeaders = filledHeaders;  // Row 3
-      titleRow = rows[1] ? fillForwardHeaders(rows[1]) : [];  // Row 2
+      computedTitleRow = rows[idx - 1] ? fillForwardHeaders(rows[idx - 1]) : [];  // Row above header
       dataStartIndex = idx + 1;  // Data starts at Row 4
 
       // Filter out DEFENSE and CONFLICT from both
       const columnsToKeep: number[] = [];
-      titleRow.forEach((h, i) => {
+      computedTitleRow.forEach((h, i) => {
         const header = (h || "").toString().toLowerCase();
         if (!header.includes('defense') && !header.includes('conflict')) {
           columnsToKeep.push(i);
         }
       });
 
-      if (columnsToKeep.length < titleRow.length) {
-        titleRow = columnsToKeep.map(i => titleRow[i]);
+      if (columnsToKeep.length < computedTitleRow.length) {
+        computedTitleRow = columnsToKeep.map(i => computedTitleRow[i]);
         detailHeaders = columnsToKeep.map(i => detailHeaders[i]);
-        headers = titleRow;  // Use filtered titles for group display
+        headers = detailHeaders;  // Use detail headers for mapping/display
         console.log(`✅ Filtered out ${filledHeaders.length - columnsToKeep.length} DEFENSE/CONFLICT columns`);
       } else {
-        headers = titleRow;  // Use Row 2 titles for group display
+        headers = detailHeaders;  // Use detail headers for mapping/display
       }
     } else if (hasGroups && rows[idx + 1]) {
       // Row has groups → use filled row for grouping, next row for details
@@ -287,10 +468,10 @@ const App: React.FC = () => {
     let rawRows = rows.slice(dataStartIndex);
 
     // ✅ Apply column filter to data rows if we filtered headers
-    if (idx === 2 && titleRow.length > 0) {
+    if ((idx === 2 || idx === 3) && computedTitleRow.length > 0) {
       // Review mode: filter based on titleRow (Row 2)
-      const unfilteredTitleRow = rows[1] ? fillForwardHeaders(rows[1]) : [];
-      if (titleRow.length < unfilteredTitleRow.length) {
+      const unfilteredTitleRow = rows[idx - 1] ? fillForwardHeaders(rows[idx - 1]) : [];
+      if (computedTitleRow.length < unfilteredTitleRow.length) {
         const columnsToKeep: number[] = [];
         unfilteredTitleRow.forEach((h, i) => {
           const header = (h || "").toString().toLowerCase();
@@ -325,6 +506,7 @@ const App: React.FC = () => {
     setFullHeaders(headers);  // For group detection
     setFullDetailHeaders(detailHeaders);  // Actual column names for UI tier 2
     setFullRows(rawRows);
+    setTitleRow(computedTitleRow);
     setColumnMap({
       date: schema.mapping.date,
       time: schema.mapping.time,
@@ -336,16 +518,38 @@ const App: React.FC = () => {
 
     if (nextMeta) {
       setSheetMeta(nextMeta);
-      const data = googleService.normalizeRows({
-        sheetId: nextMeta.sheetId,
-        tab: nextMeta.tab,
-        headers: detailHeaders,  // Use detail headers for data mapping
-        rawRows,
-        mapping: schema.mapping,
-        headerRowIndex: idx
+
+      // ✅ Use nested mapping strategy for Review mode (idx=2 or idx=3)
+      // Pass both computedTitleRow (Row 2 groups) and detailHeaders (Row 3 columns)
+      const data = (idx === 2 || idx === 3) && computedTitleRow.length > 0
+        ? googleService.normalizeRowsWithGrouping({
+          sheetId: nextMeta.sheetId,
+          tab: nextMeta.tab,
+          groupHeaders: computedTitleRow,  // Row 2: 'REVIEW 1', 'REVIEW 2', etc.
+          detailHeaders,           // Row 3: 'Code', 'Date', 'Reviewer', etc.
+          rawRows,
+          mapping: schema.mapping,
+          headerRowIndex: idx
+        })
+        : googleService.normalizeRows({
+          sheetId: nextMeta.sheetId,
+          tab: nextMeta.tab,
+          headers: detailHeaders,  // Use detail headers for data mapping
+          rawRows,
+          mapping: schema.mapping,
+          headerRowIndex: idx
+        });
+
+      // ✅ Sort by startTime (chronological order) before setting rows
+      const sortedData = data.sort((a, b) => {
+        const timeA = new Date(a.startTime).getTime();
+        const timeB = new Date(b.startTime).getTime();
+        return timeA - timeB;
       });
-      setRows(data);
-      updateSelections(data);
+
+      setRows(sortedData);
+      // ✅ Pass empty string để select ALL rows khi apply header row
+      updateSelections(sortedData, '');
     } else {
       setRows([]);
       setSelectedIds(new Set());
@@ -353,9 +557,16 @@ const App: React.FC = () => {
   };
 
 
-  const applyMapping = () => {
+  const applyMapping = async () => {
     try {
-      console.log('applyMapping called:', { sheetMeta, columnMap, fullHeaders: fullHeaders.length, fullRows: fullRows.length });
+      console.log('applyMapping called:', {
+        sheetMeta,
+        columnMap,
+        fullHeaders: fullHeaders.length,
+        fullRows: fullRows.length,
+        allRows: allRows.length
+      });
+      console.log('First 3 rows of fullRows:', fullRows.slice(0, 3).map(r => r.slice(0, 5)));
       if (!sheetMeta) {
         setError('Vui lòng tải dữ liệu trước (sheetMeta không tồn tại)');
         console.error('sheetMeta is null');
@@ -371,16 +582,104 @@ const App: React.FC = () => {
         console.error('Missing date or time mapping:', { date: columnMap.date, time: columnMap.time });
         return;
       }
+
+      // ✅ IMPORTANT: Use allRows to get fresh unprocessed data rows
+      // Do not use fullRows which might have been trimmed or filtered
+      let dataRowsToUse = fullRows;
+      let groupHeadersToUse = titleRow; // Default to current titleRow state
+
+      // If we have allRows (raw data from API), extract and reconstruct data rows
+      if (allRows.length > 0 && sheetMeta.headerRowIndex !== undefined) {
+        const dataStartIdx = sheetMeta.headerRowIndex + 1;
+        let rawFromAll = allRows.slice(dataStartIdx);
+
+        console.log(`applyMapping: Got ${rawFromAll.length} raw rows from allRows, dataStartIdx=${dataStartIdx}`);
+
+        // ✅ For Review mode (headerRowIndex=2 or 3), reconstruct group headers from Row 2
+        if (sheetMeta.headerRowIndex === 2 || sheetMeta.headerRowIndex === 3) {
+          const row2Raw = allRows[1] || []; // Row 2 (index 1) contains group headers
+
+          // Fill forward Row 2 to handle merged cells
+          const fillForwardRow = (row: string[]): string[] => {
+            const filled: string[] = [];
+            let last = '';
+            for (let i = 0; i < row.length; i++) {
+              const cell = (row[i] || '').toString().trim();
+              if (cell) {
+                last = cell;
+                filled[i] = cell;
+              } else {
+                filled[i] = last || `Column_${i + 1}`;
+              }
+            }
+            return filled;
+          };
+
+          const row2Filled = fillForwardRow(row2Raw);
+
+          // Filter out DEFENSE and CONFLICT columns
+          const columnsToKeep: number[] = [];
+          row2Filled.forEach((h, i) => {
+            const header = (h || "").toString().toLowerCase();
+            if (!header.includes('defense') && !header.includes('conflict')) {
+              columnsToKeep.push(i);
+            }
+          });
+
+          // Reconstruct group headers with filter applied
+          groupHeadersToUse = columnsToKeep.map(i => row2Filled[i]);
+
+          console.log(`applyMapping: Reconstructed ${groupHeadersToUse.length} group headers from Row 2`);
+          console.log(`applyMapping: Group headers:`, groupHeadersToUse.slice(0, 10));
+          console.log(`applyMapping: Keeping columns ${columnsToKeep.join(', ')} (filtered out DEFENSE/CONFLICT)`);
+
+          // Apply column filter to data rows
+          rawFromAll = rawFromAll.map(row => columnsToKeep.map(i => row[i] || ''));
+        } else {
+          // ✅ For non-Review mode, apply the same column filtering as before
+          const originalHeaderCount = allRows[sheetMeta.headerRowIndex]?.length || 0;
+          const currentHeaderCount = fullHeaders.length;
+
+          if (currentHeaderCount < originalHeaderCount) {
+            console.log(`applyMapping: Applying column filter (${originalHeaderCount} → ${currentHeaderCount})`);
+            const originalHeaderRow = allRows[sheetMeta.headerRowIndex] || [];
+            const columnsToKeep: number[] = [];
+
+            originalHeaderRow.forEach((h, i) => {
+              const header = (h || "").toString().toLowerCase();
+              if (!header.includes('defense') && !header.includes('conflict')) {
+                columnsToKeep.push(i);
+              }
+            });
+
+            console.log(`applyMapping: Keeping columns ${columnsToKeep.join(', ')} (filtered out DEFENSE/CONFLICT)`);
+            rawFromAll = rawFromAll.map(row => columnsToKeep.map(i => row[i] || ''));
+          }
+        }
+
+        dataRowsToUse = rawFromAll;
+      }
+
       console.log('applyMapping proceeding with data...');
       setError(null);
-      const data = googleService.normalizeRows({
-        sheetId: sheetMeta.sheetId,
-        tab: sheetMeta.tab,
-        headers: fullHeaders,
-        rawRows: fullRows,
-        mapping: columnMap,
-        headerRowIndex: sheetMeta.headerRowIndex
-      });
+      const data = (sheetMeta.headerRowIndex === 2 || sheetMeta.headerRowIndex === 3) && groupHeadersToUse.length > 0
+        ? googleService.normalizeRowsWithGrouping({
+          sheetId: sheetMeta.sheetId,
+          tab: sheetMeta.tab,
+          groupHeaders: groupHeadersToUse,
+          detailHeaders: fullDetailHeaders,
+          rawRows: dataRowsToUse,
+          mapping: columnMap,
+          headerRowIndex: sheetMeta.headerRowIndex
+        })
+        : googleService.normalizeRows({
+          sheetId: sheetMeta.sheetId,
+          tab: sheetMeta.tab,
+          headers: fullHeaders,
+          rawRows: dataRowsToUse,
+          mapping: columnMap,
+          headerRowIndex: sheetMeta.headerRowIndex
+        });
       console.log('Normalized data:', data.length, 'rows');
       console.log('First row:', data[0]);
       if (data.length === 0) {
@@ -390,7 +689,20 @@ const App: React.FC = () => {
       setRows(data);
       setPersonFilter(''); // Reset filter khi apply mapping
       console.log('After setRows, rows state should be updated');
-      updateSelections(data);
+      // ✅ Pass empty string để select all rows (không filter)
+      updateSelections(data, '');
+
+      // 💾 Save mapping to Firebase for next time
+      if (firebaseUser && sheetMeta) {
+        try {
+          await saveFirebaseMapping(sheetMeta.sheetId, columnMap);
+          setToastMessage('✓ Đã lưu mapping cho lần sau');
+          console.log('Saved mapping to Firebase:', columnMap);
+          S
+        } catch (err) {
+          console.error('Failed to save mapping to Firebase:', err);
+        }
+      }
     } catch (e: any) {
       console.error('Error in applyMapping:', e);
       setError(`Lỗi: ${e.message}`);
@@ -403,7 +715,7 @@ const App: React.FC = () => {
     setResult(null);
     setError(null);
     try {
-      const { rows: data, headers, rawRows, allRows: fetchedRows, schema, sheetId, headerRowIndex, mergedCells: merged } = await googleService.loadSheet(sheetUrl, tabName, accessToken);
+      const { rows: data, headers, rawRows, allRows: fetchedRows, schema, sheetId, headerRowIndex, mergedCells: merged, groupHeaders: loadedGroupHeaders, detailHeaders: loadedDetailHeaders } = await googleService.loadSheet(sheetUrl, tabName, accessToken);
       console.log('Loaded data:', {
         dataCount: data.length,
         headerCount: headers?.length,
@@ -411,7 +723,8 @@ const App: React.FC = () => {
         allRowsCount: fetchedRows?.length,
         firstHeader: headers?.[0],
         firstRow: rawRows?.[0],
-        mergedCells: merged
+        mergedCells: merged,
+        hasGrouping: !!(loadedGroupHeaders && loadedDetailHeaders)
       });
       setAllRows(fetchedRows || []);
       setShowFullTable(false);
@@ -420,7 +733,14 @@ const App: React.FC = () => {
       setMergedCells(merged);
 
       setRows(data);
-      setFullHeaders(headers || []);
+      // Data Mẫu: dùng groupHeaders (Row 2) và detailHeaders (Row 3) để Áp dụng sau này vẫn ra 12 mục
+      if (loadedGroupHeaders && loadedDetailHeaders) {
+        setFullHeaders(loadedDetailHeaders); // Use Data Headers (Date, Code...) for UI Mapping
+        setFullDetailHeaders(loadedDetailHeaders);
+      } else {
+        setFullHeaders(headers || []);
+        setFullDetailHeaders(headers || []);
+      }
       setFullRows(rawRows || []);
       setColumnMap({
         date: schema.mapping.date,
@@ -431,7 +751,8 @@ const App: React.FC = () => {
         email: schema.mapping.email
       });
 
-      updateSelections(data);
+      // ✅ Pass empty string để select ALL rows khi load sheet
+      updateSelections(data, '');
     } catch (err: any) {
       console.error('Load error:', err);
       setError(err.message);
@@ -439,25 +760,87 @@ const App: React.FC = () => {
       setLoading(false);
     }
   };
-
   const handleSync = async () => {
     const toSync = rows.filter(r => selectedIds.has(r.id));
-    if (toSync.length === 0 || !accessToken || !sheetMeta) return;
+    if (toSync.length === 0 || !sheetMeta) return;
+
     setSyncing(true);
     setError(null);
+
     try {
-      const res = await googleService.syncToCalendar(toSync, accessToken);
+      const backendUrl = import.meta.env.VITE_BACKEND_URL;
+      let res: SyncResult;
+
+      // 🚀 Try Apps Script service first (if deployed)
+      if (backendUrl && backendUrl !== 'http://localhost:5000') {
+        try {
+          console.log('Using Apps Script backend:', backendUrl);
+
+          // Convert to Apps Script event format
+          const events = toSync.map(row => ({
+            title: row.person || row.task || 'Event',
+            start: row.startTime,
+            end: row.endTime,
+            location: row.location,
+            description: `Task: ${row.task || 'N/A'}\nEmail: ${row.email || 'N/A'}`,
+            guests: row.email
+          }));
+
+          const appsScriptResult = await syncEventsToCalendar(events, 'Schedule Teaching');
+
+          // Convert Apps Script response to SyncResult format
+          res = {
+            created: appsScriptResult.data?.success || 0,
+            updated: 0,
+            failed: appsScriptResult.data?.failed || 0,
+            logs: appsScriptResult.data?.errors?.map(e => e.message) || []
+          };
+
+          setToastMessage(`✓ Đã đồng bộ ${res.created}/${toSync.length} sự kiện`);
+        } catch (appsScriptError: any) {
+          console.error('Apps Script sync failed, falling back to Calendar API:', appsScriptError);
+          // Fallback to direct Calendar API if Apps Script fails
+          if (accessToken) {
+            res = await googleService.syncToCalendar(toSync, accessToken);
+            setToastMessage('✓ Đã đồng bộ qua Calendar API (fallback)');
+          } else {
+            throw new Error('Không có access token để sử dụng Calendar API');
+          }
+        }
+      } else {
+        // 🔄 Fallback: Use direct Calendar API (legacy method)
+        console.log('Using direct Calendar API (VITE_BACKEND_URL not configured)');
+        if (!accessToken) {
+          throw new Error('Cần access token để sử dụng Calendar API');
+        }
+        res = await googleService.syncToCalendar(toSync, accessToken);
+        setToastMessage('✓ Đã đồng bộ qua Calendar API');
+      }
+
       setResult(res);
 
-      // Save sync history to database (non-blocking)
-      await syncHistoryService.saveSyncResult(
-        sheetMeta.sheetId,
-        sheetMeta.tab,
-        toSync,
-        res,
-        accessToken
-      );
+      // 💾 Save sync history to Firestore (non-blocking)
+      if (firebaseUser && sheetMeta) {
+        try {
+          const { firestoreSyncHistoryService } = await import('./services/firestoreSyncHistoryService');
+          await firestoreSyncHistoryService.saveSyncResult(
+            firebaseUser.uid,
+            sheetMeta.sheetId,
+            sheetMeta.tab,
+            toSync.length,
+            res.created,
+            res.updated,
+            res.failed
+          );
+          // ✅ Trigger history modal refresh
+          setSyncHistoryRefresh(prev => prev + 1);
+          console.log('✓ Saved sync history and triggered refresh');
+        } catch (historyError) {
+          console.error('Failed to save sync history:', historyError);
+        }
+      }
     } catch (err: any) {
+      console.error('Sync error:', err);
       setError(err.message);
     } finally {
       setSyncing(false);
@@ -467,22 +850,44 @@ const App: React.FC = () => {
   const filteredRows = useMemo(() => {
     if (!personFilter || personFilter.toLowerCase() === 'all') return rows;
     const f = personFilter.toLowerCase();
+
+    // 🔍 Detect sheet name to determine filter columns
+    const currentTab = sheetMeta?.tab?.toLowerCase() || '';
+    let filterKeywords: string[] = [];
+
+    // ✅ "Data mẫu" sheets (Sheet1, Review1) → Filter by "Reviewer"
+    if (currentTab.includes('sheet1') || currentTab.includes('review')) {
+      filterKeywords = ['reviewer', 'người đánh giá', 'đánh giá'];
+    }
+    // ✅ "test1" sheet → Filter by "Thành viên hội đồng"
+    else if (currentTab.includes('test')) {
+      filterKeywords = ['thành viên', 'hội đồng', 'member'];
+    }
+    // ⚠️ Fallback: Filter by "GVHD" (old behavior)
+    else {
+      filterKeywords = ['gvhd', 'giảng viên', 'hướng dẫn'];
+    }
+
     return rows.filter(r => {
-      // Search in all raw data columns for GVHD match
-      const gvhdColumns = Object.entries(r.raw).filter(([key]) =>
-        key.toLowerCase().includes('gvhd') ||
-        key.toLowerCase().includes('giảng viên') ||
-        key.toLowerCase().includes('hướng dẫn')
+      // Search in raw data columns for matching keywords
+      const targetColumns = Object.entries(r.raw).filter(([key]) =>
+        filterKeywords.some(keyword => key.toLowerCase().includes(keyword))
       );
 
-      if (gvhdColumns.length > 0) {
-        return gvhdColumns.some(([, value]) => (value as string).toLowerCase().includes(f));
+      if (targetColumns.length > 0) {
+        return targetColumns.some(([, value]) => (value as string).toLowerCase().includes(f));
       }
 
-      // Fallback to person/email if no GVHD column found
+      // Fallback to person/email if no matching column found
       return r.person.toLowerCase().includes(f) || r.email?.toLowerCase().includes(f);
-    });
-  }, [rows, personFilter]);
+    })
+      // ✅ Sort by startTime (chronological order: date + time)
+      .sort((a, b) => {
+        const timeA = new Date(a.startTime).getTime();
+        const timeB = new Date(b.startTime).getTime();
+        return timeA - timeB;
+      });
+  }, [rows, personFilter, sheetMeta]);
 
   const handleMapChange = (key: keyof ColumnMapping) => (e: React.ChangeEvent<HTMLSelectElement>) => {
     const value = e.target.value;
@@ -514,30 +919,43 @@ const App: React.FC = () => {
     return Array.from({ length: maxCols }, (_, i) => `Column ${i + 1}`);
   }, [fullHeaders, fullRows]);
 
-  // Filter full table rows by GVHD
+  // Filter full table rows by dynamic column detection
   const filteredFullTableRows = useMemo(() => {
     if (!personFilter || personFilter.toLowerCase() === 'all') return fullRows;
 
     const f = personFilter.toLowerCase();
-    const gvhdColIndices: number[] = [];
 
-    // Find GVHD column indices
+    // 🔍 Detect sheet name to determine filter columns (same as filteredRows)
+    const currentTab = sheetMeta?.tab?.toLowerCase() || '';
+    let filterKeywords: string[] = [];
+
+    if (currentTab.includes('sheet1') || currentTab.includes('review')) {
+      filterKeywords = ['reviewer', 'người đánh giá', 'đánh giá'];
+    } else if (currentTab.includes('test')) {
+      filterKeywords = ['thành viên', 'hội đồng', 'member'];
+    } else {
+      filterKeywords = ['gvhd', 'giảng viên', 'hướng dẫn'];
+    }
+
+    const targetColIndices: number[] = [];
+
+    // Find column indices matching filter keywords
     fullTableColumns.forEach((header, index) => {
       const h = header.toLowerCase();
-      if (h.includes('gvhd') || h.includes('giảng viên') || h.includes('hướng dẫn')) {
-        gvhdColIndices.push(index);
+      if (filterKeywords.some(keyword => h.includes(keyword))) {
+        targetColIndices.push(index);
       }
     });
 
-    if (gvhdColIndices.length === 0) return fullRows;
+    if (targetColIndices.length === 0) return fullRows;
 
     return fullRows.filter(row => {
-      return gvhdColIndices.some(colIndex => {
+      return targetColIndices.some(colIndex => {
         const cellValue = (row[colIndex] || '').toString().toLowerCase();
         return cellValue.includes(f);
       });
     });
-  }, [fullRows, fullTableColumns, personFilter]);
+  }, [fullRows, fullTableColumns, personFilter, sheetMeta]);
 
   const headerOptions = useMemo(() => {
     return fullTableColumns.map((h, i) => ({
@@ -593,33 +1011,36 @@ const App: React.FC = () => {
             </div>
             <h1 className="text-4xl font-extrabold text-slate-900 mb-3 tracking-tight">Schedule Sync</h1>
             <p className="text-slate-600 mb-8 font-normal leading-relaxed text-sm">Quản lý lịch đồng bộ từ Google Sheets sang Calendar một cách dễ dàng</p>
-            <button
-              onClick={handleLogin}
-              className="w-full py-3 px-6 bg-gradient-to-r from-indigo-600 to-indigo-700 hover:from-indigo-700 hover:to-indigo-800 text-white font-semibold rounded-xl transition-all duration-200 flex items-center justify-center gap-2 shadow-lg hover:shadow-xl active:scale-95"
-            >
-              <svg xmlns="http://www.w3.org/2000/svg" className="w-5 h-5" viewBox="0 0 24 24" fill="currentColor"><path d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z" /><path d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z" /><path d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z" /><path d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z" /></svg>
-              Đăng nhập với Google
-            </button>
+
+            {/* Firebase Auth Button */}
+            <GoogleLoginButton />
+
             {error && (
               <div className="mt-6 p-4 bg-rose-50 border border-rose-200 rounded-xl">
                 <p className="text-rose-700 text-sm font-medium">{error}</p>
               </div>
             )}
           </div>
-          <p className="text-center text-white/60 text-xs mt-6 font-medium">Sử dụng tài khoản @fe.edu.vn của bạn</p>
+          <p className="text-center text-white/60 text-xs mt-6 font-medium">Sử dụng tài khoản Google của bạn</p>
         </div>
       </div>
     );
   }
 
   return (
-    <Layout user={user} onLogout={() => {
-      setUser(null);
-      setAccessToken(null);
-      // 🗑️ Clear localStorage khi logout
-      localStorage.removeItem('accessToken');
-      localStorage.removeItem('user');
-    }}>
+    <Layout
+      user={user}
+      userId={firebaseUser?.uid || ''}
+      syncHistoryRefresh={syncHistoryRefresh}
+      onLogout={async () => {
+        await logout();
+        setUser(null);
+        setAccessToken(null);
+        // ✅ Clear persisted state khi logout
+        persistStateService.clearState();
+        console.log('✓ Cleared all persisted state on logout');
+      }}
+    >
       <div className="max-w-7xl mx-auto space-y-6 pb-12">
         {/* Input Section */}
         <div className="bg-white rounded-2xl border border-slate-200 shadow-sm hover:shadow-md transition-shadow duration-300 overflow-hidden">
@@ -679,12 +1100,16 @@ const App: React.FC = () => {
                   }
                 }}
                 disabled={loadingMode !== null}
-                className="flex-1 py-2.5 px-3 bg-blue-600 hover:bg-blue-700 text-white font-semibold rounded-lg shadow-md hover:shadow-lg transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed active:scale-95 text-sm"
+                className="flex-1 h-[42px] flex items-center justify-center bg-blue-600 hover:bg-blue-700 text-white font-semibold rounded-lg shadow-md hover:shadow-lg transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed active:scale-95 text-sm"
                 title="Cấu trúc phẳng: Header dòng 1, range A1:BE"
               >
                 {loadingMode === 'test1' ? (
-                  <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin mx-auto"></div>
-                ) : '📄 test1'}
+                  <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin"></div>
+                ) : (
+                  <span className="flex items-center gap-1">
+                    <span>📄</span> test1
+                  </span>
+                )}
               </button>
               <button
                 onClick={async () => {
@@ -710,12 +1135,16 @@ const App: React.FC = () => {
                   }
                 }}
                 disabled={loadingMode !== null}
-                className="flex-1 py-2.5 px-3 bg-purple-600 hover:bg-purple-700 text-white font-semibold rounded-lg shadow-md hover:shadow-lg transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed active:scale-95 text-sm"
+                className="flex-1 h-[42px] flex items-center justify-center bg-purple-600 hover:bg-purple-700 text-white font-semibold rounded-lg shadow-md hover:shadow-lg transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed active:scale-95 text-sm"
                 title="Cấu trúc phức tạp: Header dòng 3, range J1:BE"
               >
                 {loadingMode === 'review' ? (
-                  <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin mx-auto"></div>
-                ) : '📊 Review'}
+                  <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin"></div>
+                ) : (
+                  <span className="flex items-center gap-1">
+                    <span>📊</span> Review
+                  </span>
+                )}
               </button>
             </div>
           </div>
@@ -730,7 +1159,7 @@ const App: React.FC = () => {
               </div>
               <button
                 onClick={applyMapping}
-                className="px-5 py-2 bg-indigo-600 hover:bg-indigo-700 text-white font-semibold rounded-lg shadow-md hover:shadow-lg transition-all duration-200 text-sm active:scale-95"
+                className="py-2.5 px-3 bg-indigo-600 hover:bg-indigo-700 text-white font-semibold rounded-lg shadow-md hover:shadow-lg transition-all duration-200 text-sm active:scale-95"
               >
                 ✓ Áp dụng
               </button>
@@ -999,8 +1428,8 @@ const App: React.FC = () => {
             </div>
             <div className="overflow-x-auto">
               <table className="w-full text-left text-sm">
-                <thead className="sticky top-0 z-10">
-                  <tr className="bg-gradient-to-r from-slate-50 to-slate-50 text-xs font-semibold text-slate-600 uppercase tracking-wider border-b border-slate-200">
+                <thead className="sticky top-0 z-20 bg-gradient-to-r from-slate-50 to-slate-50">
+                  <tr className="text-xs font-semibold text-slate-600 uppercase tracking-wider border-b border-slate-200">
                     <th className="px-5 py-4 text-center w-12">
                       <input
                         type="checkbox"
@@ -1013,7 +1442,8 @@ const App: React.FC = () => {
                     </th>
                     {columnMap.date !== undefined && <th className="px-5 py-4">Ngày</th>}
                     {columnMap.time !== undefined && <th className="px-5 py-4">Thời gian</th>}
-                    {columnMap.person !== undefined && <th className="px-5 py-4">Tên đề tài</th>}
+                    <th className="px-5 py-4">Review</th>
+                    {columnMap.person !== undefined && <th className="px-5 py-4">Giảng viên</th>}
                     {columnMap.location !== undefined && <th className="px-5 py-4">Phòng</th>}
                   </tr>
                 </thead>
@@ -1047,6 +1477,15 @@ const App: React.FC = () => {
                           <div className="text-slate-500 text-xs">→ {row.endTime.split('T')[1].substring(0, 5)}</div>
                         </td>
                       )}
+                      <td className="px-5 py-4">
+                        {row.groupName ? (
+                          <span className="inline-block px-3 py-1 bg-indigo-100 text-indigo-700 text-xs font-semibold rounded-full">
+                            {row.groupName}
+                          </span>
+                        ) : (
+                          <span className="text-slate-400 text-xs">-</span>
+                        )}
+                      </td>
                       {columnMap.person !== undefined && (
                         <td className="px-5 py-4 font-semibold text-slate-900 max-w-xs truncate" title={row.person}>
                           {row.person}
@@ -1070,6 +1509,16 @@ const App: React.FC = () => {
           </div>
         )}
       </div>
+
+      {/* Toast Notification */}
+      {toastMessage && (
+        <div className="fixed bottom-6 right-6 bg-indigo-600 text-white px-6 py-3 rounded-lg shadow-xl flex items-center gap-3 animate-in slide-in-from-bottom-4 duration-300">
+          <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+          </svg>
+          <span className="font-medium">{toastMessage}</span>
+        </div>
+      )}
     </Layout>
   );
 };

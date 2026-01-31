@@ -1,0 +1,14 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // User mappings - chỉ user được access của chính mình
+    match /users/{userId}/mappings/{fileId} {
+      allow read, write: if request.auth.uid == userId;
+    }
+
+    // Sync history - tracking
+    match /users/{userId}/syncHistory/{syncId} {
+      allow read, write: if request.auth.uid == userId;
+    }
+  }
+}

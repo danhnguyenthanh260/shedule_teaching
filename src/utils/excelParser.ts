@@ -1,3 +1,4 @@
+/// <reference types="vite/client" />
 import * as XLSX from 'xlsx';
 import { 
   getMergedCells, 
@@ -385,9 +386,10 @@ export async function parseGoogleSheets(url: string): Promise<NormalizedSheet[]>
   if (!match) throw new Error('Invalid Google Sheets URL');
   
   const spreadsheetId = match[1];
+  const backendUrl = import.meta.env.VITE_BACKEND_URL as string;
   
   const response = await fetch(
-    `${import.meta.env.VITE_BACKEND_URL}/api/sheets/parse`,
+    `${backendUrl}/api/sheets/parse`,
     {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },

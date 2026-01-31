@@ -3,8 +3,8 @@ import { ColumnType, InferredSchema } from '../types';
 
 const KEYWORDS: Record<ColumnType, string[]> = {
   date: ['ngày', 'date', 'thời gian'],
-  time: ['giờ', 'time', 'slot', 'ca'],
-  person: ['họ', 'tên', 'giảng viên', 'thành viên', 'người', 'teacher', 'member', 'name'],
+  time: ['giờ', 'time', 'slot', 'ca', 'slot code', 'slotcode', 'tiết'],
+  person: ['họ', 'tên', 'giảng viên', 'thành viên', 'người', 'teacher', 'member', 'name', 'reviewer'],
   task: ['nhiệm vụ', 'vai trò', 'việc', 'task', 'role', 'duty', 'môn'],
   location: ['phòng', 'địa điểm', 'room', 'location', 'online'],
   email: ['email', 'thư điện tử'],

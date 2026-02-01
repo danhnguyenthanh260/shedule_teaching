@@ -22,7 +22,7 @@ declare global {
 const App: React.FC = () => {
   // ✅ Refs for preventing duplicate operations
   const hasAutoLoaded = useRef(false);
-  
+
   // Firebase Auth & Mapping
   const { user: firebaseUser, accessToken: firebaseAccessToken, logout } = useFirebase();
   const [user, setUser] = useState<UserProfile | null>(null);
@@ -275,7 +275,7 @@ const App: React.FC = () => {
   // Chỉ chạy khi chưa có persisted data
   useEffect(() => {
     if (hasAutoLoaded.current) return; // ✅ Prevent duplicate auto-load
-    
+
     if (
       sheetUrl &&
       accessToken &&
@@ -858,10 +858,10 @@ const App: React.FC = () => {
 
     // ✅ Detect filter columns based on ACTUAL HEADERS (not sheet name)
     let filterKeywords: string[] = [];
-    
+
     // Check what types of headers exist in the data
     const headerStr = fullHeaders.join('|').toLowerCase();
-    
+
     if (headerStr.includes('reviewer') || headerStr.includes('đánh giá')) {
       // Sheet has "Reviewer" columns → Filter by reviewer
       filterKeywords = ['reviewer', 'người đánh giá', 'đánh giá'];
@@ -935,9 +935,9 @@ const App: React.FC = () => {
 
     // ✅ Detect filter columns based on ACTUAL HEADERS (not sheet name)
     let filterKeywords: string[] = [];
-    
+
     const headerStr = fullTableColumns.join('|').toLowerCase();
-    
+
     if (headerStr.includes('reviewer') || headerStr.includes('đánh giá')) {
       filterKeywords = ['reviewer', 'người đánh giá', 'đánh giá'];
     } else if (headerStr.includes('thành viên') || headerStr.includes('hội đồng')) {
@@ -1017,10 +1017,14 @@ const App: React.FC = () => {
       <div className="min-h-screen bg-linear-to-br from-slate-900 via-slate-800 to-indigo-900 flex items-center justify-center p-4">
         <div className="max-w-md w-full">
           <div className="bg-white/95 backdrop-blur-sm rounded-3xl shadow-2xl p-8 text-center border border-white/20">
-            <div className="w-20 h-20 bg-linear-to-br from-indigo-500 to-indigo-600 rounded-2xl flex items-center justify-center mx-auto mb-8 shadow-lg transform hover:scale-110 transition-transform duration-300">
-              <svg xmlns="http://www.w3.org/2000/svg" className="w-12 h-12 text-white" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M16 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2" /><circle cx="8.5" cy="7" r="4" /><polyline points="17 11 19 13 23 9" /></svg>
+            <div className="w-20 h-20 bg-white rounded-2xl flex items-center justify-center mx-auto mb-8 shadow-xl transform hover:scale-110 transition-transform duration-300 overflow-hidden border border-gray-100">
+              <img
+                src="https://static.wixstatic.com/media/c0d3eb_f3bfa95a7f0b4ca4b29ef81b3d529d68~mv2.png/v1/fill/w_706,h_706,al_c/Logo%20tr%C6%B0%E1%BB%9Dng%20%C4%91%E1%BA%A1i%20h%E1%BB%8Dc%20(layout%20tr%C3%B2n)-19.png"
+                alt="FPTU Logo"
+                className="w-full h-full object-contain p-2"
+              />
             </div>
-            <h1 className="text-4xl font-extrabold text-slate-900 mb-3 tracking-tight">Schedule Sync</h1>
+            <h1 className="text-4xl font-extrabold text-slate-900 mb-3 tracking-tight">FPTU Synchronizer</h1>
             <p className="text-slate-600 mb-8 font-normal leading-relaxed text-sm">Quản lý lịch đồng bộ từ Google Sheets sang Calendar một cách dễ dàng</p>
 
             {/* Firebase Auth Button */}

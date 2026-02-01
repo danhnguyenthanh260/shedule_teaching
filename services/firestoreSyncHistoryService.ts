@@ -19,12 +19,13 @@ export class FirestoreSyncHistoryService {
     /**
      * Lấy lịch sử sync của user hiện tại
      */
-    async getUserSyncHistory(userId: string, maxRecords: number = 50): Promise<SyncHistoryRecord[]> {
+    async getUserSyncHistory(userId: string, maxRecords: number = 20): Promise<SyncHistoryRecord[]> {
         try {
-            const historyRef = collection(db, this.collectionName);
+            // ✅ Sử dụng subcollection: users/{userId}/syncHistory
+            // Giúp khớp với firestore.rules và không cần Composite Index phức tạp
+            const historyRef = collection(db, 'users', userId, this.collectionName);
             const q = query(
                 historyRef,
-                where('userId', '==', userId),
                 orderBy('syncedAt', 'desc'),
                 limit(maxRecords)
             );
@@ -59,10 +60,9 @@ export class FirestoreSyncHistoryService {
      */
     async getSheetSyncHistory(userId: string, sheetId: string): Promise<SyncHistoryRecord[]> {
         try {
-            const historyRef = collection(db, this.collectionName);
+            const historyRef = collection(db, 'users', userId, this.collectionName);
             const q = query(
                 historyRef,
-                where('userId', '==', userId),
                 where('sheetId', '==', sheetId),
                 orderBy('syncedAt', 'desc')
             );
@@ -105,7 +105,7 @@ export class FirestoreSyncHistoryService {
         failedCount: number
     ): Promise<void> {
         try {
-            const historyRef = collection(db, this.collectionName);
+            const historyRef = collection(db, 'users', userId, this.collectionName);
             await addDoc(historyRef, {
                 userId,
                 sheetId,

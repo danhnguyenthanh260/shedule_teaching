@@ -1,5 +1,6 @@
 import React from 'react';
 import { useFirebase } from '../context/FirebaseContext';
+import { logError } from '../utils/logger';
 
 export const GoogleLoginButton: React.FC = () => {
   const { loginWithGoogle, loading, error } = useFirebase();
@@ -10,7 +11,7 @@ export const GoogleLoginButton: React.FC = () => {
       setIsLoading(true);
       await loginWithGoogle();
     } catch (err) {
-      console.error('Login failed:', err);
+      logError('Login failed:', err);
     } finally {
       setIsLoading(false);
     }
@@ -39,7 +40,7 @@ export const UserProfile: React.FC = () => {
       setIsLoading(true);
       await logout();
     } catch (err) {
-      console.error('Logout failed:', err);
+      logError('Logout failed:', err);
     } finally {
       setIsLoading(false);
     }

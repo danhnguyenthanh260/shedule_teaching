@@ -1,4 +1,5 @@
 import { db } from '../config/firebase';
+import { logError } from '../utils/logger';
 import {
   doc,
   getDoc,
@@ -43,7 +44,7 @@ export const saveMappingPreset = async (
       updatedAt: Timestamp.now(),
     });
   } catch (error) {
-    console.error('Error saving mapping:', error);
+    logError('Error saving mapping:', error);
     throw error;
   }
 };
@@ -67,7 +68,7 @@ export const getMappingPreset = async (
     }
     return null;
   } catch (error) {
-    console.error('Error getting mapping:', error);
+    logError('Error getting mapping:', error);
     throw error;
   }
 };
@@ -83,7 +84,7 @@ export const getUserMappings = async (userId: string): Promise<UserMapping[]> =>
     const snapshot = await getDocs(mappingsRef);
     return snapshot.docs.map((doc) => doc.data() as UserMapping);
   } catch (error) {
-    console.error('Error getting user mappings:', error);
+    logError('Error getting user mappings:', error);
     throw error;
   }
 };
@@ -106,7 +107,7 @@ export const updateMappingPreset = async (
       updatedAt: Timestamp.now(),
     });
   } catch (error) {
-    console.error('Error updating mapping:', error);
+    logError('Error updating mapping:', error);
     throw error;
   }
 };

@@ -1,9 +1,8 @@
 
-import React, { useState, useMemo, useEffect } from 'react';
+import React, { useState, useMemo, useEffect, useRef } from 'react';
 import { RowNormalized, UserProfile, SyncResult, ColumnMapping } from './types';
 import { inferSchema } from './lib/inference';
 import { googleService } from './services/googleService';
-import { syncHistoryService } from './services/syncHistoryService';
 import { MergedCellGroup } from './lib/headerParser';
 import Layout from './components/Layout';
 import { useFirebase } from './src/context/FirebaseContext';
@@ -11,6 +10,7 @@ import { GoogleLoginButton, UserProfile as FirebaseUserProfile } from './src/com
 import { useFirebaseMapping } from './src/hooks/useFirebaseMapping';
 import { syncEventsToCalendar } from './src/services/appsScriptService';
 import { persistStateService } from './lib/persistState';
+import { logInfo, logSuccess, logWarning, logError } from './src/utils/logger';
 
 // Khai báo kiểu cho SDK Google
 declare global {
@@ -20,6 +20,9 @@ declare global {
 }
 
 const App: React.FC = () => {
+  // ✅ Refs for preventing duplicate operations
+  const hasAutoLoaded = useRef(false);
+  
   // Firebase Auth & Mapping
   const { user: firebaseUser, accessToken: firebaseAccessToken, logout } = useFirebase();
   const [user, setUser] = useState<UserProfile | null>(null);
@@ -1011,10 +1014,10 @@ const App: React.FC = () => {
 
   if (!user) {
     return (
-      <div className="min-h-screen bg-gradient-to-br from-slate-900 via-slate-800 to-indigo-900 flex items-center justify-center p-4">
+      <div className="min-h-screen bg-linear-to-br from-slate-900 via-slate-800 to-indigo-900 flex items-center justify-center p-4">
         <div className="max-w-md w-full">
           <div className="bg-white/95 backdrop-blur-sm rounded-3xl shadow-2xl p-8 text-center border border-white/20">
-            <div className="w-20 h-20 bg-gradient-to-br from-indigo-500 to-indigo-600 rounded-2xl flex items-center justify-center mx-auto mb-8 shadow-lg transform hover:scale-110 transition-transform duration-300">
+            <div className="w-20 h-20 bg-linear-to-br from-indigo-500 to-indigo-600 rounded-2xl flex items-center justify-center mx-auto mb-8 shadow-lg transform hover:scale-110 transition-transform duration-300">
               <svg xmlns="http://www.w3.org/2000/svg" className="w-12 h-12 text-white" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M16 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2" /><circle cx="8.5" cy="7" r="4" /><polyline points="17 11 19 13 23 9" /></svg>
             </div>
             <h1 className="text-4xl font-extrabold text-slate-900 mb-3 tracking-tight">Schedule Sync</h1>
@@ -1052,7 +1055,7 @@ const App: React.FC = () => {
       <div className="max-w-7xl mx-auto space-y-6 pb-12">
         {/* Input Section */}
         <div className="bg-white rounded-2xl border border-slate-200 shadow-sm hover:shadow-md transition-shadow duration-300 overflow-hidden">
-          <div className="px-6 py-4 border-b border-slate-100 bg-gradient-to-r from-slate-50 to-transparent">
+          <div className="px-6 py-4 border-b border-slate-100 bg-linear-to-r from-slate-50 to-transparent">
             <h2 className="text-lg font-bold text-slate-900">Tải dữ liệu từ Google Sheet</h2>
             <p className="text-xs text-slate-500 mt-1 font-medium">Nhập URL Sheet và chọn tab để bắt đầu</p>
           </div>
@@ -1108,7 +1111,7 @@ const App: React.FC = () => {
                   }
                 }}
                 disabled={loadingMode !== null}
-                className="flex-1 h-[42px] flex items-center justify-center bg-blue-600 hover:bg-blue-700 text-white font-semibold rounded-lg shadow-md hover:shadow-lg transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed active:scale-95 text-sm"
+                className="flex-1 h-10.5 flex items-center justify-center bg-blue-600 hover:bg-blue-700 text-white font-semibold rounded-lg shadow-md hover:shadow-lg transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed active:scale-95 text-sm"
                 title="Cấu trúc phẳng: Header dòng 1, range A1:BE"
               >
                 {loadingMode === 'test1' ? (
@@ -1143,7 +1146,7 @@ const App: React.FC = () => {
                   }
                 }}
                 disabled={loadingMode !== null}
-                className="flex-1 h-[42px] flex items-center justify-center bg-purple-600 hover:bg-purple-700 text-white font-semibold rounded-lg shadow-md hover:shadow-lg transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed active:scale-95 text-sm"
+                className="flex-1 h-10.5 flex items-center justify-center bg-purple-600 hover:bg-purple-700 text-white font-semibold rounded-lg shadow-md hover:shadow-lg transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed active:scale-95 text-sm"
                 title="Cấu trúc phức tạp: Header dòng 3, range J1:BE"
               >
                 {loadingMode === 'review' ? (
@@ -1159,8 +1162,8 @@ const App: React.FC = () => {
         </div>
 
         {fullHeaders.length > 0 && (
-          <div className="bg-white rounded-2xl border border-slate-200 shadow-sm hover:shadow-md transition-shadow duration-300 overflow-hidden animate-in fade-in slide-in-from-bottom-4 duration-500">
-            <div className="px-6 py-4 border-b border-slate-100 bg-gradient-to-r from-slate-50 to-transparent flex items-center justify-between">
+          <div className="bg-white rounded-2xl border border-slate-200 shadow-sm hover:shadow-md transition-shadow duration-300 overflow-hidden animate-in fade-in slide-in-from-bottom-4">
+            <div className="px-6 py-4 border-b border-slate-100 bg-linear-to-r from-slate-50 to-transparent flex items-center justify-between">
               <div>
                 <h3 className="font-bold text-slate-900 text-lg">Chọn cột để đồng bộ</h3>
                 <p className="text-xs text-slate-500 mt-1 font-medium">Bắt buộc: Ngày, Thời gian</p>
@@ -1295,7 +1298,7 @@ const App: React.FC = () => {
             </button>
             {showFullTable && (
               <div className="border-t border-slate-200">
-                <div className="overflow-x-auto max-h-96 bg-gradient-to-b from-slate-50/50 to-white">
+                <div className="overflow-x-auto max-h-96 bg-linear-to-b from-slate-50/50 to-white">
                   <table className="text-left text-sm border-collapse" style={{ width: `${fullTableColumns.length * 140}px` }}>
                     <thead className="sticky top-0 z-10">
                       {(() => {
@@ -1324,7 +1327,7 @@ const App: React.FC = () => {
                           <>
                             {/* Hàng 1: Merged/Grouped Headers */}
                             {hasGroups && (
-                              <tr className="bg-gradient-to-r from-indigo-600 to-indigo-700 text-white text-xs font-bold uppercase tracking-wide border-b-2 border-indigo-800 sticky top-0 z-20">
+                              <tr className="bg-linear-to-r from-indigo-600 to-indigo-700 text-white text-xs font-bold uppercase tracking-wide border-b-2 border-indigo-800 sticky top-0 z-20">
                                 {fullTableColumns.map((_, i) => {
                                   const group = groups.find(g => g.start === i);
                                   if (group && group.span > 1) {
@@ -1410,8 +1413,8 @@ const App: React.FC = () => {
         )}
 
         {rows.length > 0 && (
-          <div className="bg-white rounded-2xl border border-slate-200 shadow-sm hover:shadow-md transition-shadow duration-300 overflow-hidden flex flex-col animate-in slide-in-from-bottom-4 duration-500">
-            <div className="px-6 py-4 border-b border-slate-100 flex items-center justify-between bg-gradient-to-r from-slate-50 to-transparent">
+          <div className="bg-white rounded-2xl border border-slate-200 shadow-sm hover:shadow-md transition-shadow duration-300 overflow-hidden flex flex-col animate-in slide-in-from-bottom-4">
+            <div className="px-6 py-4 border-b border-slate-100 flex items-center justify-between bg-linear-to-r from-slate-50 to-transparent">
               <div>
                 <h3 className="font-bold text-slate-900 text-lg">Dữ liệu sẵn sàng ({filteredRows.length} mục)</h3>
                 <p className="text-xs text-slate-500 mt-1 font-medium">✓ Mapping đã áp dụng • Chọn {selectedIds.size}/{filteredRows.length} mục</p>
@@ -1419,7 +1422,7 @@ const App: React.FC = () => {
               <button
                 onClick={handleSync}
                 disabled={syncing || selectedIds.size === 0}
-                className="px-6 py-2 bg-gradient-to-r from-indigo-600 to-indigo-700 hover:from-indigo-700 hover:to-indigo-800 text-white font-semibold rounded-lg shadow-lg hover:shadow-xl transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2 active:scale-95"
+                className="px-6 py-2 bg-linear-to-r from-indigo-600 to-indigo-700 hover:from-indigo-700 hover:to-indigo-800 text-white font-semibold rounded-lg shadow-lg hover:shadow-xl transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2 active:scale-95"
               >
                 {syncing ? (
                   <>
@@ -1436,7 +1439,7 @@ const App: React.FC = () => {
             </div>
             <div className="overflow-x-auto">
               <table className="w-full text-left text-sm">
-                <thead className="sticky top-0 z-20 bg-gradient-to-r from-slate-50 to-slate-50">
+                <thead className="sticky top-0 z-20 bg-linear-to-r from-slate-50 to-slate-50">
                   <tr className="text-xs font-semibold text-slate-600 uppercase tracking-wider border-b border-slate-200">
                     <th className="px-5 py-4 text-center w-12">
                       <input

@@ -54,23 +54,77 @@
     </div>
 
     <script>
-        // Extract authorization code from URL
+        // 🔐 SECURITY: OAuth state validation to prevent CSRF attacks
+        const STATE_EXPIRY_MS = 5 * 60 * 1000; // ✅ 5 minute expiry
+        
+        // Extract authorization code and state from URL
         const urlParams = new URLSearchParams(window.location.search);
         const authCode = urlParams.get('code');
-        const state = urlParams.get('state');
-
+        const stateFromUrl = urlParams.get('state');
+        
+        // 🔑 Retrieve stored state + timestamp from sessionStorage
+        const storedStateData = sessionStorage.getItem('oauth_state_data');
+        
+        // ✅ VALIDATE state parameter with expiry check
+        let isStateValid = false;
+        if (storedStateData) {
+          try {
+            const stateData = JSON.parse(storedStateData);
+            const storedState = stateData.state;
+            const storedTimestamp = stateData.timestamp;
+            
+            // Check 1: State matches
+            const stateMatches = stateFromUrl && storedState === stateFromUrl;
+            
+            // Check 2: State not expired (within 5 minutes)
+            const now = Date.now();
+            const stateAge = now - storedTimestamp;
+            const notExpired = stateAge < STATE_EXPIRY_MS;
+            
+            isStateValid = stateMatches && notExpired;
+            
+            if (!stateMatches) {
+              console.error('❌ CSRF: State mismatch');
+            }
+            if (!notExpired) {
+              console.error(`❌ CSRF: State expired (${stateAge}ms > ${STATE_EXPIRY_MS}ms)`);
+            }
+          } catch (e) {
+            console.error('❌ Invalid state data format', e);
+          }
+        }
+        
         if (authCode) {
-            // Send auth code back to parent window
-            window.opener.postMessage({
-                type: 'GOOGLE_AUTH_CODE',
-                code: authCode,
-                state: state
-            }, window.location.origin);
-
-            // Close callback window
-            setTimeout(() => {
-                window.close();
-            }, 500);
+            if (!isStateValid) {
+                // 🔴 CSRF detected: State mismatch or expired
+                console.error('❌ CSRF detected: OAuth state invalid');
+                window.opener.postMessage({
+                    type: 'GOOGLE_AUTH_ERROR',
+                    error: 'CSRF_DETECTED',
+                    message: 'OAuth state validation failed - possible CSRF attack'
+                }, window.location.origin);
+                
+                // Clear state immediately on failure
+                sessionStorage.removeItem('oauth_state_data');
+                
+                setTimeout(() => window.close(), 2000);
+            } else {
+                // ✅ State is valid, send auth code to parent window
+                console.log('✅ OAuth state validation successful');
+                window.opener.postMessage({
+                    type: 'GOOGLE_AUTH_CODE',
+                    code: authCode,
+                    state: stateFromUrl
+                }, window.location.origin);
+                
+                // ✅ CLEAR state immediately after successful validation
+                sessionStorage.removeItem('oauth_state_data');
+                
+                // Close callback window
+                setTimeout(() => {
+                    window.close();
+                }, 500);
+            }
         } else {
             // Handle error
             const error = urlParams.get('error');
@@ -80,6 +134,9 @@
                     error: error
                 }, window.location.origin);
             }
+            
+            // Clear stored state
+            sessionStorage.removeItem('oauth_state');
             setTimeout(() => {
                 window.close();
             }, 2000);

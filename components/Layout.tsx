@@ -18,9 +18,14 @@ const Layout: React.FC<Props> = ({ children, user, userId, onLogout, syncHistory
     <div className="min-h-screen bg-slate-50">
       <nav className="bg-white border-b border-slate-200 px-6 py-4 flex items-center justify-between sticky top-0 z-50 shadow-sm">
         <div className="flex items-center gap-3">
-          <div className="w-10 h-10 bg-indigo-600 rounded-xl flex items-center justify-center text-white font-black shadow-lg">F</div>
-          <div>
-            <h1 className="font-bold text-slate-900 leading-tight">FPTU Sync</h1>
+          <div className="w-10 h-10 bg-white rounded-xl flex items-center justify-center shadow-md overflow-hidden border border-gray-100 transform transition-all duration-200 hover:shadow-lg">
+            <img
+              src="https://static.wixstatic.com/media/c0d3eb_f3bfa95a7f0b4ca4b29ef81b3d529d68~mv2.png/v1/fill/w_706,h_706,al_c/Logo%20tr%C6%B0%E1%BB%9Dng%20%C4%91%E1%BA%A1i%20h%E1%BB%8Dc%20(layout%20tr%C3%B2n)-19.png"
+              alt="FPTU Logo"
+              className="w-full h-full object-contain p-1"
+            />
+          </div>          <div>
+            <h1 className="font-bold text-slate-900 leading-tight">FPTU Synchronizer</h1>
             <p className="text-[10px] font-bold text-indigo-500 uppercase tracking-tighter">Schedule Importer</p>
           </div>
         </div>

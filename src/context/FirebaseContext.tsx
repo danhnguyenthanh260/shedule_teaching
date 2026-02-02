@@ -9,6 +9,19 @@ import {
   onAuthStateChanged,
   User,
 } from 'firebase/auth';
+import { saveAuthTokens, clearAuth, setUserUID } from '../services/authService';
+import { logInfo, logSuccess, logError } from '../utils/logger';
+
+/**
+ * Generate random OAuth state for CSRF protection
+ */
+function generateOAuthState(): string {
+  const randomBytes = new Uint8Array(16);
+  crypto.getRandomValues(randomBytes);
+  return Array.from(randomBytes)
+    .map(b => b.toString(16).padStart(2, '0'))
+    .join('');
+}
 
 interface FirebaseContextType {
   user: User | null;
@@ -41,7 +54,7 @@ export const FirebaseProvider: React.FC<{ children: React.ReactNode }> = ({ chil
         const stored = localStorage.getItem('google_access_token');
         if (stored) {
           setAccessToken(stored);
-          console.log('✓ Restored access token from localStorage');
+          logInfo('Restored access token from localStorage');
         }
       }
     });
@@ -52,6 +65,16 @@ export const FirebaseProvider: React.FC<{ children: React.ReactNode }> = ({ chil
   const loginWithGoogle = async () => {
     try {
       setError(null);
+      
+      // 🔐 SECURITY: Generate and store OAuth state with timestamp for CSRF protection
+      const oauthState = generateOAuthState();
+      const stateData = {
+        state: oauthState,
+        timestamp: Date.now() // ✅ Add timestamp for 5-min expiry check
+      };
+      sessionStorage.setItem('oauth_state_data', JSON.stringify(stateData));
+      logInfo('OAuth state generated with timestamp and stored');
+      
       const provider = new GoogleAuthProvider();
       // Request Google Sheets and Calendar scopes
       provider.addScope('https://www.googleapis.com/auth/spreadsheets.readonly');
@@ -59,16 +82,27 @@ export const FirebaseProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       
       const result = await signInWithPopup(auth, provider);
       
+      // Set user UID for encryption key derivation
+      setUserUID(result.user.uid);
+      
       // Get the OAuth access token from the credential
       const credential = GoogleAuthProvider.credentialFromResult(result);
       if (credential?.accessToken) {
         setAccessToken(credential.accessToken);
-        // Store in localStorage for persistence
-        localStorage.setItem('google_access_token', credential.accessToken);
+        
+        // Save tokens with expiry using authService
+        await saveAuthTokens(
+          credential.accessToken,
+          '', // Firebase doesn't provide refresh token directly
+          3600 // Google tokens typically expire in 1 hour
+        );
+        
+        logSuccess('Google login successful');
       }
     } catch (err) {
       const errorMessage = err instanceof Error ? err.message : 'Failed to login with Google';
       setError(errorMessage);
+      logError('Google login failed:', errorMessage);
       throw err;
     }
   };
@@ -100,10 +134,15 @@ export const FirebaseProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       setError(null);
       await signOut(auth);
       setAccessToken(null);
-      localStorage.removeItem('google_access_token');
+      
+      // Clear all auth data using authService
+      clearAuth();
+      
+      logInfo('Logout successful');
     } catch (err) {
       const errorMessage = err instanceof Error ? err.message : 'Failed to logout';
       setError(errorMessage);
+      logError('Logout failed:', errorMessage);
       throw err;
     }
   };

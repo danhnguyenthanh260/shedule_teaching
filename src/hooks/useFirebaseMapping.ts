@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { useFirebase } from '../context/FirebaseContext';
 import { getMappingPreset, saveMappingPreset, type ColumnMapping } from '../services/firestoreService';
+import { logError } from '../utils/logger';
 
 interface UseMappingResult {
   mapping: ColumnMapping | null;
@@ -38,7 +39,7 @@ export const useFirebaseMapping = (fileId?: string): UseMappingResult => {
     } catch (err) {
       const errorMessage = err instanceof Error ? err.message : 'Failed to get mapping';
       setError(errorMessage);
-      console.error('Error getting mapping:', err);
+      logError('Error getting mapping:', err);
     } finally {
       setLoading(false);
     }
@@ -58,7 +59,7 @@ export const useFirebaseMapping = (fileId?: string): UseMappingResult => {
     } catch (err) {
       const errorMessage = err instanceof Error ? err.message : 'Failed to save mapping';
       setError(errorMessage);
-      console.error('Error saving mapping:', err);
+      logError('Error saving mapping:', err);
       throw err;
     } finally {
       setLoading(false);

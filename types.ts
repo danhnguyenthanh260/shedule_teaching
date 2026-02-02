@@ -22,6 +22,7 @@ export interface RowNormalized {
   id: string; // sheetRowId + reviewGroupName (for flattened events)
   groupName?: string; // 'REVIEW 1', 'REVIEW 2', etc. (for nested mapping)
   sourceRowId?: string; // Original sheet row ID (for tracking)
+  sourceRowIndex?: number; // ✅ NEW: Original row index in rawRows (for filtering fullRows)
   date: string;
   startTime: string; // ISO string
   endTime: string; // ISO string
@@ -32,6 +33,9 @@ export interface RowNormalized {
   raw: Record<string, string>; // Lưu data gốc để làm description
   status?: 'pending' | 'synced' | 'failed';
   error?: string;
+  // ✅ For grouped events (from flattenRow)
+  isGrouped?: boolean; // True if this event is from grouped structure (Data Mẫu/Review)
+  reviewers?: string[]; // [reviewer1, reviewer2] for search filtering
 }
 
 export interface SyncResult {

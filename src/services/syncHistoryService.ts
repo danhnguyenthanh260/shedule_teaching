@@ -1,5 +1,6 @@
 import { db } from '../config/firebase';
 import { collection, addDoc, Timestamp, getDocs, query, orderBy, limit } from 'firebase/firestore';
+import { logError } from '../utils/logger';
 
 export interface SyncRecord {
   userId: string;
@@ -36,7 +37,7 @@ export const addSyncRecord = async (
       createdAt: Timestamp.now(),
     });
   } catch (error) {
-    console.error('Error adding sync record:', error);
+    logError('Error adding sync record:', error);
     throw error;
   }
 };
@@ -57,7 +58,7 @@ export const getUserSyncHistory = async (
     const snapshot = await getDocs(q);
     return snapshot.docs.map((doc) => doc.data() as SyncRecord);
   } catch (error) {
-    console.error('Error getting sync history:', error);
+    logError('Error getting sync history:', error);
     throw error;
   }
 };

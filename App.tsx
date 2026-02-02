@@ -1,9 +1,8 @@
 
-import React, { useState, useMemo, useEffect } from 'react';
+import React, { useState, useMemo, useEffect, useRef } from 'react';
 import { RowNormalized, UserProfile, SyncResult, ColumnMapping } from './types';
 import { inferSchema } from './lib/inference';
 import { googleService } from './services/googleService';
-import { syncHistoryService } from './services/syncHistoryService';
 import { MergedCellGroup } from './lib/headerParser';
 import Layout from './components/Layout';
 import { useFirebase } from './src/context/FirebaseContext';
@@ -11,6 +10,7 @@ import { GoogleLoginButton, UserProfile as FirebaseUserProfile } from './src/com
 import { useFirebaseMapping } from './src/hooks/useFirebaseMapping';
 import { syncEventsToCalendar } from './src/services/appsScriptService';
 import { persistStateService } from './lib/persistState';
+import { logInfo, logSuccess, logWarning, logError } from './src/utils/logger';
 
 // Khai báo kiểu cho SDK Google
 declare global {
@@ -20,6 +20,9 @@ declare global {
 }
 
 const App: React.FC = () => {
+  // ✅ Refs for preventing duplicate operations
+  const hasAutoLoaded = useRef(false);
+
   // Firebase Auth & Mapping
   const { user: firebaseUser, accessToken: firebaseAccessToken, logout } = useFirebase();
   const [user, setUser] = useState<UserProfile | null>(null);
@@ -27,6 +30,7 @@ const App: React.FC = () => {
   const [sheetUrl, setSheetUrl] = useState('');
   const [tabName, setTabName] = useState('Sheet1');
   const [personFilter, setPersonFilter] = useState('');
+  const [selectedGroupName, setSelectedGroupName] = useState<string | null>(null); // ✅ Track which group is filtered
   const [loading, setLoading] = useState(false);
   const [loadingMode, setLoadingMode] = useState<'test1' | 'review' | null>(null);
   const [syncing, setSyncing] = useState(false);
@@ -271,6 +275,9 @@ const App: React.FC = () => {
   // Auto-load sheet when URL and accessToken are available (e.g., after F5 refresh)
   // Chỉ chạy khi chưa có persisted data
   useEffect(() => {
+    if (hasAutoLoaded.current) return; // ✅ Prevent duplicate auto-load
+    return; // ✅ TEMPORARY: Disable auto-load for manual testing
+
     if (
       sheetUrl &&
       accessToken &&
@@ -279,6 +286,7 @@ const App: React.FC = () => {
       fullHeaders.length === 0 && // Chưa có persisted headers
       !sheetMeta // Chưa có persisted meta
     ) {
+      hasAutoLoaded.current = true; // ✅ Mark as loaded
       console.log('Auto-loading sheet after refresh (no persisted data)...');
       // Trigger Review mode load (more common)
       setTimeout(() => {
@@ -411,7 +419,7 @@ const App: React.FC = () => {
     let dataStartIndex: number;
     let computedTitleRow: string[] = [];  // For Review mode: Row 2 titles (renamed)
 
-    if (idx === 2 || idx === 3) {
+    if (idx === 2) {
       // Review mode: ALWAYS use Row 3 (idx=2) as headers, Row 2 (idx=1) as titles
       detailHeaders = filledHeaders;  // Row 3
       computedTitleRow = rows[idx - 1] ? fillForwardHeaders(rows[idx - 1]) : [];  // Row above header
@@ -435,9 +443,11 @@ const App: React.FC = () => {
         headers = detailHeaders;  // Use detail headers for mapping/display
       }
     } else if (hasGroups && rows[idx + 1]) {
-      // Row has groups → use filled row for grouping, next row for details
-      headers = filledHeaders;  // For group detection in UI
+      // Row has groups → use this row for grouping, next row for details
+      // In Review mode, mapping UI should use DETAIL headers (Row 3), not group names
       detailHeaders = rows[idx + 1] || [];  // Detail column names from next row
+      computedTitleRow = filledHeaders;     // Group headers from current row
+      headers = detailHeaders;              // ✅ Use detail headers for mapping UI
       dataStartIndex = idx + 2;  // Data starts after detail header row
 
       // ✅ Filter out DEFENSE and CONFLICT columns (for Review mode)
@@ -450,10 +460,11 @@ const App: React.FC = () => {
         }
       });
 
-      // Apply filter to headers and detail headers
+      // Apply filter to group headers + detail headers
       if (columnsToKeep.length < filledHeaders.length) {
-        headers = columnsToKeep.map(i => filledHeaders[i]);
+        computedTitleRow = columnsToKeep.map(i => filledHeaders[i]);
         detailHeaders = columnsToKeep.map(i => detailHeaders[i]);
+        headers = detailHeaders;
         // Also need to filter all data rows later
         console.log(`✅ Filtered out ${filledHeaders.length - columnsToKeep.length} DEFENSE/CONFLICT columns`);
       }
@@ -468,7 +479,7 @@ const App: React.FC = () => {
     let rawRows = rows.slice(dataStartIndex);
 
     // ✅ Apply column filter to data rows if we filtered headers
-    if ((idx === 2 || idx === 3) && computedTitleRow.length > 0) {
+    if (idx === 2 && computedTitleRow.length > 0) {
       // Review mode: filter based on titleRow (Row 2)
       const unfilteredTitleRow = rows[idx - 1] ? fillForwardHeaders(rows[idx - 1]) : [];
       if (computedTitleRow.length < unfilteredTitleRow.length) {
@@ -521,7 +532,7 @@ const App: React.FC = () => {
 
       // ✅ Use nested mapping strategy for Review mode (idx=2 or idx=3)
       // Pass both computedTitleRow (Row 2 groups) and detailHeaders (Row 3 columns)
-      const data = (idx === 2 || idx === 3) && computedTitleRow.length > 0
+      const data = computedTitleRow.length > 0
         ? googleService.normalizeRowsWithGrouping({
           sheetId: nextMeta.sheetId,
           tab: nextMeta.tab,
@@ -587,16 +598,17 @@ const App: React.FC = () => {
       // Do not use fullRows which might have been trimmed or filtered
       let dataRowsToUse = fullRows;
       let groupHeadersToUse = titleRow; // Default to current titleRow state
+      const isGroupedMode = sheetMeta.headerRowIndex === 2 || (sheetMeta.headerRowIndex === 1 && titleRow.length > 0);
 
       // If we have allRows (raw data from API), extract and reconstruct data rows
       if (allRows.length > 0 && sheetMeta.headerRowIndex !== undefined) {
-        const dataStartIdx = sheetMeta.headerRowIndex + 1;
+        const dataStartIdx = sheetMeta.headerRowIndex + (isGroupedMode && sheetMeta.headerRowIndex === 1 ? 2 : 1);
         let rawFromAll = allRows.slice(dataStartIdx);
 
         console.log(`applyMapping: Got ${rawFromAll.length} raw rows from allRows, dataStartIdx=${dataStartIdx}`);
 
         // ✅ For Review mode (headerRowIndex=2 or 3), reconstruct group headers from Row 2
-        if (sheetMeta.headerRowIndex === 2 || sheetMeta.headerRowIndex === 3) {
+        if (isGroupedMode) {
           const row2Raw = allRows[1] || []; // Row 2 (index 1) contains group headers
 
           // Fill forward Row 2 to handle merged cells
@@ -662,7 +674,7 @@ const App: React.FC = () => {
 
       console.log('applyMapping proceeding with data...');
       setError(null);
-      const data = (sheetMeta.headerRowIndex === 2 || sheetMeta.headerRowIndex === 3) && groupHeadersToUse.length > 0
+      const data = isGroupedMode && groupHeadersToUse.length > 0
         ? googleService.normalizeRowsWithGrouping({
           sheetId: sheetMeta.sheetId,
           tab: sheetMeta.tab,
@@ -698,7 +710,6 @@ const App: React.FC = () => {
           await saveFirebaseMapping(sheetMeta.sheetId, columnMap);
           setToastMessage('✓ Đã lưu mapping cho lần sau');
           console.log('Saved mapping to Firebase:', columnMap);
-          S
         } catch (err) {
           console.error('Failed to save mapping to Firebase:', err);
         }
@@ -851,21 +862,24 @@ const App: React.FC = () => {
     if (!personFilter || personFilter.toLowerCase() === 'all') return rows;
     const f = personFilter.toLowerCase();
 
-    // 🔍 Detect sheet name to determine filter columns
-    const currentTab = sheetMeta?.tab?.toLowerCase() || '';
+    // ✅ Detect filter columns based on ACTUAL HEADERS (not sheet name)
     let filterKeywords: string[] = [];
 
-    // ✅ "Data mẫu" sheets (Sheet1, Review1) → Filter by "Reviewer"
-    if (currentTab.includes('sheet1') || currentTab.includes('review')) {
+    // Check what types of headers exist in the data
+    const headerStr = fullHeaders.join('|').toLowerCase();
+
+    if (headerStr.includes('reviewer') || headerStr.includes('đánh giá')) {
+      // Sheet has "Reviewer" columns → Filter by reviewer
       filterKeywords = ['reviewer', 'người đánh giá', 'đánh giá'];
-    }
-    // ✅ "test1" sheet → Filter by "Thành viên hội đồng"
-    else if (currentTab.includes('test')) {
+    } else if (headerStr.includes('thành viên') || headerStr.includes('hội đồng')) {
+      // Sheet has "Thành viên" columns → Filter by committee member
       filterKeywords = ['thành viên', 'hội đồng', 'member'];
-    }
-    // ⚠️ Fallback: Filter by "GVHD" (old behavior)
-    else {
+    } else if (headerStr.includes('gvhd') || headerStr.includes('giảng viên')) {
+      // Sheet has "GVHD" columns → Filter by instructor
       filterKeywords = ['gvhd', 'giảng viên', 'hướng dẫn'];
+    } else {
+      // ✅ Fallback: Try all person-related keywords
+      filterKeywords = ['reviewer', 'người đánh giá', 'đánh giá', 'thành viên', 'hội đồng', 'gvhd', 'giảng viên', 'person'];
     }
 
     return rows.filter(r => {
@@ -887,7 +901,32 @@ const App: React.FC = () => {
         const timeB = new Date(b.startTime).getTime();
         return timeA - timeB;
       });
-  }, [rows, personFilter, sheetMeta]);
+  }, [rows, personFilter, fullHeaders]);
+
+  // ✅ Auto-update groupName selection when personFilter changes
+  useEffect(() => {
+    if (personFilter && filteredRows.length > 0 && rows[0]?.isGrouped) {
+      // Get all unique groupNames from filtered events
+      const groupNames = new Set(
+        filteredRows
+          .filter(r => r.groupName)
+          .map(r => r.groupName!)
+      );
+      
+      if (groupNames.size === 1) {
+        // All filtered events belong to same group (REVIEW 1, REVIEW 2, or REVIEW 3)
+        const groupName = Array.from(groupNames)[0];
+        setSelectedGroupName(groupName);
+        console.log(`✅ Auto-update: Filter matched group "${groupName}"`);
+      } else if (groupNames.size > 1) {
+        // Multiple groups found (shouldn't happen with single reviewer search)
+        setSelectedGroupName(null);
+      }
+    } else if (!personFilter) {
+      // No filter → clear group selection
+      setSelectedGroupName(null);
+    }
+  }, [personFilter, filteredRows, rows]);
 
   const handleMapChange = (key: keyof ColumnMapping) => (e: React.ChangeEvent<HTMLSelectElement>) => {
     const value = e.target.value;
@@ -925,16 +964,32 @@ const App: React.FC = () => {
 
     const f = personFilter.toLowerCase();
 
-    // 🔍 Detect sheet name to determine filter columns (same as filteredRows)
-    const currentTab = sheetMeta?.tab?.toLowerCase() || '';
+    // ✅ For grouped events (Data Mẫu/Review), use sourceRowIndex to find matching raw rows
+    if (rows.length > 0 && rows[0]?.isGrouped) {
+      const sourceRowIndices = new Set(
+        filteredRows
+          .map(r => r.sourceRowIndex)
+          .filter((idx): idx is number => typeof idx === 'number')
+      );
+
+      if (sourceRowIndices.size === 0) return [];
+
+      return fullRows.filter((_, idx) => sourceRowIndices.has(idx));
+    }
+
+    // ✅ For non-grouped events, use old logic (search across all rows)
     let filterKeywords: string[] = [];
 
-    if (currentTab.includes('sheet1') || currentTab.includes('review')) {
+    const headerStr = fullTableColumns.join('|').toLowerCase();
+
+    if (headerStr.includes('reviewer') || headerStr.includes('đánh giá')) {
       filterKeywords = ['reviewer', 'người đánh giá', 'đánh giá'];
-    } else if (currentTab.includes('test')) {
+    } else if (headerStr.includes('thành viên') || headerStr.includes('hội đồng')) {
       filterKeywords = ['thành viên', 'hội đồng', 'member'];
-    } else {
+    } else if (headerStr.includes('gvhd') || headerStr.includes('giảng viên')) {
       filterKeywords = ['gvhd', 'giảng viên', 'hướng dẫn'];
+    } else {
+      filterKeywords = ['reviewer', 'người đánh giá', 'đánh giá', 'thành viên', 'hội đồng', 'gvhd', 'giảng viên', 'person'];
     }
 
     const targetColIndices: number[] = [];
@@ -955,7 +1010,7 @@ const App: React.FC = () => {
         return cellValue.includes(f);
       });
     });
-  }, [fullRows, fullTableColumns, personFilter, sheetMeta]);
+  }, [fullRows, fullTableColumns, personFilter, sheetMeta, filteredRows, rows]);
 
   const headerOptions = useMemo(() => {
     return fullTableColumns.map((h, i) => ({
@@ -1003,13 +1058,17 @@ const App: React.FC = () => {
 
   if (!user) {
     return (
-      <div className="min-h-screen bg-gradient-to-br from-slate-900 via-slate-800 to-indigo-900 flex items-center justify-center p-4">
+      <div className="min-h-screen bg-linear-to-br from-slate-900 via-slate-800 to-indigo-900 flex items-center justify-center p-4">
         <div className="max-w-md w-full">
           <div className="bg-white/95 backdrop-blur-sm rounded-3xl shadow-2xl p-8 text-center border border-white/20">
-            <div className="w-20 h-20 bg-gradient-to-br from-indigo-500 to-indigo-600 rounded-2xl flex items-center justify-center mx-auto mb-8 shadow-lg transform hover:scale-110 transition-transform duration-300">
-              <svg xmlns="http://www.w3.org/2000/svg" className="w-12 h-12 text-white" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M16 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2" /><circle cx="8.5" cy="7" r="4" /><polyline points="17 11 19 13 23 9" /></svg>
+            <div className="w-20 h-20 bg-white rounded-2xl flex items-center justify-center mx-auto mb-8 shadow-xl transform hover:scale-110 transition-transform duration-300 overflow-hidden border border-gray-100">
+              <img
+                src="https://static.wixstatic.com/media/c0d3eb_f3bfa95a7f0b4ca4b29ef81b3d529d68~mv2.png/v1/fill/w_706,h_706,al_c/Logo%20tr%C6%B0%E1%BB%9Dng%20%C4%91%E1%BA%A1i%20h%E1%BB%8Dc%20(layout%20tr%C3%B2n)-19.png"
+                alt="FPTU Logo"
+                className="w-full h-full object-contain p-2"
+              />
             </div>
-            <h1 className="text-4xl font-extrabold text-slate-900 mb-3 tracking-tight">Schedule Sync</h1>
+            <h1 className="text-4xl font-extrabold text-slate-900 mb-3 tracking-tight">FPTU Synchronizer</h1>
             <p className="text-slate-600 mb-8 font-normal leading-relaxed text-sm">Quản lý lịch đồng bộ từ Google Sheets sang Calendar một cách dễ dàng</p>
 
             {/* Firebase Auth Button */}
@@ -1044,7 +1103,7 @@ const App: React.FC = () => {
       <div className="max-w-7xl mx-auto space-y-6 pb-12">
         {/* Input Section */}
         <div className="bg-white rounded-2xl border border-slate-200 shadow-sm hover:shadow-md transition-shadow duration-300 overflow-hidden">
-          <div className="px-6 py-4 border-b border-slate-100 bg-gradient-to-r from-slate-50 to-transparent">
+          <div className="px-6 py-4 border-b border-slate-100 bg-linear-to-r from-slate-50 to-transparent">
             <h2 className="text-lg font-bold text-slate-900">Tải dữ liệu từ Google Sheet</h2>
             <p className="text-xs text-slate-500 mt-1 font-medium">Nhập URL Sheet và chọn tab để bắt đầu</p>
           </div>
@@ -1100,7 +1159,7 @@ const App: React.FC = () => {
                   }
                 }}
                 disabled={loadingMode !== null}
-                className="flex-1 h-[42px] flex items-center justify-center bg-blue-600 hover:bg-blue-700 text-white font-semibold rounded-lg shadow-md hover:shadow-lg transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed active:scale-95 text-sm"
+                className="flex-1 h-10.5 flex items-center justify-center bg-blue-600 hover:bg-blue-700 text-white font-semibold rounded-lg shadow-md hover:shadow-lg transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed active:scale-95 text-sm"
                 title="Cấu trúc phẳng: Header dòng 1, range A1:BE"
               >
                 {loadingMode === 'test1' ? (
@@ -1135,7 +1194,7 @@ const App: React.FC = () => {
                   }
                 }}
                 disabled={loadingMode !== null}
-                className="flex-1 h-[42px] flex items-center justify-center bg-purple-600 hover:bg-purple-700 text-white font-semibold rounded-lg shadow-md hover:shadow-lg transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed active:scale-95 text-sm"
+                className="flex-1 h-10.5 flex items-center justify-center bg-purple-600 hover:bg-purple-700 text-white font-semibold rounded-lg shadow-md hover:shadow-lg transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed active:scale-95 text-sm"
                 title="Cấu trúc phức tạp: Header dòng 3, range J1:BE"
               >
                 {loadingMode === 'review' ? (
@@ -1151,8 +1210,8 @@ const App: React.FC = () => {
         </div>
 
         {fullHeaders.length > 0 && (
-          <div className="bg-white rounded-2xl border border-slate-200 shadow-sm hover:shadow-md transition-shadow duration-300 overflow-hidden animate-in fade-in slide-in-from-bottom-4 duration-500">
-            <div className="px-6 py-4 border-b border-slate-100 bg-gradient-to-r from-slate-50 to-transparent flex items-center justify-between">
+          <div className="bg-white rounded-2xl border border-slate-200 shadow-sm hover:shadow-md transition-shadow duration-300 overflow-hidden animate-in fade-in slide-in-from-bottom-4">
+            <div className="px-6 py-4 border-b border-slate-100 bg-linear-to-r from-slate-50 to-transparent flex items-center justify-between">
               <div>
                 <h3 className="font-bold text-slate-900 text-lg">Chọn cột để đồng bộ</h3>
                 <p className="text-xs text-slate-500 mt-1 font-medium">Bắt buộc: Ngày, Thời gian</p>
@@ -1287,7 +1346,7 @@ const App: React.FC = () => {
             </button>
             {showFullTable && (
               <div className="border-t border-slate-200">
-                <div className="overflow-x-auto max-h-96 bg-gradient-to-b from-slate-50/50 to-white">
+                <div className="overflow-x-auto max-h-96 bg-linear-to-b from-slate-50/50 to-white">
                   <table className="text-left text-sm border-collapse" style={{ width: `${fullTableColumns.length * 140}px` }}>
                     <thead className="sticky top-0 z-10">
                       {(() => {
@@ -1316,7 +1375,7 @@ const App: React.FC = () => {
                           <>
                             {/* Hàng 1: Merged/Grouped Headers */}
                             {hasGroups && (
-                              <tr className="bg-gradient-to-r from-indigo-600 to-indigo-700 text-white text-xs font-bold uppercase tracking-wide border-b-2 border-indigo-800 sticky top-0 z-20">
+                              <tr className="bg-linear-to-r from-indigo-600 to-indigo-700 text-white text-xs font-bold uppercase tracking-wide border-b-2 border-indigo-800 sticky top-0 z-20">
                                 {fullTableColumns.map((_, i) => {
                                   const group = groups.find(g => g.start === i);
                                   if (group && group.span > 1) {
@@ -1402,8 +1461,8 @@ const App: React.FC = () => {
         )}
 
         {rows.length > 0 && (
-          <div className="bg-white rounded-2xl border border-slate-200 shadow-sm hover:shadow-md transition-shadow duration-300 overflow-hidden flex flex-col animate-in slide-in-from-bottom-4 duration-500">
-            <div className="px-6 py-4 border-b border-slate-100 flex items-center justify-between bg-gradient-to-r from-slate-50 to-transparent">
+          <div className="bg-white rounded-2xl border border-slate-200 shadow-sm hover:shadow-md transition-shadow duration-300 overflow-hidden flex flex-col animate-in slide-in-from-bottom-4">
+            <div className="px-6 py-4 border-b border-slate-100 flex items-center justify-between bg-linear-to-r from-slate-50 to-transparent">
               <div>
                 <h3 className="font-bold text-slate-900 text-lg">Dữ liệu sẵn sàng ({filteredRows.length} mục)</h3>
                 <p className="text-xs text-slate-500 mt-1 font-medium">✓ Mapping đã áp dụng • Chọn {selectedIds.size}/{filteredRows.length} mục</p>
@@ -1411,7 +1470,7 @@ const App: React.FC = () => {
               <button
                 onClick={handleSync}
                 disabled={syncing || selectedIds.size === 0}
-                className="px-6 py-2 bg-gradient-to-r from-indigo-600 to-indigo-700 hover:from-indigo-700 hover:to-indigo-800 text-white font-semibold rounded-lg shadow-lg hover:shadow-xl transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2 active:scale-95"
+                className="px-6 py-2 bg-linear-to-r from-indigo-600 to-indigo-700 hover:from-indigo-700 hover:to-indigo-800 text-white font-semibold rounded-lg shadow-lg hover:shadow-xl transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2 active:scale-95"
               >
                 {syncing ? (
                   <>
@@ -1428,7 +1487,7 @@ const App: React.FC = () => {
             </div>
             <div className="overflow-x-auto">
               <table className="w-full text-left text-sm">
-                <thead className="sticky top-0 z-20 bg-gradient-to-r from-slate-50 to-slate-50">
+                <thead className="sticky top-0 z-20 bg-linear-to-r from-slate-50 to-slate-50">
                   <tr className="text-xs font-semibold text-slate-600 uppercase tracking-wider border-b border-slate-200">
                     <th className="px-5 py-4 text-center w-12">
                       <input
@@ -1442,8 +1501,7 @@ const App: React.FC = () => {
                     </th>
                     {columnMap.date !== undefined && <th className="px-5 py-4">Ngày</th>}
                     {columnMap.time !== undefined && <th className="px-5 py-4">Thời gian</th>}
-                    <th className="px-5 py-4">Review</th>
-                    {columnMap.person !== undefined && <th className="px-5 py-4">Giảng viên</th>}
+                    {rows.some(r => r.groupName) && <th className="px-5 py-4">Review</th>}
                     {columnMap.location !== undefined && <th className="px-5 py-4">Phòng</th>}
                   </tr>
                 </thead>
@@ -1477,18 +1535,15 @@ const App: React.FC = () => {
                           <div className="text-slate-500 text-xs">→ {row.endTime.split('T')[1].substring(0, 5)}</div>
                         </td>
                       )}
-                      <td className="px-5 py-4">
-                        {row.groupName ? (
-                          <span className="inline-block px-3 py-1 bg-indigo-100 text-indigo-700 text-xs font-semibold rounded-full">
-                            {row.groupName}
-                          </span>
-                        ) : (
-                          <span className="text-slate-400 text-xs">-</span>
-                        )}
-                      </td>
-                      {columnMap.person !== undefined && (
-                        <td className="px-5 py-4 font-semibold text-slate-900 max-w-xs truncate" title={row.person}>
-                          {row.person}
+                      {rows.some(r => r.groupName) && (
+                        <td className="px-5 py-4">
+                          {row.groupName ? (
+                            <span className="inline-block px-3 py-1 bg-indigo-100 text-indigo-700 text-xs font-semibold rounded-full">
+                              {row.groupName}
+                            </span>
+                          ) : (
+                            <span className="text-slate-400 text-xs">-</span>
+                          )}
                         </td>
                       )}
                       {columnMap.location !== undefined && (

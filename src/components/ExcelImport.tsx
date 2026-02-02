@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { parseExcelFile, parseGoogleSheets, NormalizedSheet } from '../utils/excelParser';
+import { validateGoogleSheetUrl } from '../utils/validators';
 
 interface ExcelImportProps {
   onDataParsed: (sheets: NormalizedSheet[]) => void;
@@ -35,6 +36,11 @@ export const ExcelImport: React.FC<ExcelImportProps> = ({ onDataParsed }) => {
     setError('');
 
     try {
+      // 🔐 SECURITY: Validate URL before using
+      if (!validateGoogleSheetUrl(url)) {
+        throw new Error('URL không hợp lệ. Vui lòng nhập URL Google Sheets từ docs.google.com');
+      }
+      
       const results = await parseGoogleSheets(url);
       setPreview(results);
       onDataParsed(results);

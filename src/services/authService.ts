@@ -34,12 +34,12 @@ function getJWTExpiry(token: string): number | null {
     // JWT format: header.payload.signature
     const parts = token.split('.');
     if (parts.length !== 3) return null;
-    
+
     // Decode payload (URL-safe base64)
     const payload = JSON.parse(
       atob(parts[1].replace(/-/g, '+').replace(/_/g, '/'))
     );
-    
+
     // Firebase tokens have 'exp' claim in seconds
     return payload.exp ? payload.exp * 1000 : null;
   } catch (e) {
@@ -57,20 +57,20 @@ export function isTokenExpired(token?: string | null): boolean {
   try {
     if (!token) {
       const uid = getUserUID();
-      const storedExpiry = localStorage.getItem(`${EXPIRY_KEY}_${uid}`);
+      const storedExpiry = localStorage.getItem(`${EXPIRY_KEY}_${uid}`) || localStorage.getItem(EXPIRY_KEY);
       if (!storedExpiry) return true;
-      
+
       const expiryTime = parseInt(storedExpiry);
       const now = Date.now();
-      
+
       // Consider expired if less than 5 minutes remaining
       return now >= (expiryTime - 5 * 60 * 1000);
     }
-    
+
     // ✅ Validate token JWT expiry
     const expiryMs = getJWTExpiry(token);
     if (!expiryMs) return true;
-    
+
     const now = Date.now();
     // Expired if less than 5 minutes remaining
     return now >= (expiryMs - 5 * 60 * 1000);
@@ -87,15 +87,15 @@ export async function getAccessToken(): Promise<string | null> {
   try {
     const uid = getUserUID();
     const token = await secureGetItem(TOKEN_KEY, uid);
-    
+
     if (!token) return null;
-    
+
     // ✅ VALIDATE token expiry before sending
     if (isTokenExpired(token)) {
       console.log('🔄 Token expired or expiring soon, refreshing...');
       return await refreshAccessToken();
     }
-    
+
     return token;
   } catch (error) {
     console.error('❌ Error getting access token:', error);
@@ -108,16 +108,16 @@ export async function getAccessToken(): Promise<string | null> {
  */
 export async function refreshAccessToken(): Promise<string> {
   const uid = getUserUID();
-  
+
   try {
     const refreshToken = await secureGetItem(REFRESH_TOKEN_KEY, uid);
-    
+
     if (!refreshToken) {
       console.error('❌ No refresh token available');
       clearAuth();
       throw new Error('No refresh token. Please login again.');
     }
-    
+
     const response = await fetch('https://oauth2.googleapis.com/token', {
       method: 'POST',
       headers: {
@@ -129,23 +129,23 @@ export async function refreshAccessToken(): Promise<string> {
         grant_type: 'refresh_token',
       }),
     });
-    
+
     if (!response.ok) {
       throw new Error('Token refresh failed');
     }
-    
+
     const data = await response.json();
-    
+
     // Save new access token (encrypted)
     await secureSetItem(TOKEN_KEY, data.access_token, uid);
-    
+
     // Calculate expiry time (usually 3600 seconds = 1 hour)
     const expiryTime = Date.now() + (data.expires_in * 1000);
     localStorage.setItem(EXPIRY_KEY, expiryTime.toString());
-    
+
     console.log('✅ Token refreshed successfully');
     return data.access_token;
-    
+
   } catch (error) {
     console.error('❌ Token refresh failed:', error);
     clearAuth();
@@ -158,21 +158,21 @@ export async function refreshAccessToken(): Promise<string> {
  */
 export async function saveAuthTokens(accessToken: string, refreshToken?: string, expiresIn?: number) {
   const uid = getUserUID();
-  
+
   try {
     // Save access token encrypted
     await secureSetItem(TOKEN_KEY, accessToken, uid);
-    
+
     if (refreshToken) {
       // Save refresh token encrypted
       await secureSetItem(REFRESH_TOKEN_KEY, refreshToken, uid);
     }
-    
+
     if (expiresIn) {
       const expiryTime = Date.now() + (expiresIn * 1000);
       localStorage.setItem(EXPIRY_KEY, expiryTime.toString());
     }
-    
+
     console.log('✅ Auth tokens saved (encrypted)');
   } catch (error) {
     console.error('❌ Failed to save auth tokens:', error);
@@ -194,11 +194,11 @@ export function clearAuth() {
  */
 export async function fetchWithAuth(url: string, options: RequestInit = {}): Promise<Response> {
   let token = await getAccessToken();
-  
+
   if (!token) {
     throw new Error('Not authenticated');
   }
-  
+
   // First attempt
   let response = await fetch(url, {
     ...options,
@@ -207,14 +207,14 @@ export async function fetchWithAuth(url: string, options: RequestInit = {}): Pro
       'Authorization': `Bearer ${token}`,
     },
   });
-  
+
   // If 401, try refreshing token and retry once
   if (response.status === 401) {
     console.log('🔄 Got 401, refreshing token and retrying...');
-    
+
     try {
       token = await refreshAccessToken();
-      
+
       // Retry request with new token
       response = await fetch(url, {
         ...options,
@@ -231,6 +231,6 @@ export async function fetchWithAuth(url: string, options: RequestInit = {}): Pro
       throw error;
     }
   }
-  
+
   return response;
 }

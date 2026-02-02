@@ -30,6 +30,7 @@ const App: React.FC = () => {
   const [sheetUrl, setSheetUrl] = useState('');
   const [tabName, setTabName] = useState('Sheet1');
   const [personFilter, setPersonFilter] = useState('');
+  const [selectedGroupName, setSelectedGroupName] = useState<string | null>(null); // ✅ Track which group is filtered
   const [loading, setLoading] = useState(false);
   const [loadingMode, setLoadingMode] = useState<'test1' | 'review' | null>(null);
   const [syncing, setSyncing] = useState(false);
@@ -275,6 +276,7 @@ const App: React.FC = () => {
   // Chỉ chạy khi chưa có persisted data
   useEffect(() => {
     if (hasAutoLoaded.current) return; // ✅ Prevent duplicate auto-load
+    return; // ✅ TEMPORARY: Disable auto-load for manual testing
 
     if (
       sheetUrl &&
@@ -441,9 +443,11 @@ const App: React.FC = () => {
         headers = detailHeaders;  // Use detail headers for mapping/display
       }
     } else if (hasGroups && rows[idx + 1]) {
-      // Row has groups → use filled row for grouping, next row for details
-      headers = filledHeaders;  // For group detection in UI
+      // Row has groups → use this row for grouping, next row for details
+      // In Review mode, mapping UI should use DETAIL headers (Row 3), not group names
       detailHeaders = rows[idx + 1] || [];  // Detail column names from next row
+      computedTitleRow = filledHeaders;     // Group headers from current row
+      headers = detailHeaders;              // ✅ Use detail headers for mapping UI
       dataStartIndex = idx + 2;  // Data starts after detail header row
 
       // ✅ Filter out DEFENSE and CONFLICT columns (for Review mode)
@@ -456,10 +460,11 @@ const App: React.FC = () => {
         }
       });
 
-      // Apply filter to headers and detail headers
+      // Apply filter to group headers + detail headers
       if (columnsToKeep.length < filledHeaders.length) {
-        headers = columnsToKeep.map(i => filledHeaders[i]);
+        computedTitleRow = columnsToKeep.map(i => filledHeaders[i]);
         detailHeaders = columnsToKeep.map(i => detailHeaders[i]);
+        headers = detailHeaders;
         // Also need to filter all data rows later
         console.log(`✅ Filtered out ${filledHeaders.length - columnsToKeep.length} DEFENSE/CONFLICT columns`);
       }
@@ -527,7 +532,7 @@ const App: React.FC = () => {
 
       // ✅ Use nested mapping strategy for Review mode (idx=2 or idx=3)
       // Pass both computedTitleRow (Row 2 groups) and detailHeaders (Row 3 columns)
-      const data = idx === 2 && computedTitleRow.length > 0
+      const data = computedTitleRow.length > 0
         ? googleService.normalizeRowsWithGrouping({
           sheetId: nextMeta.sheetId,
           tab: nextMeta.tab,
@@ -593,16 +598,17 @@ const App: React.FC = () => {
       // Do not use fullRows which might have been trimmed or filtered
       let dataRowsToUse = fullRows;
       let groupHeadersToUse = titleRow; // Default to current titleRow state
+      const isGroupedMode = sheetMeta.headerRowIndex === 2 || (sheetMeta.headerRowIndex === 1 && titleRow.length > 0);
 
       // If we have allRows (raw data from API), extract and reconstruct data rows
       if (allRows.length > 0 && sheetMeta.headerRowIndex !== undefined) {
-        const dataStartIdx = sheetMeta.headerRowIndex + 1;
+        const dataStartIdx = sheetMeta.headerRowIndex + (isGroupedMode && sheetMeta.headerRowIndex === 1 ? 2 : 1);
         let rawFromAll = allRows.slice(dataStartIdx);
 
         console.log(`applyMapping: Got ${rawFromAll.length} raw rows from allRows, dataStartIdx=${dataStartIdx}`);
 
         // ✅ For Review mode (headerRowIndex=2 or 3), reconstruct group headers from Row 2
-        if (sheetMeta.headerRowIndex === 2) {
+        if (isGroupedMode) {
           const row2Raw = allRows[1] || []; // Row 2 (index 1) contains group headers
 
           // Fill forward Row 2 to handle merged cells
@@ -668,7 +674,7 @@ const App: React.FC = () => {
 
       console.log('applyMapping proceeding with data...');
       setError(null);
-      const data = sheetMeta.headerRowIndex === 2 && groupHeadersToUse.length > 0
+      const data = isGroupedMode && groupHeadersToUse.length > 0
         ? googleService.normalizeRowsWithGrouping({
           sheetId: sheetMeta.sheetId,
           tab: sheetMeta.tab,
@@ -897,6 +903,31 @@ const App: React.FC = () => {
       });
   }, [rows, personFilter, fullHeaders]);
 
+  // ✅ Auto-update groupName selection when personFilter changes
+  useEffect(() => {
+    if (personFilter && filteredRows.length > 0 && rows[0]?.isGrouped) {
+      // Get all unique groupNames from filtered events
+      const groupNames = new Set(
+        filteredRows
+          .filter(r => r.groupName)
+          .map(r => r.groupName!)
+      );
+      
+      if (groupNames.size === 1) {
+        // All filtered events belong to same group (REVIEW 1, REVIEW 2, or REVIEW 3)
+        const groupName = Array.from(groupNames)[0];
+        setSelectedGroupName(groupName);
+        console.log(`✅ Auto-update: Filter matched group "${groupName}"`);
+      } else if (groupNames.size > 1) {
+        // Multiple groups found (shouldn't happen with single reviewer search)
+        setSelectedGroupName(null);
+      }
+    } else if (!personFilter) {
+      // No filter → clear group selection
+      setSelectedGroupName(null);
+    }
+  }, [personFilter, filteredRows, rows]);
+
   const handleMapChange = (key: keyof ColumnMapping) => (e: React.ChangeEvent<HTMLSelectElement>) => {
     const value = e.target.value;
     setColumnMap(prev => {
@@ -933,7 +964,20 @@ const App: React.FC = () => {
 
     const f = personFilter.toLowerCase();
 
-    // ✅ Detect filter columns based on ACTUAL HEADERS (not sheet name)
+    // ✅ For grouped events (Data Mẫu/Review), use sourceRowIndex to find matching raw rows
+    if (rows.length > 0 && rows[0]?.isGrouped) {
+      const sourceRowIndices = new Set(
+        filteredRows
+          .map(r => r.sourceRowIndex)
+          .filter((idx): idx is number => typeof idx === 'number')
+      );
+
+      if (sourceRowIndices.size === 0) return [];
+
+      return fullRows.filter((_, idx) => sourceRowIndices.has(idx));
+    }
+
+    // ✅ For non-grouped events, use old logic (search across all rows)
     let filterKeywords: string[] = [];
 
     const headerStr = fullTableColumns.join('|').toLowerCase();
@@ -966,7 +1010,7 @@ const App: React.FC = () => {
         return cellValue.includes(f);
       });
     });
-  }, [fullRows, fullTableColumns, personFilter, sheetMeta]);
+  }, [fullRows, fullTableColumns, personFilter, sheetMeta, filteredRows, rows]);
 
   const headerOptions = useMemo(() => {
     return fullTableColumns.map((h, i) => ({

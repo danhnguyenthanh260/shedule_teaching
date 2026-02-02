@@ -196,7 +196,8 @@ export class GoogleSyncService {
     let detailHeaders: string[] | undefined;
 
     if (isDataMau && values.length >= 4) {
-      // Data Mẫu: Row 2 = groups (REVIEW 1, REVIEW 2, REVIEW 3), Row 3 = detail → mỗi dòng data = 3 events
+      // Data Mẫu: Row 1 = super headers (REVIEW 1, REVIEW 2, REVIEW 3), Row 2 = groups, Row 3 = detail → mỗi dòng data = 3 events
+      const row1 = this.fillForwardRow(values[0] || []);  // ✅ NEW: Extract Row 1 (super headers)
       const row2 = this.fillForwardRow(values[1] || []);
       const row3 = values[2] || [];
       const columnsToKeep: number[] = [];
@@ -206,15 +207,17 @@ export class GoogleSyncService {
           columnsToKeep.push(i);
         }
       });
+      const superHeaders = columnsToKeep.map(i => row1[i]);  // ✅ NEW: Pass Row 1 for visual grouping
       groupHeaders = columnsToKeep.map(i => row2[i]);
       detailHeaders = columnsToKeep.map(i => row3[i] || `Column_${i + 1}`);
       rawData = values.slice(3).map(row => columnsToKeep.map(i => (row[i] || '').toString().trim()));
       rawData = rawData.filter(row => row.some(c => c !== ''));
-      headers = groupHeaders;
+      headers = detailHeaders;  // ✅ FIX: Use detail headers instead of group headers
       schema = inferSchema(detailHeaders, rawData.slice(0, 5));
       normalized = this.normalizeRowsWithGrouping({
         sheetId,
         tab: finalTabName,
+        superHeaders,  // ✅ NEW: Pass Row 1 for proper grouping
         groupHeaders,
         detailHeaders,
         rawRows: rawData,
@@ -348,13 +351,13 @@ export class GoogleSyncService {
 
     // ✅ Detect tab type:
     // - "Review1" tab: Uses A1:BE1000, header at row 4 (index 3)
-    // - Other Review tabs: Uses J1:BE1000 (skip Project Info A-I), header at row 3 (index 2)
+    // - Other Review tabs: Uses J1:BE1000 (skip Project Info A-I), header at row 2 (index 1)
     const isReview1Tab = finalTabName.toLowerCase() === 'review1';
     const range = isReview1Tab
       ? `'${finalTabName}'!A1:BE1000`  // Review1: Full range
       : `'${finalTabName}'!J1:BE1000`; // Data Mẫu: Skip A-I
 
-    const headerRowIndex = isReview1Tab ? 3 : 2; // Review1: row 4, Others: row 3
+    const headerRowIndex = isReview1Tab ? 3 : 1; // Review1: row 4 (index 3), Data Mẫu: row 2 (index 1)
 
     const data = await this.fetchWithAuth(
       `https://sheets.googleapis.com/v4/spreadsheets/${sheetId}/values/${encodeURIComponent(range)}`,
@@ -362,7 +365,7 @@ export class GoogleSyncService {
     );
 
     const values: string[][] = data.values;
-    const minRows = isReview1Tab ? 5 : 4;
+    const minRows = isReview1Tab ? 5 : 3; // Review1: need 5 rows (header row 4 + data), Data Mẫu: need 3 rows (header row 2 + data)
     if (!values || values.length < minRows) {
       throw new Error(`Sheet không đủ dữ liệu (cần ít nhất ${minRows} hàng).`);
     }
@@ -451,9 +454,11 @@ export class GoogleSyncService {
       };
     }
 
-    // ✅ CRITICAL FIX: Extract Row 2 (group headers) and Row 3 (detail headers) for grouped normalization
-    // Row 2: REVIEW 1, REVIEW 1, REVIEW 1, REVIEW 2, REVIEW 2, REVIEW 2, REVIEW 3, ...
-    // Row 3: Code, Count, Date, Slot, Room, Reviewer 1, Reviewer 2, ...
+    // ✅ CRITICAL FIX: Extract Row 1 (super headers), Row 2 (group headers), and Row 3 (detail headers)
+    // Row 1 (index 0): REVIEW 1, REVIEW 1, ..., REVIEW 2, REVIEW 2, ..., REVIEW 3, REVIEW 3, ...
+    // Row 2 (index 1): REVIEWER 1, REVIEWER 2, ..., REVIEWER 1, REVIEWER 2, ...
+    // Row 3 (index 2): Code, Count, Date, Slot, Room, Reviewer 1, Reviewer 2, ...
+    const row1 = this.fillForwardRow(values[0] || []); // Super headers (REVIEW 1/2/3) with fill-forward
     const row2 = this.fillForwardRow(values[1] || []); // Group headers with fill-forward
     const row3 = values[2] || []; // Detail headers
 
@@ -466,7 +471,8 @@ export class GoogleSyncService {
       }
     });
 
-    const groupHeaders = columnsToKeep.map(i => row2[i]);
+    const superHeaders = columnsToKeep.map(i => row1[i]); // REVIEW 1/2/3
+    const groupHeaders = columnsToKeep.map(i => row2[i]); // REVIEWER 1/2, etc
     const detailHeaders = columnsToKeep.map(i => row3[i] || `Column_${i + 1}`);
 
     // Extract data rows and apply column filter
@@ -478,6 +484,7 @@ export class GoogleSyncService {
     rawData = rawData.filter(row => row.some(c => c !== ''));
 
     console.log(`✅ Review mode (GROUPED): Range ${range}`);
+    console.log(`✅ Row 1 (super headers):`, superHeaders.slice(0, 10));
     console.log(`✅ Row 2 (group headers):`, groupHeaders.slice(0, 10));
     console.log(`✅ Row 3 (detail headers):`, detailHeaders.slice(0, 10));
     console.log(`✅ Data rows: ${rawData.length}`);
@@ -486,10 +493,12 @@ export class GoogleSyncService {
     const schema = inferSchema(detailHeaders, rawData.slice(0, 5));
 
     // ✅ CRITICAL: Use normalizeRowsWithGrouping to expand each row into multiple events
+    // Pass superHeaders (REVIEW 1/2/3) so flattenRow can group by review
     // Example: 4 data rows × 3 review groups = 12 events
     const normalized = this.normalizeRowsWithGrouping({
       sheetId,
       tab: finalTabName,
+      superHeaders,  // ✅ NEW: Pass Row 1 for visual grouping
       groupHeaders,
       detailHeaders,
       rawRows: rawData,
@@ -636,23 +645,26 @@ export class GoogleSyncService {
 
   /**
    * 2b. FLATTEN ROW: Decompose a row with grouped columns into multiple events
-   * Used for sheets with structure: Row 2 = Groups ('REVIEW 1', 'REVIEW 2'), Row 3 = Details ('Code', 'Date', 'Reviewer')
+   * Used for sheets with structure: Row 1 = Super headers (REVIEW 1, REVIEW 2), Row 2 = Groups (REVIEWER 1, REVIEWER 2), Row 3 = Details (Code, Date)
    */
   private flattenRow(params: {
     sheetId: string;
     tab: string;
     rowIndex: number;
-    groupHeaders: string[]; // Row 2: ['REVIEW 1', 'REVIEW 1', ..., 'REVIEW 2', ...]
-    detailHeaders: string[]; // Row 3: ['Code', 'Count', 'Date', 'Slot', 'Room', 'Reviewer', ...]
+    superHeaders?: string[]; // ✅ NEW: Row 1 - REVIEW 1, REVIEW 2, REVIEW 3 (main grouping)
+    groupHeaders: string[]; // Row 2: [REVIEWER 1, REVIEWER 2, ..., REVIEWER 1, ...]
+    detailHeaders: string[]; // Row 3: [Code, Count, Date, Slot, Room, Reviewer, ...]
     rawRow: string[];
     headerRowIndex: number;
   }): RowNormalized[] {
-    const { sheetId, tab, rowIndex, groupHeaders, detailHeaders, rawRow, headerRowIndex } = params;
+    const { sheetId, tab, rowIndex, superHeaders, groupHeaders, detailHeaders, rawRow, headerRowIndex } = params;
     const events: RowNormalized[] = [];
 
-    // Group columns by group name
+    // Group columns by super header name (REVIEW 1, REVIEW 2, REVIEW 3)
+    // ✅ Use superHeaders if available (Row 1), else fall back to groupHeaders (Row 2)
+    const headersToGroup = superHeaders && superHeaders.length > 0 ? superHeaders : groupHeaders;
     const groups = new Map<string, number[]>(); // 'REVIEW 1' => [0, 1, 2, 3, 4, 5]
-    groupHeaders.forEach((group, colIndex) => {
+    headersToGroup.forEach((group, colIndex) => {
       const groupName = (group || '').trim();
       // Skip generic columns or empty groups
       if (!groupName || groupName.match(/^Column_?\d+$/i)) return;
@@ -703,8 +715,14 @@ export class GoogleSyncService {
         const slot = findValueInGroup(groupData, ['slot', 'tiết', 'time', 'giờ']);
         // Room: NVH G.02, NVH F.01... (không lấy tên người)
         const room = findValueInGroup(groupData, ['room', 'phòng']);
-        // Reviewer: Reviewer 1, Reviewer 2 hoặc tên GV
-        const reviewer = findValueInGroup(groupData, ['reviewer 1', 'reviewer 2', 'reviewer', 'người đánh giá', 'đánh giá']);
+        // ✅ Extract BOTH Reviewer 1 AND Reviewer 2 separately for this group
+        const reviewer1 = findValueInGroup(groupData, ['reviewer 1', 'đánh giá viên 1'], ['reviewer 2', 'đánh giá viên 2']);
+        const reviewer2 = findValueInGroup(groupData, ['reviewer 2', 'đánh giá viên 2'], ['reviewer 1', 'đánh giá viên 1']);
+        const reviewers: string[] = [];
+        if (reviewer1) reviewers.push(reviewer1);
+        if (reviewer2) reviewers.push(reviewer2);
+        // Use reviewer1 as primary person, or reviewer2 if reviewer1 is empty
+        const reviewer = reviewer1 || reviewer2 || 'Chưa phân công';
         const code = findValueInGroup(groupData, ['code', 'mã']);
         const count = findValueInGroup(groupData, ['count', 'số lượng']);
 
@@ -717,14 +735,18 @@ export class GoogleSyncService {
             id: `${sheetId}_${tab}_row${rowIndex + headerRowIndex + 1}_${groupName}`,
             groupName,
             sourceRowId: `${sheetId}_${tab}_row${rowIndex + headerRowIndex + 1}`,
-            person: reviewer || 'Chưa phân công', // ✅ Default value if reviewer not assigned
+            sourceRowIndex: rowIndex, // ✅ NEW: Store original row index for filtering fullRows
+            person: reviewer, // Primary person (reviewer1 or reviewer2)
             date,
             startTime: start,
             endTime: end,
             task: code || count || groupName,
             location: room || 'Chưa xác định',
             raw: groupData,
-            status: 'pending'
+            status: 'pending',
+            // ✅ Mark as grouped event with separate reviewers array
+            isGrouped: true,
+            reviewers: reviewers.length > 0 ? reviewers : undefined
           });
         }
       } catch (e) {
@@ -741,13 +763,14 @@ export class GoogleSyncService {
   normalizeRowsWithGrouping(params: {
     sheetId: string;
     tab: string;
-    groupHeaders?: string[]; // Row 2: groups like 'REVIEW 1', 'REVIEW 2'
+    superHeaders?: string[]; // ✅ NEW: Row 1 - super group headers (REVIEW 1, REVIEW 2, REVIEW 3)
+    groupHeaders?: string[]; // Row 2: groups like 'REVIEWER 1', 'REVIEWER 2'
     detailHeaders: string[]; // Row 3: detail columns like 'Code', 'Date', 'Reviewer'
     rawRows: string[][];
     mapping: ColumnMapping;
     headerRowIndex: number;
   }): RowNormalized[] {
-    const { groupHeaders, detailHeaders, rawRows, headerRowIndex } = params;
+    const { superHeaders, groupHeaders, detailHeaders, rawRows, headerRowIndex } = params;
 
     // If no groupHeaders, use legacy normalization (1 row = 1 event)
     if (!groupHeaders || groupHeaders.length === 0) {
@@ -764,7 +787,8 @@ export class GoogleSyncService {
         sheetId: params.sheetId,
         tab: params.tab,
         rowIndex,
-        groupHeaders,
+        superHeaders: superHeaders || groupHeaders, // ✅ Use superHeaders (REVIEW 1/2/3) if available, else fall back to groupHeaders
+        groupHeaders: groupHeaders || [],
         detailHeaders,
         rawRow,
         headerRowIndex

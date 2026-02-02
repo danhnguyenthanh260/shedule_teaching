@@ -52,13 +52,13 @@ export const FirebaseProvider: React.FC<{ children: React.ReactNode }> = ({ chil
         console.log('🔍 Checking redirect result...');
         const result = await getRedirectResult(auth);
         console.log('🔍 Redirect result:', result);
-        
+
         if (result?.user) {
           console.log('✅ User from redirect:', result.user.email);
           setUserUID(result.user.uid);
           const credential = GoogleAuthProvider.credentialFromResult(result);
           console.log('✅ Credential:', credential);
-          
+
           if (credential?.accessToken) {
             console.log('✅ Access token obtained');
             setAccessToken(credential.accessToken);
@@ -83,7 +83,7 @@ export const FirebaseProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       console.log('🔍 Auth state changed:', currentUser?.email);
       setUser(currentUser);
       setLoading(false);
-      
+
       // If user is logged in and we don't have access token, try to restore from localStorage
       if (currentUser && !accessToken) {
         const stored = localStorage.getItem('google_access_token');
@@ -101,38 +101,25 @@ export const FirebaseProvider: React.FC<{ children: React.ReactNode }> = ({ chil
   const loginWithGoogle = async () => {
     try {
       setError(null);
-      const isLocalhost = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
-      console.log('🚀 Starting Google login...', isLocalhost ? 'popup' : 'redirect');
-      
-      // 🔐 SECURITY: Generate and store OAuth state with timestamp for CSRF protection
-      const oauthState = generateOAuthState();
-      const stateData = {
-        state: oauthState,
-        timestamp: Date.now()
-      };
-      sessionStorage.setItem('oauth_state_data', JSON.stringify(stateData));
-      logInfo('OAuth state generated');
-      
+      console.log('🚀 Starting Google login with popup...');
+
       const provider = new GoogleAuthProvider();
       provider.addScope('https://www.googleapis.com/auth/spreadsheets.readonly');
       provider.addScope('https://www.googleapis.com/auth/calendar.events');
-      
-      // Use popup for localhost, redirect for production
-      if (isLocalhost) {
-        console.log('🚀 Using popup for localhost...');
-        const result = await signInWithPopup(auth, provider);
-        setUserUID(result.user.uid);
-        
-        const credential = GoogleAuthProvider.credentialFromResult(result);
-        if (credential?.accessToken) {
-          console.log('✅ Access token obtained from popup');
-          setAccessToken(credential.accessToken);
-          await saveAuthTokens(credential.accessToken, '', 3600);
-          logSuccess('Google login successful (popup)');
-        }
-      } else {
-        console.log('🚀 Using redirect for production...');
-        await signInWithRedirect(auth, provider);
+
+      const result = await signInWithPopup(auth, provider);
+      setUserUID(result.user.uid);
+
+      const credential = GoogleAuthProvider.credentialFromResult(result);
+      if (credential?.accessToken) {
+        console.log('✅ Access token obtained from popup');
+        setAccessToken(credential.accessToken);
+        await saveAuthTokens(credential.accessToken, '', 3600);
+
+        // Also store in legacy key for components that might use it
+        localStorage.setItem('google_access_token', credential.accessToken);
+
+        logSuccess('Google login successful');
       }
     } catch (err) {
       const errorMessage = err instanceof Error ? err.message : 'Failed to login with Google';
@@ -170,10 +157,10 @@ export const FirebaseProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       setError(null);
       await signOut(auth);
       setAccessToken(null);
-      
+
       // Clear all auth data using authService
       clearAuth();
-      
+
       logInfo('Logout successful');
     } catch (err) {
       const errorMessage = err instanceof Error ? err.message : 'Failed to logout';
@@ -186,13 +173,13 @@ export const FirebaseProvider: React.FC<{ children: React.ReactNode }> = ({ chil
   const getAccessToken = async (): Promise<string | null> => {
     // Return stored access token or try to restore from localStorage
     if (accessToken) return accessToken;
-    
+
     const stored = localStorage.getItem('google_access_token');
     if (stored) {
       setAccessToken(stored);
       return stored;
     }
-    
+
     return null;
   };
 

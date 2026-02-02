@@ -62,44 +62,13 @@ const App: React.FC = () => {
     getMapping: getFirebaseMapping
   } = useFirebaseMapping(sheetMeta?.sheetId);
 
-  // Toast notification auto-hide
+  // ✅ Toast notification auto-hide
   useEffect(() => {
     if (toastMessage) {
       const timer = setTimeout(() => setToastMessage(null), 3000);
       return () => clearTimeout(timer);
     }
   }, [toastMessage]);
-
-  // ✅ Handle redirect result from Google login
-  useEffect(() => {
-    const handleRedirectResult = async () => {
-      try {
-        console.log('🔍 App.tsx - Checking redirect result...');
-        const result = await getRedirectResult(auth);
-        console.log('🔍 App.tsx - Redirect result:', result);
-        
-        if (result?.user) {
-          console.log('✅ App.tsx - User logged in:', result.user.email);
-          setUserUID(result.user.uid);
-          
-          const credential = GoogleAuthProvider.credentialFromResult(result);
-          if (credential?.accessToken) {
-            console.log('✅ App.tsx - Access token obtained');
-            setAccessToken(credential.accessToken);
-            await saveAuthTokens(credential.accessToken, '', 3600);
-            logSuccess('Google login successful via redirect');
-          }
-        } else {
-          console.log('⚠️ App.tsx - No redirect result found');
-        }
-      } catch (error) {
-        console.error('❌ App.tsx - Redirect error:', error);
-        logError('Redirect result error:', error);
-      }
-    };
-    
-    handleRedirectResult();
-  }, []);
 
   // ✅ Restore toàn bộ state từ localStorage on mount
   useEffect(() => {
@@ -946,7 +915,7 @@ const App: React.FC = () => {
           .filter(r => r.groupName)
           .map(r => r.groupName!)
       );
-      
+
       if (groupNames.size === 1) {
         // All filtered events belong to same group (REVIEW 1, REVIEW 2, or REVIEW 3)
         const groupName = Array.from(groupNames)[0];

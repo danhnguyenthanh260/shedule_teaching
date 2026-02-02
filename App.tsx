@@ -70,6 +70,40 @@ const App: React.FC = () => {
     }
   }, [toastMessage]);
 
+  /* 
+  // RESTORED CODE AS COMMENT (User Request):
+  // ✅ Handle redirect result from Google login
+  useEffect(() => {
+    const handleRedirectResult = async () => {
+      try {
+        console.log('🔍 App.tsx - Checking redirect result...');
+        const result = await getRedirectResult(auth);
+        console.log('🔍 App.tsx - Redirect result:', result);
+        
+        if (result?.user) {
+          console.log('✅ App.tsx - User logged in:', result.user.email);
+          setUserUID(result.user.uid);
+          
+          const credential = GoogleAuthProvider.credentialFromResult(result);
+          if (credential?.accessToken) {
+            console.log('✅ App.tsx - Access token obtained');
+            setAccessToken(credential.accessToken);
+            await saveAuthTokens(credential.accessToken, '', 3600);
+            logSuccess('Google login successful via redirect');
+          }
+        } else {
+          console.log('⚠️ App.tsx - No redirect result found');
+        }
+      } catch (error) {
+        console.error('❌ App.tsx - Redirect error:', error);
+        logError('Redirect result error:', error);
+      }
+    };
+    
+    handleRedirectResult();
+  }, []);
+  */
+
   // ✅ Restore toàn bộ state từ localStorage on mount
   useEffect(() => {
     const restored = persistStateService.restoreState();
@@ -1321,6 +1355,7 @@ const App: React.FC = () => {
           </div>
         )}
 
+        {/* COMMENTED OUT UI SECTION (User Request)
         {fullRows.length > 0 && (
           <div className="bg-white rounded-2xl border border-slate-200 shadow-sm hover:shadow-md transition-shadow duration-300 overflow-hidden">
             <button
@@ -1376,7 +1411,6 @@ const App: React.FC = () => {
 
                         return (
                           <>
-                            {/* Hàng 1: Merged/Grouped Headers */}
                             {hasGroups && (
                               <tr className="bg-linear-to-r from-indigo-600 to-indigo-700 text-white text-xs font-bold uppercase tracking-wide border-b-2 border-indigo-800 sticky top-0 z-20">
                                 {fullTableColumns.map((_, i) => {
@@ -1402,7 +1436,6 @@ const App: React.FC = () => {
                               </tr>
                             )}
 
-                            {/* Hàng 2: Detail Headers (Dòng 3 gốc) */}
                             <tr className={`bg-slate-100 text-[10px] font-semibold text-slate-700 uppercase tracking-wider border-b-2 border-slate-300 sticky ${detailRowStickyTop} z-10`}>
                               {(fullDetailHeaders.length > 0 ? fullDetailHeaders : fullTableColumns).map((h, i) => {
                                 const isSelected =
@@ -1462,6 +1495,7 @@ const App: React.FC = () => {
             )}
           </div>
         )}
+        */}
 
         {rows.length > 0 && (
           <div className="bg-white rounded-2xl border border-slate-200 shadow-sm hover:shadow-md transition-shadow duration-300 overflow-hidden flex flex-col animate-in slide-in-from-bottom-4">

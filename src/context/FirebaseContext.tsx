@@ -101,7 +101,8 @@ export const FirebaseProvider: React.FC<{ children: React.ReactNode }> = ({ chil
   const loginWithGoogle = async () => {
     try {
       setError(null);
-      console.log('🚀 Starting Google login redirect...');
+      const isLocalhost = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
+      console.log('🚀 Starting Google login...', isLocalhost ? 'popup' : 'redirect');
       
       // 🔐 SECURITY: Generate and store OAuth state with timestamp for CSRF protection
       const oauthState = generateOAuthState();
@@ -116,10 +117,23 @@ export const FirebaseProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       provider.addScope('https://www.googleapis.com/auth/spreadsheets.readonly');
       provider.addScope('https://www.googleapis.com/auth/calendar.events');
       
-      console.log('🚀 Calling signInWithRedirect...');
-      // Use redirect instead of popup (more reliable)
-      await signInWithRedirect(auth, provider);
-      console.log('🚀 Redirect initiated, waiting for callback...');
+      // Use popup for localhost, redirect for production
+      if (isLocalhost) {
+        console.log('🚀 Using popup for localhost...');
+        const result = await signInWithPopup(auth, provider);
+        setUserUID(result.user.uid);
+        
+        const credential = GoogleAuthProvider.credentialFromResult(result);
+        if (credential?.accessToken) {
+          console.log('✅ Access token obtained from popup');
+          setAccessToken(credential.accessToken);
+          await saveAuthTokens(credential.accessToken, '', 3600);
+          logSuccess('Google login successful (popup)');
+        }
+      } else {
+        console.log('🚀 Using redirect for production...');
+        await signInWithRedirect(auth, provider);
+      }
     } catch (err) {
       const errorMessage = err instanceof Error ? err.message : 'Failed to login with Google';
       setError(errorMessage);

@@ -4,6 +4,8 @@ import {
   createUserWithEmailAndPassword,
   signInWithEmailAndPassword,
   signInWithPopup,
+  signInWithRedirect,
+  getRedirectResult,
   GoogleAuthProvider,
   signOut,
   onAuthStateChanged,
@@ -43,6 +45,27 @@ export const FirebaseProvider: React.FC<{ children: React.ReactNode }> = ({ chil
   const [error, setError] = useState<string | null>(null);
   const [accessToken, setAccessToken] = useState<string | null>(null);
 
+  // Check for redirect result on mount
+  useEffect(() => {
+    const checkRedirectResult = async () => {
+      try {
+        const result = await getRedirectResult(auth);
+        if (result?.user) {
+          setUserUID(result.user.uid);
+          const credential = GoogleAuthProvider.credentialFromResult(result);
+          if (credential?.accessToken) {
+            setAccessToken(credential.accessToken);
+            await saveAuthTokens(credential.accessToken, '', 3600);
+            logSuccess('Google login successful (redirect)');
+          }
+        }
+      } catch (err) {
+        logError('Redirect result error:', err);
+      }
+    };
+    checkRedirectResult();
+  }, []);
+
   // Listen to auth state changes
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, (currentUser) => {
@@ -70,35 +93,17 @@ export const FirebaseProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       const oauthState = generateOAuthState();
       const stateData = {
         state: oauthState,
-        timestamp: Date.now() // ✅ Add timestamp for 5-min expiry check
+        timestamp: Date.now()
       };
       sessionStorage.setItem('oauth_state_data', JSON.stringify(stateData));
-      logInfo('OAuth state generated with timestamp and stored');
+      logInfo('OAuth state generated');
       
       const provider = new GoogleAuthProvider();
-      // Request Google Sheets and Calendar scopes
       provider.addScope('https://www.googleapis.com/auth/spreadsheets.readonly');
       provider.addScope('https://www.googleapis.com/auth/calendar.events');
       
-      const result = await signInWithPopup(auth, provider);
-      
-      // Set user UID for encryption key derivation
-      setUserUID(result.user.uid);
-      
-      // Get the OAuth access token from the credential
-      const credential = GoogleAuthProvider.credentialFromResult(result);
-      if (credential?.accessToken) {
-        setAccessToken(credential.accessToken);
-        
-        // Save tokens with expiry using authService
-        await saveAuthTokens(
-          credential.accessToken,
-          '', // Firebase doesn't provide refresh token directly
-          3600 // Google tokens typically expire in 1 hour
-        );
-        
-        logSuccess('Google login successful');
-      }
+      // Use redirect instead of popup (more reliable)
+      await signInWithRedirect(auth, provider);
     } catch (err) {
       const errorMessage = err instanceof Error ? err.message : 'Failed to login with Google';
       setError(errorMessage);

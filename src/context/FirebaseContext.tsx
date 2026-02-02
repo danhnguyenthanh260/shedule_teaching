@@ -49,17 +49,27 @@ export const FirebaseProvider: React.FC<{ children: React.ReactNode }> = ({ chil
   useEffect(() => {
     const checkRedirectResult = async () => {
       try {
+        console.log('🔍 Checking redirect result...');
         const result = await getRedirectResult(auth);
+        console.log('🔍 Redirect result:', result);
+        
         if (result?.user) {
+          console.log('✅ User from redirect:', result.user.email);
           setUserUID(result.user.uid);
           const credential = GoogleAuthProvider.credentialFromResult(result);
+          console.log('✅ Credential:', credential);
+          
           if (credential?.accessToken) {
+            console.log('✅ Access token obtained');
             setAccessToken(credential.accessToken);
             await saveAuthTokens(credential.accessToken, '', 3600);
             logSuccess('Google login successful (redirect)');
           }
+        } else {
+          console.log('⚠️ No redirect result found');
         }
       } catch (err) {
+        console.error('❌ Redirect result error:', err);
         logError('Redirect result error:', err);
       }
     };
@@ -68,7 +78,9 @@ export const FirebaseProvider: React.FC<{ children: React.ReactNode }> = ({ chil
 
   // Listen to auth state changes
   useEffect(() => {
+    console.log('🔍 Setting up auth state listener...');
     const unsubscribe = onAuthStateChanged(auth, (currentUser) => {
+      console.log('🔍 Auth state changed:', currentUser?.email);
       setUser(currentUser);
       setLoading(false);
       
@@ -76,6 +88,7 @@ export const FirebaseProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       if (currentUser && !accessToken) {
         const stored = localStorage.getItem('google_access_token');
         if (stored) {
+          console.log('✅ Restored access token from localStorage');
           setAccessToken(stored);
           logInfo('Restored access token from localStorage');
         }
@@ -88,6 +101,7 @@ export const FirebaseProvider: React.FC<{ children: React.ReactNode }> = ({ chil
   const loginWithGoogle = async () => {
     try {
       setError(null);
+      console.log('🚀 Starting Google login redirect...');
       
       // 🔐 SECURITY: Generate and store OAuth state with timestamp for CSRF protection
       const oauthState = generateOAuthState();
@@ -102,11 +116,14 @@ export const FirebaseProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       provider.addScope('https://www.googleapis.com/auth/spreadsheets.readonly');
       provider.addScope('https://www.googleapis.com/auth/calendar.events');
       
+      console.log('🚀 Calling signInWithRedirect...');
       // Use redirect instead of popup (more reliable)
       await signInWithRedirect(auth, provider);
+      console.log('🚀 Redirect initiated, waiting for callback...');
     } catch (err) {
       const errorMessage = err instanceof Error ? err.message : 'Failed to login with Google';
       setError(errorMessage);
+      console.error('❌ Google login failed:', errorMessage, err);
       logError('Google login failed:', errorMessage);
       throw err;
     }

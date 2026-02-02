@@ -11,6 +11,9 @@ import { useFirebaseMapping } from './src/hooks/useFirebaseMapping';
 import { syncEventsToCalendar } from './src/services/appsScriptService';
 import { persistStateService } from './lib/persistState';
 import { logInfo, logSuccess, logWarning, logError } from './src/utils/logger';
+import { auth } from './src/config/firebase';
+import { getRedirectResult, GoogleAuthProvider } from 'firebase/auth';
+import { saveAuthTokens, setUserUID } from './src/services/authService';
 
 // Khai báo kiểu cho SDK Google
 declare global {
@@ -66,6 +69,37 @@ const App: React.FC = () => {
       return () => clearTimeout(timer);
     }
   }, [toastMessage]);
+
+  // ✅ Handle redirect result from Google login
+  useEffect(() => {
+    const handleRedirectResult = async () => {
+      try {
+        console.log('🔍 App.tsx - Checking redirect result...');
+        const result = await getRedirectResult(auth);
+        console.log('🔍 App.tsx - Redirect result:', result);
+        
+        if (result?.user) {
+          console.log('✅ App.tsx - User logged in:', result.user.email);
+          setUserUID(result.user.uid);
+          
+          const credential = GoogleAuthProvider.credentialFromResult(result);
+          if (credential?.accessToken) {
+            console.log('✅ App.tsx - Access token obtained');
+            setAccessToken(credential.accessToken);
+            await saveAuthTokens(credential.accessToken, '', 3600);
+            logSuccess('Google login successful via redirect');
+          }
+        } else {
+          console.log('⚠️ App.tsx - No redirect result found');
+        }
+      } catch (error) {
+        console.error('❌ App.tsx - Redirect error:', error);
+        logError('Redirect result error:', error);
+      }
+    };
+    
+    handleRedirectResult();
+  }, []);
 
   // ✅ Restore toàn bộ state từ localStorage on mount
   useEffect(() => {

@@ -1,0 +1,19 @@
+{
+  "indexes": [
+    {
+      "collectionGroup": "syncHistory",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "syncedAt", "order": "DESCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "syncHistory",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "sheetId", "order": "ASCENDING" },
+        { "fieldPath": "syncedAt", "order": "DESCENDING" }
+      ]
+    }
+  ]
+}

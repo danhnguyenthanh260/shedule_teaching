@@ -328,7 +328,7 @@ const App: React.FC = () => {
         setResult(null);
         setError(null);
 
-          (async () => {
+        (async () => {
           try {
             if (!firebaseAccessToken) throw new Error("No access token available");
             const { rows: data, headers, rawRows, allRows: fetchedRows, schema, sheetId, headerRowIndex } = await googleService.loadSheetReview(sheetUrl, tabName, firebaseAccessToken);
@@ -736,8 +736,8 @@ const App: React.FC = () => {
       setRows(data);
       setPersonFilter(''); // Reset filter khi apply mapping
       console.log('After setRows, rows state should be updated');
-      // ✅ Pass empty string để select all rows (không filter)
-      updateSelections(data, '');
+      // ✅ Fix: Do NOT auto-select all rows. User must manually select.
+      setSelectedIds(new Set());
 
       // 💾 Save mapping to Firebase for next time
       if (firebaseUser && sheetMeta) {

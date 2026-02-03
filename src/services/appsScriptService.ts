@@ -90,15 +90,21 @@ export const syncEventsToCalendar = async (
       userEmail: currentUser.email 
     });
 
-    // ✅ Add CSRF token to headers for defense-in-depth
-    let headers: Record<string, string> = {
-      'Content-Type': 'application/json',
-    };
-    headers = addCSRFTokenToHeaders(headers);
+    // ✅ CORS FIX: Use text/plain and no custom headers to avoid Preflight (OPTIONS)
+    // Google Apps Script handles POST requests better with text/plain or default content type
+    // when called from browser to avoid strict CORS preflight checks.
+    
+    // Determine URL: Use Proxy in DEV needed for localhost to bypass CORS
+    const isDev = import.meta.env.DEV;
+    const url = isDev ? '/api/appscript' : APPS_SCRIPT_URL;
 
-    const response = await fetch(APPS_SCRIPT_URL, {
+    logInfo(`Sending request to: ${url} (Dev mode: ${isDev})`);
+
+    const response = await fetch(url, {
       method: 'POST',
-      headers,
+      // ⚠️ CRITICAL: Do NOT set Content-Type to application/json, it triggers Preflight
+      // ⚠️ CRITICAL: Do NOT add custom headers like X-CSRF-Token
+      // Browser will auto-detect or default to text/plain which is a "Simple Request"
       body: JSON.stringify(payload),
     });
 

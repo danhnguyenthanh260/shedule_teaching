@@ -11,14 +11,14 @@ export function parseHeadersFromSheet(sheetData: string[][]): string[] {
   const detailHeaders = sheetData[2] || [];
   // Lấy sub-headers từ row 1 (index 1) để backup khi detail header rỗng
   const subHeaders = sheetData[1] || [];
-  
+
   const headers: string[] = [];
-  
+
   for (let i = 0; i < 57; i++) {
     // Ưu tiên detail header (row 2), nếu rỗng thì lấy sub-header (row 1)
     const detailHeader = detailHeaders[i]?.trim();
     const subHeader = subHeaders[i]?.trim();
-    
+
     if (detailHeader) {
       headers[i] = detailHeader;
     } else if (subHeader && subHeader !== 'REVIEW 1' && subHeader !== 'REVIEW 2' && subHeader !== 'REVIEW 3' && subHeader !== 'DEFENSE 1' && subHeader !== 'DEFENSE 2') {
@@ -28,7 +28,7 @@ export function parseHeadersFromSheet(sheetData: string[][]): string[] {
       headers[i] = `Column_${i}`;
     }
   }
-  
+
   return headers;
 }
 
@@ -61,7 +61,7 @@ export function parseMergedCells(): MergedCellGroup[] {
 export function parseSheetDataRows(sheetData: string[][], headers: string[]): Record<string, string>[] {
   // Bỏ qua 3 hàng đầu (row 1, 2, 3), lấy từ row 4 (index 3)
   const dataRows = sheetData.slice(3);
-  
+
   return dataRows
     .filter(row => row.some(cell => cell?.trim())) // Bỏ hàng trống
     .map((row, idx) => {
@@ -87,5 +87,38 @@ export function detectHeaderSections(headers: string[]) {
     supervisorResult: headers.slice(38, 39), // AM
     defense1: headers.slice(39, 49),        // AN-AW
     defense2: headers.slice(49, 57)         // AX-BE
+  };
+}
+
+/**
+ * 🆕 DYNAMIC DETECTION: Find sections based on keywords instead of fixed indices
+ * Addresses edge case: Columns inserted/deleted shifting indices
+ */
+export function detectHeaderSectionsDynamic(headers: string[]) {
+  // Helper to find start index of a keyword
+  const findStart = (keyword: string, startFrom: number = 0): number => {
+    const idx = headers.findIndex((h, i) =>
+      i >= startFrom && h?.toLowerCase().includes(keyword.toLowerCase())
+    );
+    return idx === -1 ? -1 : idx;
+  };
+
+  // Find landmarks
+  const review1Start = findStart('Review 1');
+  const review2Start = findStart('Review 2', review1Start + 1);
+  const defense1Start = findStart('Defense 1', review2Start + 1);
+
+  // Fallback to defaults if not found
+  if (review1Start === -1 || review2Start === -1) {
+    console.warn('⚠️ Cannot detect dynamic sections, using defaults.');
+    return detectHeaderSections(headers);
+  }
+
+  // Calculate generic ranges based on landmarks
+  return {
+    projectsInfo: headers.slice(0, review1Start),
+    review1: headers.slice(review1Start, review2Start),
+    review2: headers.slice(review2Start, defense1Start !== -1 ? defense1Start : undefined),
+    // ... logic can be extended
   };
 }

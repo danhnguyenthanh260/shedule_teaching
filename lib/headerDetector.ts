@@ -25,7 +25,7 @@ export function detectHeaderRow(rows: any[][]): HeaderDetectionResult {
 
   let bestRowIndex = 0;
   let maxScore = 0;
-  
+
   const maxRowsToCheck = Math.min(5, rows.length);
 
   for (let i = 0; i < maxRowsToCheck; i++) {
@@ -46,13 +46,13 @@ export function detectHeaderRow(rows: any[][]): HeaderDetectionResult {
     const textCells = nonEmptyCells.filter(cell => {
       const value = cell?.toString().trim();
       if (!value) return false;
-      
+
       // Check if it's a pure number
       const isNumber = !isNaN(Number(value)) && value.length < 10;
-      
+
       // Check if it looks like a date
       const isDate = /^\d{1,2}[\/\-]\d{1,2}[\/\-]\d{2,4}$/.test(value);
-      
+
       return !isNumber && !isDate && value.length >= 2;
     }).length;
 
@@ -65,9 +65,9 @@ export function detectHeaderRow(rows: any[][]): HeaderDetectionResult {
     // - Fill rate: 0-100 points (higher = better)
     // - Text cells: 0-50 points (more text = likely header)
     // - Avg length: 0-30 points (longer text = likely header)
-    const score = 
-      fillRate * 100 + 
-      (textCells / row.length) * 50 + 
+    const score =
+      fillRate * 100 +
+      (textCells / row.length) * 50 +
       Math.min(avgLength / 2, 30);
 
     if (score > maxScore) {
@@ -153,4 +153,52 @@ export function loadHeaderRowPreference(fileId: string): number | null {
     console.error('Failed to load header row preference:', error);
     return null;
   }
+}
+
+/**
+ * ------------------------------------------------------------------
+ * IMPROVED COLUMN DETECTION
+ * ------------------------------------------------------------------
+ */
+
+/**
+ * Normalize header text for comparison (remove accents, lowercase, trim)
+ */
+export function normalizeHeader(text: string): string {
+  if (!text) return '';
+  return text
+    .toString()
+    .toLowerCase()
+    .trim()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "") // Remove accents
+    .replace(/\s+/g, ' '); // Normalize spaces
+}
+
+/**
+ * Find column index loosely matching keywords
+ * Edge cases handled:
+ * - Case insensitivity ("Giáo Viên" vs "giáo viên")
+ * - Accents ("Giảng viên" vs "Giang vien")
+ * - Extra spaces ("Mã  Lớp")
+ * - Empty columns (skipped)
+ */
+export function findColumnIndex(headers: string[], keywords: string[]): number {
+  const normalizedKeywords = keywords.map(normalizeHeader);
+
+  // 1. Exact match (normalized)
+  const exactIdx = headers.findIndex(h => {
+    const norm = normalizeHeader(h);
+    return normalizedKeywords.includes(norm);
+  });
+  if (exactIdx !== -1) return exactIdx;
+
+  // 2. Contains match (robust)
+  // Check if header *contains* any keyword
+  const containsIdx = headers.findIndex(h => {
+    const norm = normalizeHeader(h);
+    return normalizedKeywords.some(k => norm.includes(k));
+  });
+
+  return containsIdx;
 }

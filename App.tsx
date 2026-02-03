@@ -14,6 +14,7 @@ import { logInfo, logSuccess, logWarning, logError } from './src/utils/logger';
 import { auth } from './src/config/firebase';
 import { getRedirectResult, GoogleAuthProvider } from 'firebase/auth';
 import { saveAuthTokens, setUserUID } from './src/services/authService';
+import { CustomSelect } from './src/components/ui/CustomSelect';
 
 // Khai báo kiểu cho SDK Google
 declare global {
@@ -831,7 +832,11 @@ const App: React.FC = () => {
             end: row.endTime,
             location: row.location,
             description: `Task: ${row.task || 'N/A'}\nEmail: ${row.email || 'N/A'}`,
-            guests: row.email
+            guests: row.email,
+            // 🔑 Create hash from content to prevent duplicates even if row index changes
+            signature: btoa(unescape(encodeURIComponent(
+              `${row.startTime}|${row.endTime}|${row.location || ''}|${row.task || ''}|${row.person || ''}`
+            )))
           }));
 
           const appsScriptResult = await syncEventsToCalendar(events, 'Schedule Teaching');
@@ -1050,9 +1055,20 @@ const App: React.FC = () => {
   }, [fullRows, fullTableColumns, personFilter, sheetMeta, filteredRows, rows]);
 
   const headerOptions = useMemo(() => {
-    return fullTableColumns.map((h, i) => ({
-      label: h || `Column ${i + 1}`,
-      value: i
+    // ✅ Deduplicate headers: Only show unique column names in the dropdown
+    const uniqueMap = new Map<string, number>();
+
+    fullTableColumns.forEach((h, i) => {
+      const label = (h || `Column ${i + 1}`).trim();
+      // Keep first occurrence only
+      if (!uniqueMap.has(label)) {
+        uniqueMap.set(label, i);
+      }
+    });
+
+    return Array.from(uniqueMap.entries()).map(([label, value]) => ({
+      label,
+      value
     }));
   }, [fullTableColumns]);
 
@@ -1091,6 +1107,15 @@ const App: React.FC = () => {
   const getColumnLabel = (index?: number) => {
     if (index === undefined) return 'Chưa chọn';
     return fullTableColumns[index] || `Column ${index + 1}`;
+  };
+
+  // Handler for custom select (direct string value)
+  const handleCustomSelectChange = (key: keyof ColumnMapping) => (value: string) => {
+    console.log('[CustomSelect] Changing', key, 'to', value);
+    setColumnMap(prev => ({
+      ...prev,
+      [key]: value === '' ? undefined : Number(value)
+    }));
   };
 
   if (!user) {
@@ -1247,7 +1272,7 @@ const App: React.FC = () => {
         </div>
 
         {fullHeaders.length > 0 && (
-          <div className="bg-white rounded-2xl border border-slate-200 shadow-sm hover:shadow-md transition-shadow duration-300 overflow-hidden animate-in fade-in slide-in-from-bottom-4">
+          <div className="bg-white rounded-2xl border border-slate-200 shadow-sm hover:shadow-md transition-shadow duration-300 animate-in fade-in slide-in-from-bottom-4">
             <div className="px-6 py-4 border-b border-slate-100 bg-linear-to-r from-slate-50 to-transparent flex items-center justify-between">
               <div>
                 <h3 className="font-bold text-slate-900 text-lg">Chọn cột để đồng bộ</h3>
@@ -1276,59 +1301,23 @@ const App: React.FC = () => {
                   <div className="mt-2 text-xs text-blue-700 font-medium">💡 Chọn dòng cuối cùng trước dữ liệu</div>
                 </div>
               )}
+
               <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-                <div className="space-y-2">
-                  <label className="block text-sm font-semibold text-slate-900">Ngày</label>
-                  <select
-                    className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none transition-all font-medium text-slate-900"
-                    value={columnMap.date ?? ''}
-                    onChange={handleMapChange('date')}
-                  >
-                    <option value="">- Chọn -</option>
-                    {headerOptions.map(opt => (
-                      <option key={`date-${opt.value}`} value={opt.value}>{opt.label}</option>
-                    ))}
-                  </select>
-                </div>
-                <div className="space-y-2">
-                  <label className="block text-sm font-semibold text-slate-900">Thời gian</label>
-                  <select
-                    className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none transition-all font-medium text-slate-900"
-                    value={columnMap.time ?? ''}
-                    onChange={handleMapChange('time')}
-                  >
-                    <option value="">- Chọn -</option>
-                    {headerOptions.map(opt => (
-                      <option key={`time-${opt.value}`} value={opt.value}>{opt.label}</option>
-                    ))}
-                  </select>
-                </div>
-                <div className="space-y-2">
-                  <label className="block text-sm font-semibold text-slate-900">Tên đề tài</label>
-                  <select
-                    className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none transition-all font-medium text-slate-900"
-                    value={columnMap.person ?? ''}
-                    onChange={handleMapChange('person')}
-                  >
-                    <option value="">- Chọn -</option>
-                    {headerOptions.map(opt => (
-                      <option key={`person-${opt.value}`} value={opt.value}>{opt.label}</option>
-                    ))}
-                  </select>
-                </div>
-                <div className="space-y-2">
-                  <label className="block text-sm font-semibold text-slate-900">Phòng</label>
-                  <select
-                    className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none transition-all font-medium text-slate-900"
-                    value={columnMap.location ?? ''}
-                    onChange={handleMapChange('location')}
-                  >
-                    <option value="">- Chọn -</option>
-                    {headerOptions.map(opt => (
-                      <option key={`location-${opt.value}`} value={opt.value}>{opt.label}</option>
-                    ))}
-                  </select>
-                </div>
+                {[
+                  { label: "Ngày", field: 'date', value: columnMap.date },
+                  { label: "Thời gian", field: 'time', value: columnMap.time },
+                  { label: "Tên đề tài", field: 'person', value: columnMap.person },
+                  { label: "Phòng", field: 'location', value: columnMap.location }
+                ].map((item) => (
+                  <CustomSelect
+                    key={item.field}
+                    label={item.label}
+                    value={item.value}
+                    onChange={handleCustomSelectChange(item.field as any)}
+                    options={headerOptions}
+                    placeholder="- Chọn cột -"
+                  />
+                ))}
               </div>
             </div>
           </div>

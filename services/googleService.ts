@@ -59,7 +59,7 @@ export class GoogleSyncService {
     }
     // ✅ Check row 1 OR row 2 for REVIEW keywords (flexible detection)
     if (row1Str.includes("review 1") || row1Str.includes("review 2") ||
-        row2Str.includes("review 1") || row2Str.includes("review 2")) {
+      row2Str.includes("review 1") || row2Str.includes("review 2")) {
       dataMauScore += 40;
       console.log("✓ Data Mẫu signal: Found 'Review' at row 1 or 2 (+40)");
     }

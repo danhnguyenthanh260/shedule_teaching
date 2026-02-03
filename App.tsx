@@ -30,7 +30,8 @@ const App: React.FC = () => {
   // Firebase Auth & Mapping
   const { user: firebaseUser, accessToken: firebaseAccessToken, logout } = useFirebase();
   const [user, setUser] = useState<UserProfile | null>(null);
-  const [accessToken, setAccessToken] = useState<string | null>(null);
+  // Removed local accessToken state in favor of firebaseAccessToken from context
+
   const [sheetUrl, setSheetUrl] = useState('');
   const [tabName, setTabName] = useState('Sheet1');
   const [personFilter, setPersonFilter] = useState('');
@@ -231,7 +232,7 @@ const App: React.FC = () => {
     }
   }, [selectedIds]);
 
-  // Sync Firebase user with local user state and get access token
+  // Sync Firebase user with local user state
   useEffect(() => {
     if (firebaseUser) {
       setUser({
@@ -240,16 +241,10 @@ const App: React.FC = () => {
         image: firebaseUser.photoURL || ''
       });
       setPersonFilter(firebaseUser.displayName || firebaseUser.email || '');
-
-      // Use access token from Firebase context
-      if (firebaseAccessToken) {
-        setAccessToken(firebaseAccessToken);
-      }
     } else {
       setUser(null);
-      setAccessToken(null);
     }
-  }, [firebaseUser, firebaseAccessToken]);
+  }, [firebaseUser]);
 
   // Auto-load saved mapping when sheet changes
   useEffect(() => {
@@ -318,7 +313,7 @@ const App: React.FC = () => {
 
     if (
       sheetUrl &&
-      accessToken &&
+      firebaseAccessToken &&
       !loadingMode &&
       rows.length === 0 &&
       fullHeaders.length === 0 && // Chưa có persisted headers
@@ -333,10 +328,12 @@ const App: React.FC = () => {
         setResult(null);
         setError(null);
 
-        (async () => {
+          (async () => {
           try {
-            const { rows: data, headers, rawRows, allRows: fetchedRows, schema, sheetId, headerRowIndex } = await googleService.loadSheetReview(sheetUrl, tabName, accessToken);
+            if (!firebaseAccessToken) throw new Error("No access token available");
+            const { rows: data, headers, rawRows, allRows: fetchedRows, schema, sheetId, headerRowIndex } = await googleService.loadSheetReview(sheetUrl, tabName, firebaseAccessToken);
             setAllRows(fetchedRows || []);
+
             setShowFullTable(false);
             setSheetMeta({ sheetId, tab: tabName, headerRowIndex });
             applyHeaderRow(headerRowIndex, fetchedRows, { sheetId, tab: tabName });
@@ -350,7 +347,7 @@ const App: React.FC = () => {
         })();
       }, 500); // Small delay to ensure state is settled
     }
-  }, [sheetUrl, accessToken, loadingMode, rows.length, fullHeaders.length, sheetMeta]);
+  }, [sheetUrl, firebaseAccessToken, loadingMode, rows.length, fullHeaders.length, sheetMeta]);
 
   const updateSelections = (data: RowNormalized[], filterValue?: string) => {
     const filterLower = (filterValue !== undefined ? filterValue : personFilter).toLowerCase();
@@ -759,12 +756,12 @@ const App: React.FC = () => {
   };
 
   const handleLoad = async () => {
-    if (!sheetUrl || !accessToken) return;
+    if (!sheetUrl || !firebaseAccessToken) return;
     setLoading(true);
     setResult(null);
     setError(null);
     try {
-      const { rows: data, headers, rawRows, allRows: fetchedRows, schema, sheetId, headerRowIndex, mergedCells: merged, groupHeaders: loadedGroupHeaders, detailHeaders: loadedDetailHeaders } = await googleService.loadSheet(sheetUrl, tabName, accessToken);
+      const { rows: data, headers, rawRows, allRows: fetchedRows, schema, sheetId, headerRowIndex, mergedCells: merged, groupHeaders: loadedGroupHeaders, detailHeaders: loadedDetailHeaders } = await googleService.loadSheet(sheetUrl, tabName, firebaseAccessToken);
       console.log('Loaded data:', {
         dataCount: data.length,
         headerCount: headers?.length,
@@ -851,23 +848,11 @@ const App: React.FC = () => {
 
           setToastMessage(`✓ Đã đồng bộ ${res.created}/${toSync.length} sự kiện`);
         } catch (appsScriptError: any) {
-          console.error('Apps Script sync failed, falling back to Calendar API:', appsScriptError);
-          // Fallback to direct Calendar API if Apps Script fails
-          if (accessToken) {
-            res = await googleService.syncToCalendar(toSync, accessToken);
-            setToastMessage('✓ Đã đồng bộ qua Calendar API (fallback)');
-          } else {
-            throw new Error('Không có access token để sử dụng Calendar API');
-          }
+          console.error('Apps Script sync failed:', appsScriptError);
+          throw new Error(`Lỗi đồng bộ Apps Script: ${appsScriptError.message}`);
         }
       } else {
-        // 🔄 Fallback: Use direct Calendar API (legacy method)
-        console.log('Using direct Calendar API (VITE_BACKEND_URL not configured)');
-        if (!accessToken) {
-          throw new Error('Cần access token để sử dụng Calendar API');
-        }
-        res = await googleService.syncToCalendar(toSync, accessToken);
-        setToastMessage('✓ Đã đồng bộ qua Calendar API');
+        throw new Error('Chưa cấu hình VITE_BACKEND_URL');
       }
 
       setResult(res);
@@ -1156,7 +1141,7 @@ const App: React.FC = () => {
       onLogout={async () => {
         await logout();
         setUser(null);
-        setAccessToken(null);
+        // access token handled by provider
         // ✅ Clear persisted state khi logout
         persistStateService.clearState();
         console.log('✓ Cleared all persisted state on logout');
@@ -1199,13 +1184,13 @@ const App: React.FC = () => {
             <div className="md:col-span-2 flex items-end gap-2">
               <button
                 onClick={async () => {
-                  if (!sheetUrl || !accessToken || loadingMode) return;
+                  if (!sheetUrl || !firebaseAccessToken || loadingMode) return;
                   setLoadingMode('test1');
                   setLoading(true);
                   setResult(null);
                   setError(null);
                   try {
-                    const { rows: data, headers, rawRows, allRows: fetchedRows, schema, sheetId, headerRowIndex } = await googleService.loadSheetTest1(sheetUrl, tabName, accessToken);
+                    const { rows: data, headers, rawRows, allRows: fetchedRows, schema, sheetId, headerRowIndex } = await googleService.loadSheetTest1(sheetUrl, tabName, firebaseAccessToken);
                     setAllRows(fetchedRows || []);
                     setShowFullTable(false);
                     setSheetMeta({ sheetId, tab: tabName, headerRowIndex });
@@ -1234,13 +1219,13 @@ const App: React.FC = () => {
               </button>
               <button
                 onClick={async () => {
-                  if (!sheetUrl || !accessToken || loadingMode) return;
+                  if (!sheetUrl || !firebaseAccessToken || loadingMode) return;
                   setLoadingMode('review');
                   setLoading(true);
                   setResult(null);
                   setError(null);
                   try {
-                    const { rows: data, headers, rawRows, allRows: fetchedRows, schema, sheetId, headerRowIndex } = await googleService.loadSheetReview(sheetUrl, tabName, accessToken);
+                    const { rows: data, headers, rawRows, allRows: fetchedRows, schema, sheetId, headerRowIndex } = await googleService.loadSheetReview(sheetUrl, tabName, firebaseAccessToken);
                     setAllRows(fetchedRows || []);
                     setShowFullTable(false);
                     setSheetMeta({ sheetId, tab: tabName, headerRowIndex });

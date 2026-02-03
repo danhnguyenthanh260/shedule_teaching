@@ -152,7 +152,8 @@ export const FirebaseProvider: React.FC<{ children: React.ReactNode }> = ({ chil
 
       const provider = new GoogleAuthProvider();
       provider.addScope('https://www.googleapis.com/auth/spreadsheets.readonly');
-      provider.addScope('https://www.googleapis.com/auth/calendar.events');
+      // Calendar scope removed - moving to Apps Script authority
+
 
       const result = await signInWithPopup(auth, provider);
       setUserUID(result.user.uid);

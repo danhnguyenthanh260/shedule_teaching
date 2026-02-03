@@ -54,8 +54,17 @@ export const useFirebaseMapping = (fileId?: string): UseMappingResult => {
     try {
       setLoading(true);
       setError(null);
-      await saveMappingPreset(user.uid, id, newMapping);
-      setMapping(newMapping);
+
+      // Sanitize mapping to remove undefined values
+      const sanitizedMapping: any = { ...newMapping };
+      Object.keys(sanitizedMapping).forEach(key => {
+        if (sanitizedMapping[key] === undefined) {
+          sanitizedMapping[key] = null; // Or delete sanitizedMapping[key]
+        }
+      });
+      
+      await saveMappingPreset(user.uid, id, sanitizedMapping);
+      setMapping(sanitizedMapping);
     } catch (err) {
       const errorMessage = err instanceof Error ? err.message : 'Failed to save mapping';
       setError(errorMessage);

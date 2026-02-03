@@ -12,7 +12,7 @@ export default defineConfig(({ mode }) => {
         '/api/appscript': {
           target: 'https://script.google.com',
           changeOrigin: true,
-          rewrite: (path) => path.replace(/^\/api\/appscript/, '/macros/s/AKfycby1yWOWCgOBe_T_J6zggGygMN5DFhj-t0AAHvsvNM9hdFZKSbXdFNFp4OrVGnKnYI0/exec'),
+          rewrite: (path) => path.replace(/^\/api\/appscript/, '/macros/s/AKfycbyb5bD0VkvmeL1qwZxz6ngTB0INTs2FAEukaf7GbO5m-mXGnykTEqltcBiYJI1vDlC_1g/exec'),
           secure: true,
         }
       }

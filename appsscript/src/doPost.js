@@ -15,6 +15,17 @@
  *   ]
  * }
  */
+/**
+ * HTTP POST handler
+ * Nhận request từ React frontend
+ *
+ * Expected payload:
+ * {
+ *   "idToken": "FIREBASE_ID_TOKEN",
+ *   "calendarName": "Schedule Teaching", // Optional
+ *   "events": [ ... ]
+ * }
+ */
 function doPost(e) {
   const startTime = new Date();
   let response = {
@@ -27,17 +38,27 @@ function doPost(e) {
 
   try {
     AppLogger.info('=== POST Request Received ===');
-    AppLogger.info('Content type: ' + e.contentType);
+    
+    // Parse request body
+    let payload;
+    try {
+      const contents = e.postData.contents;
+      payload = JSON.parse(contents);
+    } catch (parseError) {
+      AppLogger.error('JSON parse error', parseError);
+      response.message = 'Invalid JSON in request body';
+      return buildHttpResponse(response, 400);
+    }
 
     // 🔴 SECURITY: Verify Firebase ID token FIRST
-    const token = payload?.idToken;
+    const token = payload.idToken;
     if (!token) {
       AppLogger.error('Missing Firebase ID token');
       response.message = 'Unauthorized: Missing authentication token';
       return buildHttpResponse(response, 401);
     }
 
-    // Verify token (call Firebase Admin SDK via UrlFetchApp)
+    // Verify token (call Firebase Auth REST API)
     const verificationResult = verifyFirebaseToken(token);
     if (!verificationResult.valid) {
       AppLogger.error('Invalid Firebase token', verificationResult.error);
@@ -48,47 +69,32 @@ function doPost(e) {
     const userEmail = verificationResult.email;
     AppLogger.info('✅ Request authenticated for user: ' + userEmail);
 
-    // Parse request body
-    let payload;
-    try {
-      const contents = e.postData.contents;
-      AppLogger.info('Raw payload received', contents);
-      payload = JSON.parse(contents);
-    } catch (parseError) {
-      AppLogger.error('JSON parse error', parseError);
-      response.message = 'Invalid JSON in request body';
-      return buildHttpResponse(response, 400);
-    }
-
-    // Validate payload
-    if (!payload.calendarName) {
-      AppLogger.warn('Missing calendarName');
-      response.message = CONSTANTS.ERRORS.MISSING_CALENDAR;
-      return buildHttpResponse(response, 400);
-    }
-
+    // Validate events
     if (!payload.events || !Array.isArray(payload.events)) {
       AppLogger.warn('Missing or invalid events array');
       response.message = CONSTANTS.ERRORS.MISSING_EVENTS;
       return buildHttpResponse(response, 400);
     }
 
+    // Use default calendar if not provided
+    const calendarName = payload.calendarName || 'Schedule Teaching';
+
     AppLogger.info('Payload validated', {
-      calendarName: payload.calendarName,
+      calendarName: calendarName,
       eventCount: payload.events.length,
-      userEmail: userEmail // 🔴 Track who made the request
+      userEmail: userEmail
     });
 
-    // Create events
+    // Create events using Apps Script's authority
     const result = CalendarService.createEvents(
-      payload.calendarName,
+      calendarName,
       payload.events
     );
 
     AppLogger.info('Events creation completed', result);
 
     response.status = CONSTANTS.SUCCESS;
-    response.message = `Successfully created ${result.success} out of ${result.total} events`;
+    response.message = `Successfully processed ${result.total} events`;
     response.data = {
       total: result.total,
       success: result.success,
@@ -97,6 +103,7 @@ function doPost(e) {
     };
 
     return buildHttpResponse(response, 200);
+
   } catch (error) {
     AppLogger.error('Unhandled error in doPost', error);
     response.status = CONSTANTS.ERROR;
@@ -104,7 +111,7 @@ function doPost(e) {
     return buildHttpResponse(response, 500);
   } finally {
     const endTime = new Date();
-    response.executionTime = endTime - startTime + 'ms';
+    response.executionTime = (endTime.getTime() - startTime.getTime()) + 'ms';
     AppLogger.info('=== POST Request Completed ===', {
       status: response.status,
       executionTime: response.executionTime

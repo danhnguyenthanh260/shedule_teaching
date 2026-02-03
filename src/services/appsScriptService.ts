@@ -15,6 +15,7 @@ export interface CalendarEvent {
   location?: string;
   description?: string;
   guests?: string;
+  signature?: string; // Unique hash/ID for deduplication
 }
 
 export interface SyncPayload {
@@ -84,10 +85,10 @@ export const syncEventsToCalendar = async (
       userEmail: currentUser.email || undefined,
     };
 
-    logInfo('Syncing events to Apps Script:', { 
+    logInfo('Syncing events to Apps Script:', {
       eventCount: events.length,
       calendarName: targetCalendar,
-      userEmail: currentUser.email 
+      userEmail: currentUser.email
     });
 
     // ✅ CORS FIX: Use text/plain and no custom headers to avoid Preflight (OPTIONS)

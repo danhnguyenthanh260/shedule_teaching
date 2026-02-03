@@ -76,11 +76,33 @@ const CalendarService = {
       const startDate = new Date(event.start);
       const endDate = new Date(event.end);
       const location = event.location ? event.location.trim() : '';
+      const signature = event.signature;
+
+      // 🔍 1. Check for duplicates using Signature (if provided)
+      if (signature) {
+        // Get events in this time range
+        const existingEvents = calendar.getEvents(startDate, endDate);
+        for (let i = 0; i < existingEvents.length; i++) {
+          const ev = existingEvents[i];
+          const existingSig = ev.getTag('signature');
+          
+          if (existingSig === signature) {
+            AppLogger.info('Skipping duplicate event (signature match): ' + title, { signature });
+            return {
+              success: true, // Idempotent success
+              eventId: ev.getId(),
+              title: title,
+              skipped: true
+            };
+          }
+        }
+      }
 
       AppLogger.info('Creating event: ' + title, {
         start: startDate.toISOString(),
         end: endDate.toISOString(),
-        location: location
+        location: location,
+        signature: signature
       });
 
       const options = {
@@ -90,6 +112,15 @@ const CalendarService = {
       };
 
       const createdEvent = calendar.createEvent(title, startDate, endDate, options);
+
+      // ✅ 2. Set Signature Tag for future deduplication
+      if (signature) {
+        try {
+          createdEvent.setTag('signature', signature);
+        } catch (tagError) {
+          AppLogger.warn('Failed to set tag for event', tagError);
+        }
+      }
 
       AppLogger.info('Event created successfully', {
         eventId: createdEvent.getId(),

@@ -51,12 +51,14 @@ export const ExcelImport: React.FC<ExcelImportProps> = ({
 
       const result = await googleService.loadSheet(sheetUrl, targetTab, token);
       
+      const isReviewTab = targetTab.toLowerCase().includes('review');
+      
       onDataLoaded({
         rawRows: result.rawRows,
         sheetId: result.sheetId,
         tabName: targetTab,
         headerRowIndex: result.headerRowIndex,
-        isDataMau: (result as any).isDataMau || false
+        isDataMau: isReviewTab || result.isDataMau
       });
       
     } catch (err: any) {
@@ -94,12 +96,9 @@ export const ExcelImport: React.FC<ExcelImportProps> = ({
         </div>
       </div>
 
-      <div className="flex-none flex gap-2">
+      <div className="flex-none flex items-center gap-2">
         <button 
-          onClick={() => {
-            setTabName('test1');
-            setTimeout(() => handleImport('test1'), 10);
-          }}
+          onClick={() => handleImport('test1')}
           disabled={isProcessing || !sheetUrl}
           className="px-6 h-11 bg-[#F27024] text-white rounded-xl hover:bg-orange-600 active:scale-95 transition-all font-black shadow-lg shadow-orange-200 flex items-center justify-center gap-2 disabled:bg-slate-100 disabled:text-slate-400 disabled:shadow-none disabled:border-slate-200 border border-transparent text-xs uppercase tracking-tighter"
         >
@@ -108,10 +107,7 @@ export const ExcelImport: React.FC<ExcelImportProps> = ({
         </button>
         
         <button 
-          onClick={() => {
-            setTabName('Review');
-            setTimeout(() => handleImport('Review'), 10);
-          }}
+          onClick={() => handleImport('Review')}
           disabled={isProcessing || !sheetUrl}
           className="px-6 h-11 bg-slate-700 text-white rounded-xl hover:bg-slate-800 active:scale-95 transition-all font-black shadow-lg shadow-slate-200 flex items-center justify-center gap-2 disabled:bg-slate-100 disabled:text-slate-400 disabled:shadow-none disabled:border-slate-200 border border-transparent text-xs uppercase tracking-tighter"
         >

@@ -91,7 +91,10 @@ export const useSheetLogic = ({
   };
 
   const examinerColumnIndices = useMemo(() => {
-    const keywords = ['ho va ten', 'thanh vien hoi dong', 'reviewer', 'chu tich', 'thu ky', 'uy vien'];
+    const keywords = [
+      'ho va ten', 'thanh vien hoi dong', 'reviewer', 'reviewer 1', 'reviewer 2', 
+      'chu tich', 'thu ky', 'uy vien', 'can bo'
+    ];
     return fullHeaders.reduce((acc, header, index) => {
       const h = khongDau(header);
       if (keywords.some(k => h.includes(k))) {
@@ -134,14 +137,14 @@ export const useSheetLogic = ({
     const primaryHeaders = idx > 0 ? rowsData[idx - 1] : [];
     const secondaryHeaders = rowsData[idx] || [];
 
-    // Logic: Nếu chọn Row 1 (idx=0), thì chỉ dùng Row 1 làm header, không merge.
-    // Nếu chọn Row 2 (idx=1), merge Row 1 và Row 2.
-    const merged = idx > 0 ? mergeHeaderRows(primaryHeaders, secondaryHeaders) : secondaryHeaders;
+    // Logic: Nếu là sheet Review (DataMau), KHÔNG merge để giữ đúng ranh giới khối.
+    const isReview = (meta as any)?.isDataMau || tabName.toLowerCase().includes('review');
+    const merged = (idx > 0 && !isReview) ? mergeHeaderRows(primaryHeaders, secondaryHeaders) : secondaryHeaders;
     const filled = fillForwardHeaders(merged);
 
     setTitleRow(titleR);
-    setFullHeaders(filled);
-    setFullDetailHeaders(secondaryHeaders);
+    setFullHeaders(idx > 0 && isReview ? fillForwardHeaders(primaryHeaders) : filled); // Row 2 headers for groups
+    setFullDetailHeaders(secondaryHeaders); // Row 3 headers for details
     setFullRows(rowsData.slice(idx + 1));
 
     if (meta) {
@@ -169,7 +172,8 @@ export const useSheetLogic = ({
           detailHeaders: fullDetailHeaders,
           rawRows: rowsToUse,
           mapping,
-          headerRowIndex
+          headerRowIndex,
+          isDataMau: true
         });
       } else {
         normalized = googleService.normalizeRows({
@@ -257,30 +261,37 @@ export const useSheetLogic = ({
     const primary = headerRowIndex > 0 ? allRows[headerRowIndex - 1] : [];
     const options: { label: string; value: number }[] = [];
     const seen = new Set<string>();
+    
+    // Đếm số lần xuất hiện của mỗi label (cho chế độ Review)
+    const labelCounts = new Map<string, number>();
+    const isReview = sheetMeta?.isDataMau;
 
-    fullHeaders.forEach((h, i) => {
+    fullDetailHeaders.forEach((h, i) => {
+      let label = (h || "").trim();
+      if (!label || label.startsWith('Column_')) return;
+      labelCounts.set(label, (labelCounts.get(label) || 0) + 1);
+    });
+
+    fullDetailHeaders.forEach((h, i) => {
       let label = (h || "").trim();
       if (!label || label.startsWith('Column_')) return;
 
-      // Logic "Tiêu đề lặp lại -> Hiện 1 lần":
-      // Nếu là tiêu đề gộp kiểu "Hội đồng", ta ưu tiên lấy nhãn gốc từ hàng Primary
-      const p = (primary[i] || "").trim();
-      const isGroup = p && (
-        (i > 0 && (primary[i-1] || "").trim() === p) || 
-        (i < primary.length - 1 && (primary[i+1] || "").trim() === p)
-      );
+      const count = labelCounts.get(label) || 0;
+      
+      // Nếu là sheet Review: 
+      // - Chấp nhận cột xuất hiện 1 lần (Shared)
+      // - Chấp nhận cột xuất hiện đúng 3 lần (Repeated)
+      if (isReview && count !== 1 && count !== 3) return;
 
-      const finalLabel = isGroup ? p : label;
-
-      // CHẶN: Không cho phép dữ liệu lọt vào dropdown (vd: "1/25/2026")
-      if (!seen.has(finalLabel) && !looksLikeDataRow([finalLabel])) {
-        seen.add(finalLabel);
-        options.push({ label: finalLabel, value: i });
+      // Logic "Tiêu đề lặp lại -> Hiện 1 lần"
+      if (!seen.has(label) && !looksLikeDataRow([label])) {
+        seen.add(label);
+        options.push({ label: label, value: i });
       }
     });
 
     return options.length > 0 ? options : [{ label: '-- Chọn cột --', value: -1 }];
-  }, [fullHeaders, allRows, headerRowIndex]);
+  }, [fullHeaders, allRows, headerRowIndex, sheetMeta?.isDataMau]);
 
   const headerRowOptions = useMemo(() => {
     const startIndex = 0; // Bắt đầu từ Row 1

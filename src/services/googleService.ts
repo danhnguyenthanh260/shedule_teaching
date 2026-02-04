@@ -107,18 +107,35 @@ export class GoogleSyncService {
     return match ? match[1] : null;
   }
 
-  private detectSheetFormat(values: string[][]): {
+  private detectSheetFormat(values: string[][], tabName?: string): {
     headerRowIndex: number;
     isDataMau: boolean;
     confidence: number;
     formatName: string;
   } {
     const rows = values.slice(0, 5).map(r => r.join("").toLowerCase());
+    const lowTab = (tabName || "").toLowerCase();
     
-    let isTest1 = rows.some(r => (r.includes("ngành") && r.includes("mã đề tài")) || r.includes("hội đồng"));
-    let isReview = rows.some(r => r.includes("review") || r.includes("hội đồng") || r.includes("người đánh giá"));
+    // Nhận diện Review: Qua tên tab hoặc nội dung row đầu
+    const isReview = lowTab.includes("review") || values.some((row, idx) => 
+      idx < 3 && row.some(cell => 
+        cell?.toString().toLowerCase().includes("review 1") || 
+        cell?.toString().toLowerCase().includes("review 2")
+      )
+    );
 
-    if (isReview) return { headerRowIndex: 1, isDataMau: true, confidence: 100, formatName: 'Review' };
+    if (isReview) {
+      // Tìm dòng chứa Review 1/2/3
+      const reviewRowIdx = values.findIndex(row => row.some(c => c?.toString().toLowerCase().includes("review 1")));
+      return { 
+        headerRowIndex: reviewRowIdx !== -1 ? reviewRowIdx + 1 : 1, 
+        isDataMau: true, 
+        confidence: 100, 
+        formatName: 'Review' 
+      };
+    }
+    
+    const isTest1 = rows.some(r => (r.includes("ngành") && r.includes("mã đề tài")) || r.includes("hội đồng"));
     if (isTest1) return { headerRowIndex: 0, isDataMau: false, confidence: 90, formatName: 'test1' };
     
     return { headerRowIndex: 0, isDataMau: false, confidence: 50, formatName: 'Mặc định' };
@@ -135,38 +152,30 @@ export class GoogleSyncService {
     return filled;
   }
 
-  async loadSheet(url: string, tab: string, token: string) {
+  async loadSheet(url: string, tabName: string, accessToken: string) {
     const sheetId = this.extractSheetId(url);
-    if (!sheetId) throw new Error("URL Sheet không hợp lệ.");
+    if (!sheetId) throw new Error('URL Google Sheet không hợp lệ');
 
-    const metadata = await this.fetchWithAuth(`https://sheets.googleapis.com/v4/spreadsheets/${sheetId}?fields=sheets.properties.title`, token);
+    const metadata = await this.fetchWithAuth(`https://sheets.googleapis.com/v4/spreadsheets/${sheetId}?fields=sheets.properties.title`, accessToken);
     const allSheetNames = metadata.sheets.map((s: any) => s.properties.title);
-    const finalTabName = allSheetNames.includes(tab) ? tab : allSheetNames[0];
+    const finalTabName = allSheetNames.includes(tabName) ? tabName : allSheetNames[0];
 
     const range = `'${finalTabName}'!A1:BE500`;
-    const data = await this.fetchWithAuth(`https://sheets.googleapis.com/v4/spreadsheets/${sheetId}/values/${encodeURIComponent(range)}`, token);
+    const data = await this.fetchWithAuth(`https://sheets.googleapis.com/v4/spreadsheets/${sheetId}/values/${encodeURIComponent(range)}`, accessToken);
 
     const values: string[][] = data.values || [];
     if (values.length === 0) {
       throw new Error("Sheet này không có dữ liệu hoặc tab không tồn tại.");
     }
 
-    const detection = this.detectSheetFormat(values);
-    const headerRowIndex = detection.headerRowIndex;
-
-    let headers = values[headerRowIndex] || [];
-    let groupHeaders = headerRowIndex > 0 ? this.fillForwardRow(values[headerRowIndex - 1] || []) : undefined;
-    let schema = inferSchema(headers, values.slice(headerRowIndex + 1, headerRowIndex + 6));
+    const format = this.detectSheetFormat(values, finalTabName);
 
     return {
-      rows: [], 
-      schema,
-      headers: headers,
-      rawRows: values, // Trả về toàn bộ dữ liệu thô
+      rawRows: values,
       sheetId,
-      headerRowIndex,
-      groupHeaders,
-      isDataMau: detection.isDataMau
+      tabName: finalTabName,
+      headerRowIndex: format.headerRowIndex,
+      isDataMau: format.isDataMau
     };
   }
 
@@ -233,8 +242,9 @@ export class GoogleSyncService {
     rawRows: string[][];
     mapping: ColumnMapping;
     headerRowIndex: number;
+    isDataMau?: boolean;
   }): RowNormalized[] {
-    const { sheetId, tab, groupHeaders, detailHeaders, rawRows, mapping, headerRowIndex } = params;
+    const { sheetId, tab, groupHeaders, detailHeaders, rawRows, mapping, headerRowIndex, isDataMau } = params;
     const allEvents: RowNormalized[] = [];
     const dataRows = rawRows.slice(headerRowIndex + 1);
 
@@ -263,61 +273,141 @@ export class GoogleSyncService {
       const { start, end } = parseVNTime(lastDate, lastTime);
       const baseTask = (mapping.task !== undefined ? (row[mapping.task] || "Review") : "Review").toString().trim();
 
-      const groups = new Map<string, number[]>();
-      if (groupHeaders && mapping.person !== undefined) {
-        const targetGroupLabel = (groupHeaders[mapping.person] || "").trim();
-        
-        if (targetGroupLabel) {
-          groupHeaders.forEach((gName, colIdx) => {
-            const name = (gName || "").trim();
-            if (name === targetGroupLabel) {
-              const detail = (detailHeaders[colIdx] || "").toLowerCase();
-              
-              const isInfoCol = detail.includes('code') || detail.includes('mã') || detail.includes('id') || 
-                              detail.includes('count') || detail.includes('stt') || detail.includes('số') ||
-                              detail.includes('email');
-              
-              if (!isInfoCol) {
-                if (!groups.has(name)) groups.set(name, []);
-                groups.get(name)!.push(colIdx);
-              }
+      // Tự động nhận diện tất cả các khối (Review 1, 2, 3...)
+      let reviewGroups = new Map<string, number[]>();
+      
+      if (groupHeaders) {
+        groupHeaders.forEach((gName, colIdx) => {
+          const name = (gName || "").trim();
+          if (name) {
+            if (!reviewGroups.has(name)) reviewGroups.set(name, []);
+            reviewGroups.get(name)!.push(colIdx);
+          }
+        });
+      }
+
+      // Fallback 1: Tìm dựa trên cột 'Reviewer' lặp lại ở Row 3 (nới lỏng từ khóa)
+      if (reviewGroups.size < 2) {
+        const blockIndices: number[] = [];
+        detailHeaders.forEach((h, i) => {
+          const lbl = (h || "").toLowerCase();
+          // Tìm mọi cột có chứa reviewer, giảng viên, cb chấm, giám khảo... kèm số 1 hoặc đứng đầu khối
+          if ((lbl.includes('reviewer') || lbl.includes('giảng viên') || lbl.includes('cb chấm') || lbl.includes('giám khảo')) && 
+              (lbl.includes('1') || !lbl.match(/\d/))) {
+            if (blockIndices.length === 0 || (i - blockIndices[blockIndices.length-1] > 2)) {
+               blockIndices.push(i);
             }
+          }
+        });
+
+        if (blockIndices.length >= 2) {
+          reviewGroups.clear(); // Reset để dùng fallback
+          blockIndices.forEach((start, idx) => {
+            const nextStart = blockIndices[idx + 1] || detailHeaders.length;
+            const name = `Review ${idx + 1}`;
+            const cols = [];
+            for (let i = start; i < nextStart; i++) cols.push(i);
+            reviewGroups.set(name, cols);
           });
         }
       }
 
-      if (groups.size > 0) {
-        groups.forEach((colIndices, gName) => {
-          colIndices.forEach((colIdx) => {
-            // ƯU TIÊN: Nếu người dùng đã mapping cột person cụ thể, hãy lấy giá trị từ đó
-            const mappedPerson = (mapping.person !== undefined ? (row[mapping.person] || "") : "").toString().trim();
-            const personValue = mappedPerson || (row[colIdx] || "").toString().trim();
+      // Fallback 2: Nếu vẫn < 2 khối, ép chia đều sheet thành 3 phần nếu tab là Review hoặc isDataMau gạt tay
+      if (reviewGroups.size < 2) {
+        const isReviewSheet = tab.toLowerCase().includes('review') || isDataMau;
+        if (isReviewSheet) {
+          reviewGroups.clear();
+          const totalCols = detailHeaders.length;
+          const startCol = mapping.date !== undefined ? Math.min(mapping.date, mapping.time || 999) : 0;
+          const usefulCols = totalCols - startCol;
+          const blockSize = Math.max(3, Math.floor(usefulCols / 3));
+          
+          for (let i = 0; i < 3; i++) {
+            const start = startCol + (i * blockSize);
+            const end = i === 2 ? totalCols - 1 : startCol + ((i + 1) * blockSize) - 1;
+            const cols = [];
+            for (let c = start; c <= Math.min(end, totalCols - 1); c++) cols.push(c);
+            reviewGroups.set(`Review ${i + 1}`, cols);
+          }
+        }
+      }
+
+      const isReviewMode = reviewGroups.size >= 1; // Chấp nhận cả 1 block nhưng thường sẽ là 3 do fallback trên
+
+      if (isReviewMode) {
+        const sortedGroupNames = Array.from(reviewGroups.keys()).sort((a, b) => {
+          const aIdx = Math.min(...reviewGroups.get(a)!);
+          const bIdx = Math.min(...reviewGroups.get(b)!);
+          return aIdx - bIdx;
+        });
+
+        sortedGroupNames.forEach((gName) => {
+          const colIndices = reviewGroups.get(gName)!;
+          const groupStart = Math.min(...colIndices);
+          const groupEnd = Math.max(...colIndices);
+
+          const getMappedValue = (field: keyof ColumnMapping) => {
+            const mappedIdx = mapping[field];
+            if (mappedIdx === undefined) return "";
             
-            // CHẤP NHẬN dữ liệu kể cả khi personValue không giống tên người (để hiển thị thô)
-            allEvents.push({
-              id: `${sheetId}-${tab}-${rowIndex}-${colIdx}`,
-              groupName: gName,
-              person: personValue || (baseTask || gName),
-              date: lastDate || "Chưa rõ",
-              startTime: start,
-              endTime: end,
-              task: baseTask,
-              location: lastLocation || "Chưa xác định",
-              dateRaw: lastDate,
-              timeRaw: lastTime,
-              personRaw: personValue,
-              locationRaw: lastLocation,
-              status: 'pending',
-              rawRow: row
-            });
+            const label = (detailHeaders[mappedIdx] || "").trim();
+            const allMatchIndices = detailHeaders.reduce((acc, h, i) => {
+              if (h.trim() === label) acc.push(i);
+              return acc;
+            }, [] as number[]);
+
+            const localIdx = allMatchIndices.find(idx => idx >= groupStart && idx <= groupEnd);
+            const finalIdx = localIdx !== undefined ? localIdx : mappedIdx;
+            
+            return (row[finalIdx] || "").toString().trim();
+          };
+
+          const reviewers = colIndices.filter(idx => {
+            const h = (detailHeaders[idx] || "").toLowerCase();
+            return h.includes('reviewer 1') || h.includes('reviewer 2') || h.includes('giảng viên');
+          }).map(idx => (row[idx] || "").toString().trim()).filter(Boolean);
+
+          const rDate = getMappedValue('date') || lastDate;
+          const rTime = getMappedValue('time') || lastTime;
+          const rLocation = getMappedValue('location') || lastLocation;
+          
+          const { start, end } = parseVNTime(rDate, rTime);
+          const reviewerNames = reviewers.join(" & ");
+          
+          let personValue = "";
+          if (baseTask && reviewerNames) {
+            personValue = `${baseTask} - ${reviewerNames}`;
+          } else {
+            personValue = reviewerNames || baseTask || gName;
+          }
+          
+          if (!reviewerNames && !baseTask) return; 
+
+          allEvents.push({
+            id: `${sheetId}-${tab}-${rowIndex}-${gName}`,
+            groupName: gName,
+            person: personValue,
+            date: rDate || "Chưa rõ",
+            startTime: start,
+            endTime: end,
+            task: baseTask,
+            location: rLocation || "Chưa xác định",
+            dateRaw: rDate,
+            timeRaw: rTime,
+            personRaw: reviewerNames,
+            locationRaw: rLocation,
+            status: 'pending',
+            rawRow: row
           });
         });
       } else {
-        // Fallback về 1 dòng = 1 event
-        const person = (mapping.person !== undefined ? (row[mapping.person] || "") : "").toString().trim();
+        // Chế độ bình thường: 1 dòng -> 1 sự kiện
+        const personValue = (mapping.person !== undefined ? (row[mapping.person] || "") : "").toString().trim();
+        if (!personValue && !baseTask) return;
+
         allEvents.push({
           id: `${sheetId}-${tab}-${rowIndex}`,
-          person: person || (baseTask || "Chưa rõ"),
+          person: personValue || baseTask,
           date: lastDate || "Chưa rõ",
           startTime: start,
           endTime: end,
@@ -325,7 +415,7 @@ export class GoogleSyncService {
           location: lastLocation || "Chưa xác định",
           dateRaw: lastDate,
           timeRaw: lastTime,
-          personRaw: person || (baseTask || "Chưa rõ"),
+          personRaw: personValue || baseTask,
           locationRaw: lastLocation,
           status: 'pending',
           rawRow: row

@@ -19,10 +19,12 @@ export interface ParsedDateTime {
  * Định nghĩa các slot chuẩn
  */
 const STANDARD_SLOTS: TimeSlot[] = [
-  { slot: 1, startTime: '07:00', endTime: '09:15', display: '7:00 - 9:15' },
-  { slot: 2, startTime: '09:30', endTime: '11:45', display: '9:30 - 11:45' },
+  { slot: 1, startTime: '07:00', endTime: '09:15', display: '07:00 - 09:15' },
+  { slot: 2, startTime: '09:30', endTime: '11:45', display: '09:30 - 11:45' },
   { slot: 3, startTime: '12:30', endTime: '14:45', display: '12:30 - 14:45' },
-  { slot: 4, startTime: '15:00', endTime: '17:15', display: '15:00 - 17:15' }
+  { slot: 4, startTime: '15:00', endTime: '17:15', display: '15:00 - 17:15' },
+  { slot: 5, startTime: '17:30', endTime: '19:45', display: '17:30 - 19:45' },
+  { slot: 6, startTime: '20:00', endTime: '22:15', display: '20:00 - 22:15' }
 ];
 
 /**
@@ -37,6 +39,11 @@ export function parseDate(value: any): Date | null {
   }
 
   const strValue = String(value).trim();
+
+  // Tránh parse các số đơn lẻ (thường là slot) thành ngày tháng
+  if (strValue.length <= 2 && !isNaN(parseInt(strValue))) {
+    return null;
+  }
 
   // Excel serial date number (ví dụ: 44927 = 2023-01-01)
   if (typeof value === 'number' && value > 40000 && value < 60000) {
@@ -84,9 +91,9 @@ export function parseSlotNumber(value: any): TimeSlot | null {
 
   const strValue = String(value).trim().toLowerCase();
 
-  // Nếu là số thuần túy từ 1-4
+  // Nếu là số thuần túy từ 1-6
   const numValue = parseInt(strValue);
-  if (!isNaN(numValue) && numValue >= 1 && numValue <= 4) {
+  if (!isNaN(numValue) && numValue >= 1 && numValue <= 6) {
     return STANDARD_SLOTS[numValue - 1];
   }
 
@@ -94,7 +101,7 @@ export function parseSlotNumber(value: any): TimeSlot | null {
   const slotMatch = strValue.match(/slot\s*(\d+)/i);
   if (slotMatch) {
     const slotNum = parseInt(slotMatch[1]);
-    if (slotNum >= 1 && slotNum <= 4) {
+    if (slotNum >= 1 && slotNum <= 6) {
       return STANDARD_SLOTS[slotNum - 1];
     }
   }
@@ -103,7 +110,7 @@ export function parseSlotNumber(value: any): TimeSlot | null {
   const altMatch = strValue.match(/s(?:lot)?[\s_-]*(\d+)/i);
   if (altMatch) {
     const slotNum = parseInt(altMatch[1]);
-    if (slotNum >= 1 && slotNum <= 4) {
+    if (slotNum >= 1 && slotNum <= 6) {
       return STANDARD_SLOTS[slotNum - 1];
     }
   }
@@ -198,18 +205,7 @@ export function parseDateTime(value: any): ParsedDateTime {
 
   const rawValue = String(value).trim();
 
-  // 1. Thử parse date
-  const date = parseDate(value);
-  if (date) {
-    return {
-      date,
-      dateString: format(date, 'yyyy-MM-dd'),
-      rawValue,
-      type: 'date'
-    };
-  }
-
-  // 2. Thử parse slot number
+  // 1. Thử parse slot number trước (ưu tiên vì slot thường là số ngắn dễ bị parse nhầm)
   const slotNum = parseSlotNumber(value);
   if (slotNum) {
     return {
@@ -219,13 +215,24 @@ export function parseDateTime(value: any): ParsedDateTime {
     };
   }
 
-  // 3. Thử parse time range
+  // 2. Thử parse time range
   const timeRange = parseTimeRange(value);
   if (timeRange) {
     return {
       timeSlot: timeRange,
       rawValue,
       type: 'time-range'
+    };
+  }
+
+  // 3. Thử parse date
+  const date = parseDate(value);
+  if (date) {
+    return {
+      date,
+      dateString: format(date, 'yyyy-MM-dd'),
+      rawValue,
+      type: 'date'
     };
   }
 

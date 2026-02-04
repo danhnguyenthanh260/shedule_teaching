@@ -99,23 +99,21 @@ const App: React.FC = () => {
     if (mappingId && allRows.length > 0) {
       // We only want to auto-restore once per mappingId change to avoid fighting user manual changes
       const isNewSheet = lastAppliedMappingId.current !== mappingId;
-      
-      if (isNewSheet && savedMapping && Object.keys(savedMapping).length > 0) {
-        console.log('📥 Restoring saved configuration for:', mappingId);
-        
-        setColumnMap(savedMapping);
-        setAppliedColumnMap(savedMapping);
-        
-        // Restore saved header row index
-        if (savedHeaderRowIndex !== null && savedHeaderRowIndex !== undefined) {
-          console.log('📐 Applying saved Header Row:', savedHeaderRowIndex + 1);
-          setHeaderRowIndex(savedHeaderRowIndex);
-          applyHeaderRow(savedHeaderRowIndex, allRows);
+      if (isNewSheet) {
+        if (savedMapping && Object.keys(savedMapping).length > 0) {
+          console.log('📥 Restoring saved configuration for:', mappingId);
+          setColumnMap(savedMapping);
+          setAppliedColumnMap(savedMapping);
+          if (savedHeaderRowIndex !== null && savedHeaderRowIndex !== undefined) {
+            setHeaderRowIndex(savedHeaderRowIndex);
+            applyHeaderRow(savedHeaderRowIndex, allRows);
+          }
+          applyMapping(savedMapping, sheetMeta?.isDataMau || false);
+        } else {
+          // New sheet/tab with no saved mapping: reset to clean state
+          setColumnMap({});
+          setAppliedColumnMap({});
         }
-
-        // 🔥 CRITICAL: Automatically apply the restored mapping to the table
-        applyMapping(savedMapping, sheetMeta?.isDataMau || false);
-
         lastAppliedMappingId.current = mappingId;
       }
     }
@@ -173,6 +171,13 @@ const App: React.FC = () => {
             <ExcelImport
               accessToken={accessToken}
               onDataLoaded={(data) => {
+                // 🔥 Reset old state for new data
+                setColumnMap({});
+                setAppliedColumnMap({});
+                setRows([]);
+                setResult(null);
+                setError(null);
+
                 setAllRows(data.rawRows);
                 const meta = { 
                   sheetId: data.sheetId, 
@@ -183,7 +188,7 @@ const App: React.FC = () => {
                 setSheetMeta(meta);
                 applyHeaderRow(data.headerRowIndex, data.rawRows, { sheetId: data.sheetId, tab: data.tabName });
                 setLoading(false);
-                showToast(`✓ Đã tải ${data.rawRows.length} dòng dữ liệu`);
+                showToast(`✓ Đã tải ${data.rawRows.length} dòng dữ liệu (${data.isDataMau ? 'Review Mode' : 'Normal'})`);
               }}
               setLoading={setLoading}
               setError={setError}

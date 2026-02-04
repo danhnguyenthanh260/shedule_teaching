@@ -10,7 +10,7 @@ import {
   Timestamp,
 } from 'firebase/firestore';
 // Dùng đúng kiểu mapping của app (types.ts) để tránh lỗi ts(2345)
-import type { ColumnMapping as AppColumnMapping } from '../../types';
+import type { ColumnMapping as AppColumnMapping } from '../types';
 
 /** Re-export để hook và App dùng chung một kiểu (date, time, person, task, location, email) */
 export type ColumnMapping = AppColumnMapping;
@@ -19,6 +19,7 @@ export interface UserMapping {
   userId: string;
   fileId: string;
   mapping: AppColumnMapping;
+  headerRowIndex?: number;
   createdAt: Timestamp;
   updatedAt: Timestamp;
 }
@@ -32,7 +33,8 @@ export interface UserMapping {
 export const saveMappingPreset = async (
   userId: string,
   fileId: string,
-  mapping: AppColumnMapping
+  mapping: AppColumnMapping,
+  headerRowIndex?: number
 ): Promise<void> => {
   try {
     const mappingRef = doc(db, 'users', userId, 'mappings', fileId);
@@ -40,6 +42,7 @@ export const saveMappingPreset = async (
       userId,
       fileId,
       mapping,
+      headerRowIndex,
       createdAt: Timestamp.now(),
       updatedAt: Timestamp.now(),
     });
@@ -58,13 +61,17 @@ export const saveMappingPreset = async (
 export const getMappingPreset = async (
   userId: string,
   fileId: string
-): Promise<AppColumnMapping | null> => {
+): Promise<{ mapping: AppColumnMapping; headerRowIndex?: number } | null> => {
   try {
     const mappingRef = doc(db, 'users', userId, 'mappings', fileId);
     const docSnap = await getDoc(mappingRef);
 
     if (docSnap.exists()) {
-      return docSnap.data().mapping;
+      const data = docSnap.data();
+      return { 
+        mapping: data.mapping, 
+        headerRowIndex: data.headerRowIndex 
+      };
     }
     return null;
   } catch (error) {
@@ -98,12 +105,14 @@ export const getUserMappings = async (userId: string): Promise<UserMapping[]> =>
 export const updateMappingPreset = async (
   userId: string,
   fileId: string,
-  mapping: AppColumnMapping
+  mapping: AppColumnMapping,
+  headerRowIndex?: number
 ): Promise<void> => {
   try {
     const mappingRef = doc(db, 'users', userId, 'mappings', fileId);
     await updateDoc(mappingRef, {
       mapping,
+      headerRowIndex,
       updatedAt: Timestamp.now(),
     });
   } catch (error) {

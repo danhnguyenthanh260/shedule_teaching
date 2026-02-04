@@ -1,114 +1,117 @@
+
 import React, { useState } from 'react';
-import { parseExcelFile, parseGoogleSheets, NormalizedSheet } from '../utils/excelParser';
-import { validateGoogleSheetUrl } from '../utils/validators';
+import { googleService } from '../services/googleService';
 
 interface ExcelImportProps {
-  onDataParsed: (sheets: NormalizedSheet[]) => void;
+  onDataLoaded: (data: {
+    rawRows: string[][];
+    sheetId: string;
+    tabName: string;
+    headerRowIndex: number;
+    isDataMau: boolean;
+  }) => void;
+  setLoading: (loading: boolean) => void;
+  setError: (error: string | null) => void;
+  sheetUrl: string;
+  setSheetUrl: (url: string) => void;
+  tabName: string;
+  setTabName: (tab: string) => void;
 }
 
-export const ExcelImport: React.FC<ExcelImportProps> = ({ onDataParsed }) => {
-  const [url, setUrl] = useState('');
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState('');
-  const [preview, setPreview] = useState<NormalizedSheet[]>([]);
+export const ExcelImport: React.FC<ExcelImportProps> = ({
+  onDataLoaded,
+  setLoading,
+  setError,
+  sheetUrl,
+  setSheetUrl,
+  tabName,
+  setTabName
+}) => {
+  const [isProcessing, setIsProcessing] = useState(false);
 
-  const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-
-    setLoading(true);
-    setError('');
-
-    try {
-      const results = await parseExcelFile(file);
-      setPreview(results);
-      onDataParsed(results);
-    } catch (err) {
-      setError('Lỗi: ' + (err as Error).message);
-    } finally {
-      setLoading(false);
+  const handleImport = async (overrideTab?: string) => {
+    if (!sheetUrl) {
+      setError('Vui lòng nhập URL Google Sheet');
+      return;
     }
-  };
 
-  const handleUrlSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
+    const targetTab = overrideTab || tabName;
+
+    setIsProcessing(true);
     setLoading(true);
-    setError('');
+    setError(null);
 
     try {
-      // 🔐 SECURITY: Validate URL before using
-      if (!validateGoogleSheetUrl(url)) {
-        throw new Error('URL không hợp lệ. Vui lòng nhập URL Google Sheets từ docs.google.com');
+      const token = localStorage.getItem('google_access_token');
+      if (!token) {
+        throw new Error('Bạn cần đăng nhập lại để thực hiện thao tác này.');
       }
+
+      const result = await googleService.loadSheet(sheetUrl, targetTab, token);
       
-      const results = await parseGoogleSheets(url);
-      setPreview(results);
-      onDataParsed(results);
-    } catch (err) {
-      setError('Lỗi: ' + (err as Error).message);
+      onDataLoaded({
+        rawRows: result.rawRows,
+        sheetId: result.sheetId,
+        tabName: targetTab,
+        headerRowIndex: result.headerRowIndex,
+        isDataMau: (result as any).isDataMau || false
+      });
+      
+    } catch (err: any) {
+      console.error('Import error:', err);
+      setError(err.message || 'Không thể tải dữ liệu từ Google Sheet');
     } finally {
+      setIsProcessing(false);
       setLoading(false);
     }
   };
 
   return (
-    <div className="excel-import">
-      <h3>Nhập Excel/Google Sheets</h3>
-      
-      <div className="upload-section">
-        <label htmlFor="file-upload">Chọn file Excel:</label>
-        <input
-          id="file-upload"
-          type="file"
-          accept=".xlsx,.xls"
-          onChange={handleFileUpload}
-          disabled={loading}
-          className="file-input"
-        />
-      </div>
-
-      <div className="divider">HOẶC</div>
-
-      <form onSubmit={handleUrlSubmit} className="url-section">
-        <label htmlFor="sheets-url">Paste link Google Sheets:</label>
-        <div className="input-group">
+    <div className="flex flex-col xl:flex-row gap-3 items-end">
+      <div className="flex-1 w-full">
+        <label className="block text-[10px] font-black text-slate-400 mb-1.5 ml-1 uppercase tracking-widest">Google Sheet URL</label>
+        <div className="relative group">
           <input
-            id="sheets-url"
             type="text"
-            value={url}
-            onChange={(e) => setUrl(e.target.value)}
-            placeholder="https://docs.google.com/spreadsheets/d/..."
-            disabled={loading}
-            className="url-input"
+            placeholder="Dán link Google Sheet vào đây..."
+            className="w-full pl-4 pr-12 py-2 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-fpt-orange outline-none transition-all text-xs text-slate-600 placeholder:text-slate-300 font-bold h-11 shadow-inner group-focus-within:bg-white"
+            value={sheetUrl}
+            onChange={(e) => setSheetUrl(e.target.value)}
           />
-          <button type="submit" disabled={loading || !url} className="btn-submit">
-            {loading ? 'Đang xử lý...' : 'Nhập'}
-          </button>
-        </div>
-      </form>
-
-      {error && <div className="error-message">{error}</div>}
-
-      {preview.length > 0 && (
-        <div className="preview">
-          <h4>Phát hiện {preview.length} sheet:</h4>
-          <div className="sheet-list">
-            {preview.map((sheet, idx) => (
-              <div key={idx} className="sheet-info">
-                <div className="sheet-name"><strong>{sheet.sheetName}</strong></div>
-                <div className="sheet-details">
-                  <span className="badge type">{sheet.detectedType}</span>
-                  <span className="stat">{sheet.data.length} dòng</span>
-                  <span className="stat">{sheet.headers.length} cột</span>
-                  {sheet.mergeInfo?.totalMerges > 0 && (
-                    <span className="stat merge">🔗 {sheet.mergeInfo.totalMerges} merged</span>
-                  )}
-                </div>
-              </div>
-            ))}
+          <div className="absolute right-3.5 top-3 text-slate-300 group-focus-within:text-fpt-orange transition-colors">
+            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101" />
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M10.172 13.828a4 4 0 015.656 0l4-4a4 4 0 10-5.656-5.656-1.102 1.101" />
+            </svg>
           </div>
         </div>
-      )}
+      </div>
+
+      <div className="flex-none flex gap-2">
+        <button 
+          onClick={() => {
+            setTabName('test1');
+            setTimeout(() => handleImport('test1'), 10);
+          }}
+          disabled={isProcessing || !sheetUrl}
+          className="px-6 h-11 bg-[#F27024] text-white rounded-xl hover:bg-orange-600 active:scale-95 transition-all font-black shadow-lg shadow-orange-200 flex items-center justify-center gap-2 disabled:bg-slate-100 disabled:text-slate-400 disabled:shadow-none disabled:border-slate-200 border border-transparent text-xs uppercase tracking-tighter"
+        >
+          <span className="opacity-60 text-[9px] font-black font-mono">TAB</span>
+          <span>test1</span>
+        </button>
+        
+        <button 
+          onClick={() => {
+            setTabName('Review');
+            setTimeout(() => handleImport('Review'), 10);
+          }}
+          disabled={isProcessing || !sheetUrl}
+          className="px-6 h-11 bg-slate-700 text-white rounded-xl hover:bg-slate-800 active:scale-95 transition-all font-black shadow-lg shadow-slate-200 flex items-center justify-center gap-2 disabled:bg-slate-100 disabled:text-slate-400 disabled:shadow-none disabled:border-slate-200 border border-transparent text-xs uppercase tracking-tighter"
+        >
+          <span className="opacity-60 text-[9px] font-black font-mono">TAB</span>
+          <span>Review</span>
+        </button>
+      </div>
     </div>
   );
 };

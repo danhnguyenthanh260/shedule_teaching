@@ -113,9 +113,22 @@ export const syncEventsToCalendar = async (
       throw new Error(`HTTP error! status: ${response.status}`);
     }
 
-    const data: SyncResponse = await response.json();
+    // Read text first to enable logging raw response even if JSON parsing fails
+    const text = await response.text();
+    
+    let data: SyncResponse;
+    try {
+      data = JSON.parse(text);
+    } catch (jsonError) {
+      logError('Failed to parse JSON response. Raw text:', text);
+      throw new Error(`Apps Script returned invalid JSON. Possible auth or config issue. Raw: ${text.substring(0, 200)}...`);
+    }
 
     logSuccess('Sync response:', data);
+
+    if (data.status === 'error') {
+      throw new Error(data.message || 'Unknown error from Apps Script');
+    }
 
     return data;
   } catch (error) {

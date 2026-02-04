@@ -5,9 +5,10 @@ import { logError } from '../utils/logger';
 
 interface UseMappingResult {
   mapping: ColumnMapping | null;
+  savedHeaderRowIndex: number | null;
   loading: boolean;
   error: string | null;
-  saveMapping: (fileId: string, mapping: ColumnMapping) => Promise<void>;
+  saveMapping: (fileId: string, mapping: ColumnMapping, headerRowIndex: number) => Promise<void>;
   getMapping: (fileId: string) => Promise<void>;
 }
 
@@ -18,6 +19,7 @@ interface UseMappingResult {
 export const useFirebaseMapping = (fileId?: string): UseMappingResult => {
   const { user } = useFirebase();
   const [mapping, setMapping] = useState<ColumnMapping | null>(null);
+  const [savedHeaderRowIndex, setSavedHeaderRowIndex] = useState<number | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -25,6 +27,10 @@ export const useFirebaseMapping = (fileId?: string): UseMappingResult => {
   useEffect(() => {
     if (user && fileId) {
       getMapping(fileId);
+    } else {
+      // Reset states when dependencies missing or changing
+      setMapping(null);
+      setSavedHeaderRowIndex(null);
     }
   }, [user, fileId]);
 
@@ -35,7 +41,15 @@ export const useFirebaseMapping = (fileId?: string): UseMappingResult => {
       setLoading(true);
       setError(null);
       const result = await getMappingPreset(user.uid, id);
-      setMapping(result);
+      if (result) {
+        setMapping(result.mapping);
+        if (result.headerRowIndex !== undefined) {
+          setSavedHeaderRowIndex(result.headerRowIndex);
+        }
+      } else {
+        setMapping(null);
+        setSavedHeaderRowIndex(null);
+      }
     } catch (err) {
       const errorMessage = err instanceof Error ? err.message : 'Failed to get mapping';
       setError(errorMessage);
@@ -45,7 +59,7 @@ export const useFirebaseMapping = (fileId?: string): UseMappingResult => {
     }
   };
 
-  const saveMapping = async (id: string, newMapping: ColumnMapping) => {
+  const saveMapping = async (id: string, newMapping: ColumnMapping, headerRowIndex: number) => {
     if (!user) {
       setError('User not authenticated');
       return;
@@ -54,8 +68,18 @@ export const useFirebaseMapping = (fileId?: string): UseMappingResult => {
     try {
       setLoading(true);
       setError(null);
-      await saveMappingPreset(user.uid, id, newMapping);
-      setMapping(newMapping);
+
+      // Sanitize mapping to remove undefined values
+      const sanitizedMapping: any = { ...newMapping };
+      Object.keys(sanitizedMapping).forEach(key => {
+        if (sanitizedMapping[key] === undefined) {
+          sanitizedMapping[key] = null;
+        }
+      });
+      
+      await saveMappingPreset(user.uid, id, sanitizedMapping, headerRowIndex);
+      setMapping(sanitizedMapping);
+      setSavedHeaderRowIndex(headerRowIndex);
     } catch (err) {
       const errorMessage = err instanceof Error ? err.message : 'Failed to save mapping';
       setError(errorMessage);
@@ -68,6 +92,7 @@ export const useFirebaseMapping = (fileId?: string): UseMappingResult => {
 
   return {
     mapping,
+    savedHeaderRowIndex,
     loading,
     error,
     saveMapping,

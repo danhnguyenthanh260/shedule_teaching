@@ -12,7 +12,17 @@ export default defineConfig(({ mode }) => {
         '/api/appscript': {
           target: 'https://script.google.com',
           changeOrigin: true,
-          rewrite: (path) => path.replace(/^\/api\/appscript/, '/macros/s/AKfycbyb5bD0VkvmeL1qwZxz6ngTB0INTs2FAEukaf7GbO5m-mXGnykTEqltcBiYJI1vDlC_1g/exec'),
+          rewrite: (path) => {
+            const backendUrl = env.VITE_BACKEND_URL;
+            if (!backendUrl) return path;
+            try {
+              const urlObj = new URL(backendUrl);
+              return path.replace(/^\/api\/appscript/, urlObj.pathname + urlObj.search);
+            } catch (e) {
+              console.error('Invalid VITE_BACKEND_URL:', backendUrl);
+              return path;
+            }
+          },
           secure: true,
         }
       }

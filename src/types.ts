@@ -48,6 +48,7 @@ export interface SyncResult {
   created: number;
   updated: number;
   failed: number;
+  skipped: number;
   logs: string[];
 }
 

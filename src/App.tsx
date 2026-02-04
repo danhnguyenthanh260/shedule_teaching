@@ -113,19 +113,15 @@ const App: React.FC = () => {
           applyHeaderRow(savedHeaderRowIndex, allRows);
         }
 
+        // 🔥 CRITICAL: Automatically apply the restored mapping to the table
+        applyMapping(savedMapping, sheetMeta?.isDataMau || false);
+
         lastAppliedMappingId.current = mappingId;
       }
     }
-  }, [mappingId, savedMapping, savedHeaderRowIndex, allRows, setColumnMap, setHeaderRowIndex, applyHeaderRow]);
+  }, [mappingId, savedMapping, savedHeaderRowIndex, allRows, setColumnMap, setHeaderRowIndex, applyHeaderRow, applyMapping, sheetMeta?.isDataMau]);
 
-  // ✅ 2. Auto-apply mapping for UI logic after index/mapping is restored
-  useEffect(() => {
-    if (allRows.length > 0 && Object.keys(columnMap).length > 0 && rows.length === 0 && !loading) {
-      console.log('⚙️ Auto-applying restored mapping to display table...');
-      applyMapping(columnMap, sheetMeta?.isDataMau || false);
-      setAppliedColumnMap(columnMap);
-    }
-  }, [allRows.length, columnMap, rows.length, loading, applyMapping, sheetMeta?.isDataMau]);
+
 
   // ✅ 3. SAVE mapping only when manually applied (controlled in useSheetLogic)
   
@@ -175,6 +171,7 @@ const App: React.FC = () => {
           </h2>
           <div className="flex-1 overflow-y-auto custom-scrollbar pr-1">
             <ExcelImport
+              accessToken={accessToken}
               onDataLoaded={(data) => {
                 setAllRows(data.rawRows);
                 const meta = { 
@@ -185,7 +182,6 @@ const App: React.FC = () => {
                 };
                 setSheetMeta(meta);
                 applyHeaderRow(data.headerRowIndex, data.rawRows, { sheetId: data.sheetId, tab: data.tabName });
-                if (columnMap && Object.keys(columnMap).length >= 2) applyMapping(columnMap, data.isDataMau, data.rawRows);
                 setLoading(false);
                 showToast(`✓ Đã tải ${data.rawRows.length} dòng dữ liệu`);
               }}

@@ -152,8 +152,12 @@ export const FirebaseProvider: React.FC<{ children: React.ReactNode }> = ({ chil
 
       const provider = new GoogleAuthProvider();
       provider.addScope('https://www.googleapis.com/auth/spreadsheets.readonly');
-      // Calendar scope removed - moving to Apps Script authority
-
+      provider.addScope('https://www.googleapis.com/auth/calendar.events');
+      
+      // ✅ FORCE Google to show the account picker and consent screen to avoid 403 session confusion
+      provider.setCustomParameters({
+        prompt: 'select_account'
+      });
 
       const result = await signInWithPopup(auth, provider);
       setUserUID(result.user.uid);

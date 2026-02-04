@@ -187,6 +187,7 @@ export function clearAuth() {
   secureRemoveItem(TOKEN_KEY);
   secureRemoveItem(REFRESH_TOKEN_KEY);
   localStorage.removeItem(EXPIRY_KEY);
+  localStorage.removeItem('google_access_token');
 }
 
 /**

@@ -16,6 +16,7 @@ interface ExcelImportProps {
   setSheetUrl: (url: string) => void;
   tabName: string;
   setTabName: (tab: string) => void;
+  accessToken: string | null;
 }
 
 export const ExcelImport: React.FC<ExcelImportProps> = ({
@@ -25,7 +26,8 @@ export const ExcelImport: React.FC<ExcelImportProps> = ({
   sheetUrl,
   setSheetUrl,
   tabName,
-  setTabName
+  setTabName,
+  accessToken
 }) => {
   const [isProcessing, setIsProcessing] = useState(false);
 
@@ -42,7 +44,7 @@ export const ExcelImport: React.FC<ExcelImportProps> = ({
     setError(null);
 
     try {
-      const token = localStorage.getItem('google_access_token');
+      const token = accessToken || localStorage.getItem('google_access_token');
       if (!token) {
         throw new Error('Bạn cần đăng nhập lại để thực hiện thao tác này.');
       }
@@ -59,7 +61,12 @@ export const ExcelImport: React.FC<ExcelImportProps> = ({
       
     } catch (err: any) {
       console.error('Import error:', err);
-      setError(err.message || 'Không thể tải dữ liệu từ Google Sheet');
+      // Detailed error for 403 Forbidden to help users
+      if (err.message?.includes('permission') || err.message?.includes('403')) {
+        setError(`Lỗi phân quyền: Tài khoản đang đăng nhập không có quyền truy cập File Sheets này. Hãy đảm bảo bạn đã Share file này cho email hiện tại.`);
+      } else {
+        setError(err.message || 'Không thể tải dữ liệu từ Google Sheet');
+      }
     } finally {
       setIsProcessing(false);
       setLoading(false);

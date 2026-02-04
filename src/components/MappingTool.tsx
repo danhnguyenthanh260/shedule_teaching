@@ -26,7 +26,7 @@ export const MappingTool: React.FC<MappingToolProps> = ({
   const fields: { key: keyof ColumnMapping; label: string; icon: string }[] = [
     { key: 'date', label: 'Ngày', icon: '📅' },
     { key: 'time', label: 'Thời gian', icon: '⏰' },
-    { key: 'person', label: 'Tên đề tài', icon: '📋' },
+    { key: 'person', label: 'Tên đề tài/Người dạy', icon: '📋' },
     { key: 'location', label: 'Phòng', icon: '📍' },
   ];
 

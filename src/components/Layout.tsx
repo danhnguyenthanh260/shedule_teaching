@@ -17,24 +17,25 @@ const Layout: React.FC<Props> = ({ children, user, userId, onLogout, syncHistory
   return (
     <div className="h-screen flex flex-col bg-slate-50 overflow-hidden text-slate-900">
       <nav className="flex-none bg-white border-b border-slate-200 px-6 py-2 flex items-center justify-between z-50 shadow-sm">
-        <div className="flex items-center gap-2">
-          <div className="w-8 h-8 bg-white rounded-lg flex items-center justify-center shadow-sm overflow-hidden border border-gray-100 transform transition-all duration-200 hover:shadow-md">
+        <div className="flex items-center gap-5">
+          <div className="h-12 flex items-center justify-center transform transition-all duration-300 hover:scale-105">
             <img
-              src="https://static.wixstatic.com/media/c0d3eb_f3bfa95a7f0b4ca4b29ef81b3d529d68~mv2.png/v1/fill/w_706,h_706,al_c/Logo%20tr%C6%B0%E1%BB%9Dng%20%C4%91%E1%BA%A1i%20h%E1%BB%8Dc%20(layout%20tr%C3%B2n)-19.png"
-              alt="FPTU Logo"
-              className="w-full h-full object-contain p-0.5"
+              src="https://upload.wikimedia.org/wikipedia/commons/6/68/Logo_FPT_Education.png"
+              alt="FPT Education Logo"
+              className="h-full w-auto object-contain"
             />
           </div>
+          <div className="h-8 w-px bg-slate-200 ml-2"></div>
           <div>
-            <h1 className="font-bold text-sm text-slate-900 leading-none">FPTU Synchronizer</h1>
-            <p className="text-[9px] font-bold text-indigo-500 uppercase tracking-tight">Schedule Importer</p>
+            <h1 className="font-black text-2xl text-slate-900 leading-none tracking-tight">FPTU Synchronizer</h1>
+            <p className="text-sm font-black text-[#F27024] uppercase tracking-[0.3em] mt-2">Schedule Importer</p>
           </div>
         </div>
 
         <div className="flex items-center gap-3">
           <button
             onClick={() => setShowHistoryModal(true)}
-            className="flex items-center gap-1.5 px-3 py-1.5 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 rounded-md transition-colors font-semibold text-xs border border-indigo-100"
+            className="flex items-center gap-1.5 px-3 py-1.5 bg-slate-50 hover:bg-slate-100 text-slate-700 rounded-md transition-colors font-semibold text-xs border border-slate-200"
             title="Xem lịch sử import"
           >
             <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">

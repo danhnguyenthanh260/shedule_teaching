@@ -67,18 +67,18 @@ export const ExcelImport: React.FC<ExcelImportProps> = ({
   };
 
   return (
-    <div className="flex flex-col md:flex-row gap-3 items-end">
+    <div className="flex flex-col xl:flex-row gap-3 items-end">
       <div className="flex-1 w-full">
         <label className="block text-[10px] font-black text-slate-400 mb-1.5 ml-1 uppercase tracking-widest">Google Sheet URL</label>
         <div className="relative group">
           <input
             type="text"
             placeholder="Dán link Google Sheet vào đây..."
-            className="w-full px-4 py-2 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-indigo-500 outline-none transition-all text-xs text-slate-600 placeholder:text-slate-300 font-bold h-11 shadow-inner group-focus-within:bg-white"
+            className="w-full pl-4 pr-12 py-2 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-fpt-orange outline-none transition-all text-xs text-slate-600 placeholder:text-slate-300 font-bold h-11 shadow-inner group-focus-within:bg-white"
             value={sheetUrl}
             onChange={(e) => setSheetUrl(e.target.value)}
           />
-          <div className="absolute right-3.5 top-3 text-slate-300 group-focus-within:text-indigo-400 transition-colors">
+          <div className="absolute right-3.5 top-3 text-slate-300 group-focus-within:text-fpt-orange transition-colors">
             <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101" />
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M10.172 13.828a4 4 0 015.656 0l4-4a4 4 0 10-5.656-5.656-1.102 1.101" />
@@ -94,9 +94,9 @@ export const ExcelImport: React.FC<ExcelImportProps> = ({
             setTimeout(() => handleImport('test1'), 10);
           }}
           disabled={isProcessing || !sheetUrl}
-          className="px-5 h-11 bg-gradient-to-br from-indigo-500 to-indigo-700 text-white rounded-xl hover:from-indigo-600 hover:to-indigo-800 active:scale-95 transition-all font-black shadow-lg shadow-indigo-100 flex items-center justify-center gap-2 disabled:opacity-30 text-xs uppercase tracking-tighter"
+          className="px-6 h-11 bg-[#F27024] text-white rounded-xl hover:bg-orange-600 active:scale-95 transition-all font-black shadow-lg shadow-orange-200 flex items-center justify-center gap-2 disabled:bg-slate-100 disabled:text-slate-400 disabled:shadow-none disabled:border-slate-200 border border-transparent text-xs uppercase tracking-tighter"
         >
-          <span className="opacity-60 text-[9px] font-black">TAB</span>
+          <span className="opacity-60 text-[9px] font-black font-mono">TAB</span>
           <span>test1</span>
         </button>
         
@@ -106,9 +106,9 @@ export const ExcelImport: React.FC<ExcelImportProps> = ({
             setTimeout(() => handleImport('Review'), 10);
           }}
           disabled={isProcessing || !sheetUrl}
-          className="px-5 h-11 bg-gradient-to-br from-violet-500 to-violet-700 text-white rounded-xl hover:from-violet-600 hover:to-violet-800 active:scale-95 transition-all font-black shadow-lg shadow-violet-100 flex items-center justify-center gap-2 disabled:opacity-30 text-xs uppercase tracking-tighter"
+          className="px-6 h-11 bg-slate-700 text-white rounded-xl hover:bg-slate-800 active:scale-95 transition-all font-black shadow-lg shadow-slate-200 flex items-center justify-center gap-2 disabled:bg-slate-100 disabled:text-slate-400 disabled:shadow-none disabled:border-slate-200 border border-transparent text-xs uppercase tracking-tighter"
         >
-          <span className="opacity-60 text-[9px] font-black">TAB</span>
+          <span className="opacity-60 text-[9px] font-black font-mono">TAB</span>
           <span>Review</span>
         </button>
       </div>

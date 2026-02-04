@@ -7,13 +7,20 @@ interface ScheduleTableProps {
   selectedIds: Set<string>;
   onToggleSelect: (id: string) => void;
   onToggleAll: () => void;
+  columnLabels?: {
+    date?: string;
+    time?: string;
+    person?: string;
+    location?: string;
+  };
 }
 
 export const ScheduleTable: React.FC<ScheduleTableProps> = ({
   rows,
   selectedIds,
   onToggleSelect,
-  onToggleAll
+  onToggleAll,
+  columnLabels
 }) => {
   if (rows.length === 0) {
     return (
@@ -29,70 +36,71 @@ export const ScheduleTable: React.FC<ScheduleTableProps> = ({
   }
 
   return (
-    <div className="h-full overflow-auto -mx-6 scrollbar-thin scrollbar-thumb-slate-200 scrollbar-track-transparent border-t border-slate-100">
+    <div className="h-full overflow-auto scrollbar-thin scrollbar-thumb-slate-200 scrollbar-track-transparent rounded-t-2xl border-t border-slate-200">
       <table className="w-full text-left border-collapse relative">
         <thead className="sticky top-0 z-20 bg-white shadow-sm">
-          <tr className="bg-slate-50 border-y border-slate-100">
-            <th className="pl-6 py-4 w-12 bg-slate-50">
+          <tr className="border-b border-slate-200">
+            <th className="pl-8 py-4 w-12 bg-slate-50 sticky top-0">
               <input
                 type="checkbox"
-                className="w-4 h-4 rounded border-slate-300 text-indigo-600 focus:ring-indigo-500 cursor-pointer"
+                className="w-4 h-4 rounded border-slate-300 text-[#F27024] focus:ring-[#F27024] cursor-pointer"
                 checked={selectedIds.size === rows.length && rows.length > 0}
                 onChange={onToggleAll}
               />
             </th>
-            <th className="px-4 py-4 text-[11px] font-bold text-slate-400 uppercase tracking-wider bg-slate-50">Ngày</th>
-            <th className="px-4 py-4 text-[11px] font-bold text-slate-400 uppercase tracking-wider bg-slate-50">Thời gian</th>
-            <th className="px-4 py-4 text-[11px] font-bold text-slate-400 uppercase tracking-wider bg-slate-50">Review</th>
-            <th className="px-4 py-4 text-[11px] font-bold text-slate-400 uppercase tracking-wider bg-slate-50">Phòng</th>
+            <th className="px-4 py-4 text-[11px] font-bold text-black uppercase tracking-wider bg-slate-50 text-center sticky top-0 min-w-[120px] border-r border-slate-100/50">{columnLabels?.date || 'Ngày'}</th>
+            <th className="px-4 py-4 text-[11px] font-bold text-black uppercase tracking-wider bg-slate-50 text-center sticky top-0 min-w-[140px] border-r border-slate-100/50">{columnLabels?.time || 'Thời gian'}</th>
+            <th className="px-4 py-4 text-[11px] font-bold text-black uppercase tracking-wider bg-slate-50 text-center pl-6 sticky top-0 min-w-[300px] border-r border-slate-100/50">{columnLabels?.person || 'Tên đề tài'}</th>
+            <th className="px-4 py-4 text-[11px] font-bold text-black uppercase tracking-wider bg-slate-50 text-center sticky top-0 min-w-[150px]">{columnLabels?.location || 'Phòng'}</th>
           </tr>
         </thead>
         <tbody className="divide-y divide-slate-100 bg-white">
           {rows.map((row) => (
             <tr 
               key={row.id} 
-              className={`hover:bg-indigo-50/20 transition-all group ${selectedIds.has(row.id) ? 'bg-indigo-50/40' : ''}`}
+              className={`hover:bg-orange-50/30 transition-all group ${selectedIds.has(row.id) ? 'bg-orange-50/50' : ''}`}
             >
-              <td className="pl-6 py-4">
+              <td className="pl-8 py-4">
                 <input
                   type="checkbox"
-                  className="w-5 h-5 rounded-lg border-slate-200 text-indigo-600 focus:ring-indigo-500 cursor-pointer transition-all hover:scale-110 shadow-sm"
+                  className="w-5 h-5 rounded-lg border-slate-200 text-[#F27024] focus:ring-[#F27024] cursor-pointer transition-all hover:scale-110 shadow-sm"
                   checked={selectedIds.has(row.id)}
                   onChange={() => onToggleSelect(row.id)}
                 />
               </td>
-              <td className="px-4 py-4">
-                 <span className="text-sm font-bold text-slate-700 block">{row.date}</span>
+              <td className="px-4 py-4 text-center border-r border-slate-50/50">
+                 <span className="text-sm font-medium text-slate-700 block">{row.dateRaw || row.date}</span>
               </td>
-              <td className="px-4 py-4">
-                <div className="flex flex-col">
-                  <div className="flex items-center gap-1.5">
-                    <div className="w-1.5 h-1.5 rounded-full bg-indigo-500 animate-pulse" />
-                    <span className="text-sm font-black text-slate-800 tracking-tighter">
-                      {row.startTime.split('T')[1]} - {row.endTime.split('T')[1]}
+              <td className="px-4 py-4 border-r border-slate-50/50">
+                <div className="flex flex-col items-center">
+                  <div className="flex items-center justify-center gap-1.5">
+                    <div className="w-1.5 h-1.5 rounded-full bg-[#F27024] animate-pulse" />
+                    <span className="text-sm font-medium text-slate-800 tracking-tighter">
+                      {row.timeRaw || (row.startTime.split('T')[1] + ' - ' + row.endTime.split('T')[1])}
                     </span>
                   </div>
                 </div>
               </td>
-              <td className="px-4 py-4">
-                <div className="flex flex-col">
-                  <span className="text-sm font-black text-indigo-900 tracking-tight">{row.person}</span>
-                  {row.groupName && (
-                    <span className="inline-flex items-center px-2 py-0.5 rounded-md text-[9px] font-black bg-violet-100 text-violet-700 border border-violet-200 w-fit mt-1.5 uppercase tracking-wider shadow-sm">
+              <td className="px-4 py-4 text-center border-r border-slate-50/50">
+                <div className="flex flex-col items-center">
+                  <span className="text-sm font-medium text-slate-900 tracking-tight">{row.personRaw || row.person}</span>
+                  {row.groupName && 
+                   row.groupName.toLowerCase().trim() !== (row.personRaw || row.person).toLowerCase().trim() && (
+                    <span className="inline-flex items-center px-2 py-0.5 rounded-md text-[9px] font-medium bg-slate-100 text-slate-600 border border-slate-200 w-fit mt-1.5 uppercase tracking-wider shadow-sm">
                       {row.groupName}
                     </span>
                   )}
                 </div>
               </td>
-              <td className="px-4 py-4">
-                <div className="flex items-center gap-2">
+              <td className="px-4 py-4 text-center">
+                <div className="flex items-center justify-center gap-2">
                   <div className="w-8 h-8 bg-slate-100 rounded-xl flex items-center justify-center flex-none group-hover:bg-white group-hover:shadow-sm transition-all">
-                    <svg className="w-4 h-4 text-slate-400 group-hover:text-indigo-500 transition-colors" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <svg className="w-4 h-4 text-slate-400 group-hover:text-[#F27024] transition-colors" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M17.657 16.657L13.414 20.9a1.998 1.998 0 01-2.827 0l-4.244-4.243a8 8 0 1111.314 0z" />
                       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M15 11a3 3 0 11-6 0 3 3 0 016 0z" />
                     </svg>
                   </div>
-                  <span className="text-sm font-bold text-slate-500">{row.location}</span>
+                  <span className="text-sm font-medium text-slate-500">{row.locationRaw || row.location}</span>
                 </div>
               </td>
             </tr>

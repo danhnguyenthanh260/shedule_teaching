@@ -37,6 +37,11 @@ export interface RowNormalized {
   // ✅ For grouped events (from flattenRow)
   isGrouped?: boolean; // True if this event is from grouped structure (Data Mẫu/Review)
   reviewers?: string[]; // [reviewer1, reviewer2] for search filtering
+  // ✅ Raw mapped values for preview consistency
+  dateRaw?: string;
+  timeRaw?: string;
+  personRaw?: string;
+  locationRaw?: string;
 }
 
 export interface SyncResult {

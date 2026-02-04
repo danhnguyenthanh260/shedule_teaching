@@ -38,7 +38,7 @@ export const MappingTool: React.FC<MappingToolProps> = ({
           <label className="block text-[10px] font-black text-slate-400 mb-2 ml-1 uppercase tracking-[0.2em]">Chọn dòng tiêu đề (Header)</label>
           <div className="relative group">
             <select
-              className="w-full px-4 py-2.5 bg-white border border-slate-200 rounded-xl focus:ring-2 focus:ring-violet-500 outline-none text-xs font-black text-slate-700 transition-all shadow-sm appearance-none"
+              className="w-full px-4 py-2.5 bg-white border border-slate-200 rounded-xl focus:ring-2 focus:ring-[#F27024] outline-none text-xs font-black text-slate-700 transition-all shadow-sm appearance-none"
               value={headerRowIndex}
               onChange={(e) => onHeaderRowChange(parseInt(e.target.value))}
             >
@@ -46,7 +46,7 @@ export const MappingTool: React.FC<MappingToolProps> = ({
                 <option key={opt.value} value={opt.value}>{opt.label}</option>
               ))}
             </select>
-            <div className="absolute right-3.5 top-3 text-slate-400 pointer-events-none group-focus-within:text-violet-500">
+            <div className="absolute right-3.5 top-3 text-slate-400 pointer-events-none group-focus-within:text-[#F27024]">
                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M19 9l-7 7-7-7" /></svg>
             </div>
           </div>
@@ -55,16 +55,16 @@ export const MappingTool: React.FC<MappingToolProps> = ({
         <button
           onClick={onApply}
           disabled={isLoading}
-          className="w-full lg:w-auto px-8 py-3 bg-gradient-to-br from-indigo-600 to-indigo-800 text-white font-black rounded-xl hover:shadow-indigo-200 hover:shadow-xl active:scale-95 transition-all disabled:opacity-30 flex items-center justify-center gap-3 text-xs uppercase tracking-widest h-[62px]"
+          className="px-6 h-11 bg-slate-700 text-white font-black rounded-xl hover:bg-slate-800 active:scale-95 transition-all shadow-lg shadow-slate-200 flex items-center justify-center gap-2 disabled:bg-slate-100 disabled:text-slate-400 disabled:shadow-none disabled:border-slate-200 border border-transparent text-xs uppercase tracking-tighter"
         >
           {isLoading ? (
-            <div className="w-5 h-5 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+            <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
           ) : (
             <>
               <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M5 13l4 4L19 7" />
               </svg>
-              Áp dụng
+              ÁP DỤNG
             </>
           )}
         </button>
@@ -75,7 +75,7 @@ export const MappingTool: React.FC<MappingToolProps> = ({
         {[
           { key: 'date', label: 'NGÀY', icon: '📅' },
           { key: 'time', label: 'THỜI GIAN', icon: '⏰' },
-          { key: 'task', label: 'TÊN ĐỀ TÀI', icon: '📋' },
+          { key: 'person', label: 'TÊN ĐỀ TÀI', icon: '📋' },
           { key: 'location', label: 'PHÒNG', icon: '📍' },
         ].map((field) => (
           <div key={field.key} className="space-y-2">
@@ -85,7 +85,7 @@ export const MappingTool: React.FC<MappingToolProps> = ({
             </label>
             <div className="relative group">
               <select
-                className="w-full px-3 py-2.5 bg-white border border-slate-200 rounded-xl focus:ring-2 focus:ring-indigo-500 outline-none text-[11px] font-bold text-slate-600 transition-all shadow-sm appearance-none"
+                className="w-full px-3 py-2.5 bg-white border border-slate-200 rounded-xl focus:ring-2 focus:ring-[#F27024] outline-none text-[11px] font-bold text-slate-600 transition-all shadow-sm appearance-none"
                 value={columnMap[field.key as keyof ColumnMapping] ?? ''}
                 onChange={(e) => {
                   const val = e.target.value;
@@ -97,7 +97,7 @@ export const MappingTool: React.FC<MappingToolProps> = ({
                   <option key={h.value} value={h.value}>{h.label}</option>
                 ))}
               </select>
-              <div className="absolute right-3.5 top-3 text-slate-300 pointer-events-none group-focus-within:text-indigo-400">
+              <div className="absolute right-3.5 top-3 text-slate-300 pointer-events-none group-focus-within:text-[#F27024]">
                 <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M19 9l-7 7-7-7" /></svg>
               </div>
             </div>

@@ -34,7 +34,7 @@ export const SheetSelector: React.FC<SheetSelectorProps> = ({
         <div className="md:col-span-5">
           <label className="block text-sm font-semibold text-slate-900 mb-2">Google Sheet URL</label>
           <input
-            className="w-full px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 outline-none transition-all font-medium text-slate-900 placeholder-slate-400"
+            className="w-full px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-lg focus:ring-2 focus:ring-fpt-orange focus:border-fpt-orange outline-none transition-all font-medium text-slate-900 placeholder-slate-400"
             placeholder="https://docs.google.com/spreadsheets/d/..."
             value={sheetUrl}
             onChange={e => setSheetUrl(e.target.value)}
@@ -43,7 +43,7 @@ export const SheetSelector: React.FC<SheetSelectorProps> = ({
         <div className="md:col-span-2">
           <label className="block text-sm font-semibold text-slate-900 mb-2">Tên Tab</label>
           <input
-            className="w-full px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 outline-none transition-all font-medium text-slate-900"
+            className="w-full px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-lg focus:ring-2 focus:ring-fpt-orange focus:border-fpt-orange outline-none transition-all font-medium text-slate-900"
             value={tabName}
             onChange={e => setTabName(e.target.value)}
           />
@@ -51,7 +51,7 @@ export const SheetSelector: React.FC<SheetSelectorProps> = ({
         <div className="md:col-span-3">
           <label className="block text-sm font-semibold text-slate-900 mb-2">Lọc theo GVHD</label>
           <input
-            className="w-full px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 outline-none transition-all font-medium text-slate-900 placeholder-slate-400"
+            className="w-full px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-lg focus:ring-2 focus:ring-fpt-orange focus:border-fpt-orange outline-none transition-all font-medium text-slate-900 placeholder-slate-400"
             value={personFilter}
             onChange={e => setPersonFilter(e.target.value)}
             placeholder="Nhập tên GVHD"
@@ -61,7 +61,7 @@ export const SheetSelector: React.FC<SheetSelectorProps> = ({
           <button
             onClick={onLoadTest1}
             disabled={loadingMode !== null}
-            className="flex-1 h-10.5 flex items-center justify-center bg-blue-600 hover:bg-blue-700 text-white font-semibold rounded-lg shadow-md hover:shadow-lg transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed active:scale-95 text-sm"
+            className="flex-1 h-10.5 flex items-center justify-center bg-fpt-orange hover:bg-orange-600 text-white font-bold rounded-lg shadow-md hover:shadow-lg transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed active:scale-95 text-sm uppercase tracking-tighter"
             title="Cấu trúc phẳng: Header dòng 1, range A1:BE"
           >
             {loadingMode === 'test1' ? (
@@ -75,7 +75,7 @@ export const SheetSelector: React.FC<SheetSelectorProps> = ({
           <button
             onClick={onLoadReview}
             disabled={loadingMode !== null}
-            className="flex-1 h-10.5 flex items-center justify-center bg-purple-600 hover:bg-purple-700 text-white font-semibold rounded-lg shadow-md hover:shadow-lg transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed active:scale-95 text-sm"
+            className="flex-1 h-10.5 flex items-center justify-center bg-slate-700 hover:bg-slate-800 text-white font-bold rounded-lg shadow-md hover:shadow-lg transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed active:scale-95 text-sm uppercase tracking-tighter"
             title="Cấu trúc phức tạp: Header dòng 3, range J1:BE"
           >
             {loadingMode === 'review' ? (

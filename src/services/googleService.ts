@@ -22,46 +22,25 @@ function isLikelyPersonName(val: string): boolean {
 
 function parseVNTime(dateStr: string, timeStr: string): { start: string; end: string } {
   try {
-    // Xử lý ngày: hỗ trợ DD/MM/YYYY, DD-MM-YYYY, YYYY-MM-DD
-    let date = dateStr.trim();
-    if (date.includes('/')) {
-      const parts = date.split('/');
-      if (parts[0].length === 4) date = parts.join('-'); // YYYY/MM/DD
-      else date = `${parts[2]}-${parts[1].padStart(2, '0')}-${parts[0].padStart(2, '0')}`; // DD/MM/YYYY
-    } else if (date.includes('-') && date.split('-')[0].length < 4) {
-      const parts = date.split('-');
-      date = `${parts[2]}-${parts[1].padStart(2, '0')}-${parts[0].padStart(2, '0')}`;
-    }
-
-    // Kiểm tra định dạng YYYY-MM-DD
-    if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) {
-      date = new Date().toISOString().split('T')[0]; // Fallback to today
-    }
+    const parsedDate = parseDateTime(dateStr);
+    const parsedTime = parseDateTime(timeStr);
     
-    const timeParts = timeStr.split(/[-–—/]/);
-    let startPart = (timeParts[0] || '').trim().replace('h', ':').replace('H', ':');
-    let endPart = (timeParts[1] || '').trim().replace('h', ':').replace('H', ':');
+    // Fallback if basic parsing fails
+    const today = new Date().toISOString().split('T')[0];
+    const datePart = parsedDate.dateString || today;
+    
+    let startTime = "08:00";
+    let endTime = "09:00";
 
-    // Chỉnh sửa định dạng HH:mm
-    const fixTime = (t: string) => {
-      if (!t) return "00:00";
-      if (t.includes(':')) {
-        const [h, m] = t.split(':');
-        return `${h.padStart(2, '0')}:${(m || '00').padEnd(2, '0')}`;
-      }
-      if (/^\d+$/.test(t)) return `${t.padStart(2, '0')}:00`;
-      return "00:00";
-    };
-
-    const start = `${date}T${fixTime(startPart)}`;
-    let end = '';
-    if (endPart) {
-      end = `${date}T${fixTime(endPart)}`;
-    } else {
-      const h = parseInt(fixTime(startPart).split(':')[0]);
-      end = `${date}T${(h + 1).toString().padStart(2, '0')}:00`;
+    if (parsedTime.timeSlot) {
+      startTime = parsedTime.timeSlot.startTime;
+      endTime = parsedTime.timeSlot.endTime;
     }
-    return { start, end };
+
+    return { 
+      start: `${datePart}T${startTime}`, 
+      end: `${datePart}T${endTime}` 
+    };
   } catch (e) {
     const today = new Date().toISOString().split('T')[0];
     return { start: `${today}T08:00`, end: `${today}T09:00` };
@@ -78,12 +57,12 @@ function inferSchema(headers: string[], sampleRows: string[][]): InferredSchema 
     if (head === "ngày" || head === "date" || (head.includes("ngày") && !head.includes("ký"))) mapping.date = i;
     // Ưu tiên Giờ
     else if (head === "giờ" || head === "time" || head.includes("slot") || head.includes("tiết")) mapping.time = i;
-    // Ưu tiên GVHD/Người thực hiện
-    else if (head.includes("người") || head.includes("gvhd") || head.includes("giảng viên") || head.includes("reviewer")) {
+    // Ưu tiên GVHD/Người thực hiện/Hội đồng
+    else if (head.includes("người") || head.includes("gvhd") || head.includes("giảng viên") || head.includes("reviewer") || head.includes("họ và tên") || head.includes("thành viên")) {
       if (!mapping.person) mapping.person = i;
     }
     // Ưu tiên Tên đề tài/Nhiệm vụ
-    else if (head.includes("tên đề tài") || head.includes("nhiệm vụ") || head.includes("topic") || head.includes("project")) {
+    else if (head.includes("tên đề tài") || head.includes("nhiệm vụ") || head.includes("topic") || head.includes("project") || head.includes("đề tài")) {
        if (!mapping.task) mapping.task = i;
     }
     // Ưu tiên Phòng
@@ -136,11 +115,11 @@ export class GoogleSyncService {
   } {
     const rows = values.slice(0, 5).map(r => r.join("").toLowerCase());
     
-    let isTest1 = rows.some(r => r.includes("ngành") && r.includes("mã đề tài"));
-    let isReview = rows.some(r => r.includes("review") || r.includes("hội đồng"));
+    let isTest1 = rows.some(r => (r.includes("ngành") && r.includes("mã đề tài")) || r.includes("hội đồng"));
+    let isReview = rows.some(r => r.includes("review") || r.includes("hội đồng") || r.includes("người đánh giá"));
 
-    if (isTest1) return { headerRowIndex: 0, isDataMau: false, confidence: 100, formatName: 'test1' };
-    if (isReview) return { headerRowIndex: 2, isDataMau: true, confidence: 100, formatName: 'Review' };
+    if (isReview) return { headerRowIndex: 1, isDataMau: true, confidence: 100, formatName: 'Review' };
+    if (isTest1) return { headerRowIndex: 0, isDataMau: false, confidence: 90, formatName: 'test1' };
     
     return { headerRowIndex: 0, isDataMau: false, confidence: 50, formatName: 'Mặc định' };
   }
@@ -200,26 +179,48 @@ export class GoogleSyncService {
     headerRowIndex: number;
   }): RowNormalized[] {
     const { sheetId, tab, mapping, rawRows, headerRowIndex } = params;
+    // Bắt đầu từ dòng tiếp theo của header đã chọn
     const dataRows = rawRows.slice(headerRowIndex + 1);
+    
+    console.log(`[GoogleService] normalizeRows: processing ${dataRows.length} rows, headerRowIndex: ${headerRowIndex}`);
 
     return dataRows.map((row, idx) => {
-      const date = (row[mapping.date!] || "").toString().trim();
-      const time = (row[mapping.time!] || "").toString().trim();
-      if (!date || !time) return null;
+      // Bỏ qua dòng nếu trông giống header (chứa các từ khóa tiêu đề)
+      const joinedRow = row.join(" ").toLowerCase();
+      if (joinedRow.includes("ngày") || joinedRow.includes("thời gian") || joinedRow.includes("phòng")) {
+        return null;
+      }
+
+      const date = (mapping.date !== undefined ? (row[mapping.date] || "") : "").toString().trim();
+      const time = (mapping.time !== undefined ? (row[mapping.time] || "") : "").toString().trim();
+      
+      // Chỉ bỏ qua nếu thiếu cả ngày và giờ
+      if (!date && !time) return null;
 
       const { start, end } = parseVNTime(date, time);
-      const person = (row[mapping.person!] || "").toString().trim();
-      if (!isLikelyPersonName(person)) return null;
+      let person = (mapping.person !== undefined ? (row[mapping.person] || "") : "").toString().trim();
+      
+      // Cố gắng lấy person từ các cột lân cận nếu cột mapping đang trống
+      if (!person || !isLikelyPersonName(person)) {
+        // Thử lấy task name làm person
+        const taskVal = (mapping.task !== undefined ? row[mapping.task] : "");
+        person = (taskVal || person || "Cán bộ/GV").toString().trim();
+      }
 
       return {
         id: generateRowId(sheetId, tab, idx + headerRowIndex + 1),
-        date,
+        date: date || "Chưa rõ",
         startTime: start,
         endTime: end,
-        person,
-        task: (row[mapping.task!] || "Nhiệm vụ").toString().trim(),
-        location: (row[mapping.location!] || "Chưa xác định").toString().trim(),
-        status: 'pending'
+        person: person,
+        task: (mapping.task !== undefined ? (row[mapping.task] || "Nhiệm vụ") : "Nhiệm vụ").toString().trim(),
+        location: (mapping.location !== undefined ? (row[mapping.location] || "Chưa xác định") : "Chưa xác định").toString().trim(),
+        dateRaw: date,
+        timeRaw: time,
+        personRaw: (mapping.person !== undefined ? row[mapping.person] : "").toString().trim(),
+        locationRaw: (mapping.location !== undefined ? row[mapping.location] : "").toString().trim(),
+        status: 'pending',
+        rawRow: row
       };
     }).filter(r => r !== null) as RowNormalized[];
   }
@@ -237,75 +238,98 @@ export class GoogleSyncService {
     const allEvents: RowNormalized[] = [];
     const dataRows = rawRows.slice(headerRowIndex + 1);
 
+    console.log(`[GoogleService] normalizeRowsWithGrouping: processing ${dataRows.length} rows`);
+
     let lastDate = "";
     let lastTime = "";
     let lastLocation = "";
 
     dataRows.forEach((row, rowIndex) => {
-      const currentDate = (row[mapping.date!] || "").toString().trim();
-      const currentTime = (row[mapping.time!] || "").toString().trim();
-      const currentLocation = (row[mapping.location!] || "").toString().trim();
+      // Skip rows that look like headers
+      const joinedRow = row.join(" ").toLowerCase();
+      if (joinedRow.includes("ngày") || joinedRow.includes("giờ") || joinedRow.includes("phòng")) return;
+
+      const currentDate = (mapping.date !== undefined ? (row[mapping.date] || "") : "").toString().trim();
+      const currentTime = (mapping.time !== undefined ? (row[mapping.time] || "") : "").toString().trim();
+      const currentLocation = (mapping.location !== undefined ? (row[mapping.location] || "") : "").toString().trim();
 
       if (currentDate) lastDate = currentDate;
       if (currentTime) lastTime = currentTime;
       if (currentLocation) lastLocation = currentLocation;
 
-      if (!lastDate || !lastTime) return;
+      // Không có date/time thì không xử lý dòng này
+      if (!lastDate && !lastTime) return;
 
       const { start, end } = parseVNTime(lastDate, lastTime);
-      const baseTask = (row[mapping.task!] || "Review").toString().trim();
+      const baseTask = (mapping.task !== undefined ? (row[mapping.task] || "Review") : "Review").toString().trim();
 
       const groups = new Map<string, number[]>();
-      if (groupHeaders) {
-        groupHeaders.forEach((gName, colIdx) => {
-          const name = gName.trim();
-          const detail = (detailHeaders[colIdx] || "").toLowerCase();
-          
-          // Chỉ lấy các cột trong nhóm Review/Hội đồng
-          if (name.toLowerCase().includes('review') || name.toLowerCase().includes('hội đồng')) {
-            // Loại bỏ các cột thông tin phụ như code, id, count, email
-            if (!detail.includes('code') && !detail.includes('mã') && !detail.includes('id') && 
-                !detail.includes('count') && !detail.includes('stt') && !detail.includes('số')) {
-              if (!groups.has(name)) groups.set(name, []);
-              groups.get(name)!.push(colIdx);
+      if (groupHeaders && mapping.person !== undefined) {
+        const targetGroupLabel = (groupHeaders[mapping.person] || "").trim();
+        
+        if (targetGroupLabel) {
+          groupHeaders.forEach((gName, colIdx) => {
+            const name = (gName || "").trim();
+            if (name === targetGroupLabel) {
+              const detail = (detailHeaders[colIdx] || "").toLowerCase();
+              
+              const isInfoCol = detail.includes('code') || detail.includes('mã') || detail.includes('id') || 
+                              detail.includes('count') || detail.includes('stt') || detail.includes('số') ||
+                              detail.includes('email');
+              
+              if (!isInfoCol) {
+                if (!groups.has(name)) groups.set(name, []);
+                groups.get(name)!.push(colIdx);
+              }
             }
-          }
-        });
+          });
+        }
       }
 
       if (groups.size > 0) {
         groups.forEach((colIndices, gName) => {
           colIndices.forEach((colIdx) => {
-            const person = (row[colIdx] || "").toString().trim();
-            if (isLikelyPersonName(person)) {
-              allEvents.push({
-                id: `${sheetId}-${tab}-${rowIndex}-${colIdx}`,
-                groupName: gName,
-                person,
-                date: lastDate,
-                startTime: start,
-                endTime: end,
-                task: baseTask,
-                location: lastLocation || "Chưa xác định",
-                status: 'pending'
-              });
-            }
+            // ƯU TIÊN: Nếu người dùng đã mapping cột person cụ thể, hãy lấy giá trị từ đó
+            const mappedPerson = (mapping.person !== undefined ? (row[mapping.person] || "") : "").toString().trim();
+            const personValue = mappedPerson || (row[colIdx] || "").toString().trim();
+            
+            // CHẤP NHẬN dữ liệu kể cả khi personValue không giống tên người (để hiển thị thô)
+            allEvents.push({
+              id: `${sheetId}-${tab}-${rowIndex}-${colIdx}`,
+              groupName: gName,
+              person: personValue || (baseTask || gName),
+              date: lastDate || "Chưa rõ",
+              startTime: start,
+              endTime: end,
+              task: baseTask,
+              location: lastLocation || "Chưa xác định",
+              dateRaw: lastDate,
+              timeRaw: lastTime,
+              personRaw: personValue,
+              locationRaw: lastLocation,
+              status: 'pending',
+              rawRow: row
+            });
           });
         });
       } else {
-        const person = (row[mapping.person!] || "").toString().trim();
-        if (isLikelyPersonName(person)) {
-          allEvents.push({
-            id: `${sheetId}-${tab}-${rowIndex}`,
-            person,
-            date: lastDate,
-            startTime: start,
-            endTime: end,
-            task: baseTask,
-            location: lastLocation || "Chưa xác định",
-            status: 'pending'
-          });
-        }
+        // Fallback về 1 dòng = 1 event
+        const person = (mapping.person !== undefined ? (row[mapping.person] || "") : "").toString().trim();
+        allEvents.push({
+          id: `${sheetId}-${tab}-${rowIndex}`,
+          person: person || (baseTask || "Chưa rõ"),
+          date: lastDate || "Chưa rõ",
+          startTime: start,
+          endTime: end,
+          task: baseTask,
+          location: lastLocation || "Chưa xác định",
+          dateRaw: lastDate,
+          timeRaw: lastTime,
+          personRaw: person || (baseTask || "Chưa rõ"),
+          locationRaw: lastLocation,
+          status: 'pending',
+          rawRow: row
+        });
       }
     });
 

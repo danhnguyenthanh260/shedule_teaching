@@ -40,7 +40,7 @@ const SyncHistoryModal: React.FC<Props> = ({ isOpen, onClose, userId, refreshTri
         <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-50 p-4">
             <div className="bg-white rounded-2xl shadow-2xl w-full max-w-4xl max-h-[80vh] flex flex-col animate-in fade-in zoom-in-95 duration-200">
                 {/* Header */}
-                <div className="px-6 py-4 border-b border-slate-200 flex items-center justify-between bg-gradient-to-r from-indigo-50 to-transparent">
+                <div className="px-6 py-4 border-b border-slate-200 flex items-center justify-between bg-gradient-to-r from-orange-50 to-transparent">
                     <div>
                         <h2 className="text-xl font-bold text-slate-900">📜 Lịch sử Import</h2>
                         <p className="text-xs text-slate-500 mt-1 font-medium">
@@ -62,7 +62,7 @@ const SyncHistoryModal: React.FC<Props> = ({ isOpen, onClose, userId, refreshTri
                 <div className="flex-1 overflow-y-auto p-6">
                     {loading && (
                         <div className="flex flex-col items-center justify-center py-12">
-                            <div className="w-12 h-12 border-4 border-indigo-200 border-t-indigo-600 rounded-full animate-spin"></div>
+                            <div className="w-12 h-12 border-4 border-orange-100 border-t-[#F27024] rounded-full animate-spin"></div>
                             <p className="text-sm text-slate-500 mt-4 font-medium">Đang tải lịch sử...</p>
                         </div>
                     )}
@@ -86,13 +86,13 @@ const SyncHistoryModal: React.FC<Props> = ({ isOpen, onClose, userId, refreshTri
                             {history.map((record) => (
                                 <div
                                     key={record.id}
-                                    className="border border-slate-200 rounded-xl p-4 hover:border-indigo-300 hover:shadow-md transition-all duration-200 bg-gradient-to-r from-white to-slate-50"
+                                    className="border border-slate-200 rounded-xl p-4 hover:border-orange-300 hover:shadow-md transition-all duration-200 bg-white"
                                 >
                                     <div className="flex items-start justify-between">
                                         <div className="flex-1">
                                             <div className="flex items-center gap-3 mb-2">
                                                 <h3 className="font-bold text-slate-900">{record.tabName}</h3>
-                                                <span className="px-2 py-1 bg-indigo-100 text-indigo-700 text-xs font-semibold rounded-full">
+                                                <span className="px-2 py-1 bg-orange-100 text-[#F27024] text-xs font-bold rounded-full">
                                                     {record.rowCount} sự kiện
                                                 </span>
                                             </div>

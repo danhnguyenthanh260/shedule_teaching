@@ -25,8 +25,12 @@ export const looksLikeHeaderRow = (row: string[]) => {
 export const mergeHeaderRows = (primary: string[], secondary: string[]) => {
   const maxLen = Math.max(primary.length, secondary.length);
   return Array.from({ length: maxLen }, (_, i) => {
-    const a = primary[i]?.trim() || '';
-    const b = secondary[i]?.trim() || '';
+    const a = (primary[i] || '').trim();
+    const b = (secondary[i] || '').trim();
+    
+    // Nếu b trông giống dữ liệu (ngày, giờ...), đừng gộp nó vào header
+    if (b && looksLikeDataRow([b])) return a;
+    
     if (a && b && a !== b) return `${a} ${b}`;
     return a || b;
   });

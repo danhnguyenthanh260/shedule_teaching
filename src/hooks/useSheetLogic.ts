@@ -7,7 +7,8 @@ import { logInfo, logSuccess, logWarning, logError } from '../utils/logger';
 import { RowNormalized, SyncResult, ColumnMapping } from '../types';
 import { 
   mergeHeaderRows, 
-  fillForwardHeaders 
+  fillForwardHeaders,
+  looksLikeDataRow
 } from '../utils/sheetUtils';
 
 interface UseSheetLogicProps {
@@ -74,44 +75,89 @@ export const useSheetLogic = ({
     setTimeout(() => setToastMessage(null), 3000);
   }, []);
 
+
+
+  const khongDau = (str: any) => {
+    if (!str) return "";
+    return str
+      .toString()
+      .normalize('NFD') // Tách dấu ra khỏi chữ cái
+      .replace(/[\u0300-\u036f]/g, '') // Xóa các dấu vừa tách
+      .replace(/đ/g, 'd')
+      .replace(/Đ/g, 'D')
+      .toLowerCase()
+      .trim();
+  };
+
+  const examinerColumnIndices = useMemo(() => {
+    const keywords = ['ho va ten', 'thanh vien hoi dong', 'reviewer', 'chu tich', 'thu ky', 'uy vien'];
+    return fullHeaders.reduce((acc, header, index) => {
+      const h = khongDau(header);
+      if (keywords.some(k => h.includes(k))) {
+        acc.push(index);
+      }
+      return acc;
+    }, [] as number[]);
+  }, [fullHeaders]);
+
   const updateSelections = useCallback((data: RowNormalized[], filterValue?: string) => {
-    const filterLower = (filterValue !== undefined ? filterValue : personFilter).toLowerCase();
-    if (!filterLower || filterLower === '') {
+    const fValue = filterValue !== undefined ? filterValue : personFilter;
+    const rawFilter = (fValue || '').trim();
+    
+    if (!rawFilter) {
       setSelectedIds(new Set(data.map(r => r.id)));
       return;
     }
-    const matches = data.filter(r =>
-      r.person.toLowerCase().includes(filterLower) ||
-      (r.groupName && r.groupName.toLowerCase().includes(filterLower))
-    );
+
+    const filters = rawFilter.split(',').map(f => khongDau(f)).filter(Boolean);
+    const matches = data.filter(row => {
+      // CHỈ lọc trên các cột chấm thi
+      const searchValues = examinerColumnIndices.map(idx => row.rawRow[idx] || "");
+      const searchSpace = [
+        ...searchValues,
+        row.person,
+        row.groupName
+      ].map(v => khongDau(v)).join(' ');
+      
+      return filters.some(f => searchSpace.includes(f));
+    });
+    
     setSelectedIds(new Set(matches.map(m => m.id)));
-  }, [personFilter, setSelectedIds]);
+  }, [personFilter, setSelectedIds, examinerColumnIndices]);
 
   const applyHeaderRow = useCallback((idx: number, rowsData: string[][], meta?: { sheetId: string; tab: string }) => {
     if (!rowsData || rowsData.length === 0) return;
     setHeaderRowIndex(idx);
 
     const titleR = rowsData[0] || [];
-    const primaryHeaders = rowsData[idx - 1] || [];
+    const primaryHeaders = idx > 0 ? rowsData[idx - 1] : [];
     const secondaryHeaders = rowsData[idx] || [];
 
-    const merged = mergeHeaderRows(primaryHeaders, secondaryHeaders);
+    // Logic: Nếu chọn Row 1 (idx=0), thì chỉ dùng Row 1 làm header, không merge.
+    // Nếu chọn Row 2 (idx=1), merge Row 1 và Row 2.
+    const merged = idx > 0 ? mergeHeaderRows(primaryHeaders, secondaryHeaders) : secondaryHeaders;
     const filled = fillForwardHeaders(merged);
 
     setTitleRow(titleR);
     setFullHeaders(filled);
     setFullDetailHeaders(secondaryHeaders);
     setFullRows(rowsData.slice(idx + 1));
-    
+
     if (meta) {
       setSheetMeta({ ...meta, headerRowIndex: idx });
     }
+    setResult(null);
+    setError(null);
   }, [setHeaderRowIndex, setTitleRow, setFullHeaders, setFullDetailHeaders, setFullRows, setSheetMeta]);
 
-  const applyMapping = useCallback((mapping: ColumnMapping, isDataMau: boolean) => {
-    if (!allRows || allRows.length === 0) return;
+  const applyMapping = useCallback((mapping: ColumnMapping, isDataMau: boolean, overriddenRows?: string[][]) => {
+    const rowsToUse = overriddenRows || allRows;
+    if (!rowsToUse || rowsToUse.length === 0) return;
 
     setLoading(true);
+    setResult(null);
+    setError(null);
+    setRows([]); // Clear old rows to show update
     try {
       let normalized: RowNormalized[] = [];
       if (isDataMau) {
@@ -120,7 +166,7 @@ export const useSheetLogic = ({
           tab: tabName,
           groupHeaders: fullHeaders,
           detailHeaders: fullDetailHeaders,
-          rawRows: allRows.slice(headerRowIndex + 1),
+          rawRows: rowsToUse,
           mapping,
           headerRowIndex
         });
@@ -129,14 +175,18 @@ export const useSheetLogic = ({
           sheetId: sheetMeta?.sheetId || '',
           tab: tabName,
           headers: fullHeaders,
-          rawRows: allRows.slice(headerRowIndex + 1),
+          rawRows: rowsToUse,
           mapping,
           headerRowIndex
         });
       }
       setRows(normalized);
       updateSelections(normalized);
-      showToast(`✓ Đã áp dụng mapping (${normalized.length} mục)`);
+      if (normalized.length > 0) {
+        showToast(`✓ Đã áp dụng mapping (${normalized.length} mục)`);
+      } else {
+        logWarning("Không tìm thấy dữ liệu sau khi mapping");
+      }
     } catch (err: any) {
       setError(err.message);
     } finally {
@@ -195,15 +245,37 @@ export const useSheetLogic = ({
   }, [firebaseAccessToken, firebaseUser, selectedIds, rows, showToast, sheetMeta]);
 
   const headerOptions = useMemo(() => {
-    return fullHeaders.map((h, i) => ({
-      label: h || `Column ${i + 1}`,
-      value: i
-    }));
-  }, [fullHeaders]);
+    const primary = headerRowIndex > 0 ? allRows[headerRowIndex - 1] : [];
+    const options: { label: string; value: number }[] = [];
+    const seen = new Set<string>();
+
+    fullHeaders.forEach((h, i) => {
+      let label = (h || "").trim();
+      if (!label || label.startsWith('Column_')) return;
+
+      // Logic "Tiêu đề lặp lại -> Hiện 1 lần":
+      // Nếu là tiêu đề gộp kiểu "Hội đồng", ta ưu tiên lấy nhãn gốc từ hàng Primary
+      const p = (primary[i] || "").trim();
+      const isGroup = p && (
+        (i > 0 && (primary[i-1] || "").trim() === p) || 
+        (i < primary.length - 1 && (primary[i+1] || "").trim() === p)
+      );
+
+      const finalLabel = isGroup ? p : label;
+
+      // CHẶN: Không cho phép dữ liệu lọt vào dropdown (vd: "1/25/2026")
+      if (!seen.has(finalLabel) && !looksLikeDataRow([finalLabel])) {
+        seen.add(finalLabel);
+        options.push({ label: finalLabel, value: i });
+      }
+    });
+
+    return options.length > 0 ? options : [{ label: '-- Chọn cột --', value: -1 }];
+  }, [fullHeaders, allRows, headerRowIndex]);
 
   const headerRowOptions = useMemo(() => {
-    const startIndex = 1;
-    const limit = Math.min(5, allRows.length);
+    const startIndex = 0; // Bắt đầu từ Row 1
+    const limit = Math.min(6, allRows.length);
     const options = [];
     for (let i = startIndex; i < limit; i++) {
       const preview = (allRows[i] || []).filter(Boolean).slice(0, 4).join(' | ');
@@ -216,29 +288,26 @@ export const useSheetLogic = ({
     return options;
   }, [allRows]);
 
-  const khongDau = (str: string) => {
-    return str
-      .normalize('NFD')
-      .replace(/[\u0300-\u036f]/g, '')
-      .replace(/đ/g, 'd')
-      .replace(/Đ/g, 'D')
-      .toLowerCase()
-      .trim();
-  };
-
   const filteredRows = useMemo(() => {
-    if (!personFilter || personFilter.trim() === '') return rows;
+    const rawFilter = (personFilter || '').trim();
+    if (!rawFilter) return rows;
     
-    // Hỗ trợ tìm nhiều người cách nhau bằng dấu phẩy
-    const filters = personFilter.split(',').map(f => khongDau(f)).filter(Boolean);
+    const filters = rawFilter.split(',').map(f => khongDau(f)).filter(Boolean);
     
     return rows.filter(row => {
-      const personND = khongDau(row.person);
-      const groupND = row.groupName ? khongDau(row.groupName) : '';
+      // CHỈ lọc trên các cột chấm thi
+      const searchValues = examinerColumnIndices.map(idx => row.rawRow[idx] || "");
+      const searchSpace = [
+        ...searchValues,
+        row.person,
+        row.groupName
+      ].map(v => khongDau(v)).join(' ');
       
-      return filters.some(f => personND.includes(f) || groupND.includes(f));
+      return filters.some(f => searchSpace.includes(f));
     });
-  }, [rows, personFilter]);
+  }, [rows, personFilter, examinerColumnIndices]);
+
+
 
   return {
     loading, setLoading,

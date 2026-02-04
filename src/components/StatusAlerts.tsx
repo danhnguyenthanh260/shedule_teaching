@@ -36,7 +36,7 @@ export const StatusAlerts: React.FC<StatusAlertsProps> = ({ error, result, onClo
             <div>
               <h4 className="font-black text-emerald-900 text-sm uppercase tracking-tight">✓ Đồng bộ hoàn tất!</h4>
               <p className="text-emerald-700 text-[10px] font-bold mt-0.5 uppercase tracking-wider opacity-60">
-                Thêm: {result.created} | Lỗi: {result.failed}
+                Thêm: {result.created} | Bỏ qua: {result.skipped} | Lỗi: {result.failed}
               </p>
             </div>
           </div>

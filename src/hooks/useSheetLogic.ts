@@ -2,6 +2,7 @@
 import { useState, useMemo, useCallback, useEffect } from 'react';
 import { googleService } from '../services/googleService';
 import { syncEventsToCalendar } from '../services/appsScriptService';
+import { syncToGoogleCalendarAPI } from '../services/calendarApiService';
 import { firestoreSyncHistoryService } from '../services/firestoreSyncHistoryService';
 import { logInfo, logSuccess, logWarning, logError } from '../utils/logger';
 import { RowNormalized, SyncResult, ColumnMapping } from '../types';
@@ -207,18 +208,26 @@ export const useSheetLogic = ({
     try {
       const rowsToSync = rows.filter(r => selectedIds.has(r.id));
       const events = rowsToSync.map(r => ({
-        title: r.groupName ? `[${r.groupName}] ${r.person}` : r.person,
-        start: r.startTime,
-        end: r.endTime,
+        title: r.person, // Lấy trực tiếp thông tin người dùng chọn làm tiêu đề
+        start: r.startTime.includes('+') ? r.startTime : `${r.startTime}+07:00`,
+        end: r.endTime.includes('+') ? r.endTime : `${r.endTime}+07:00`,
         location: r.location || '',
-        description: `Đồng bộ từ Google Sheet\nGVHD: ${r.person}\nPhòng: ${r.location}\nNhóm: ${r.groupName || 'N/A'}`
+        description: `Đồng bộ từ FPT Scheduler\nNội dung: ${r.person}\nPhòng: ${r.location}`
       }));
 
-      const res = await syncEventsToCalendar(events, undefined);
+      // ✅ NEW: Direct Google API sync (Always goes to user's primary calendar)
+      const res: any = await syncToGoogleCalendarAPI(events, firebaseAccessToken!);
+      
+      // Flexible result parsing (handle different possible GAS response structures)
+      const successCount = res.data?.success ?? res.success ?? 0;
+      const failedCount = res.data?.failed ?? res.failed ?? 0;
+      const skippedCount = res.data?.skipped ?? res.skipped ?? 0;
+
       const syncRes: SyncResult = {
-        created: res.data?.success || 0,
+        created: successCount,
         updated: 0,
-        failed: res.data?.failed || 0,
+        failed: failedCount,
+        skipped: skippedCount,
         logs: [res.message]
       };
 

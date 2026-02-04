@@ -38,8 +38,8 @@ function parseVNTime(dateStr: string, timeStr: string): { start: string; end: st
     }
 
     return { 
-      start: `${datePart}T${startTime}`, 
-      end: `${datePart}T${endTime}` 
+      start: `${datePart}T${startTime}:00+07:00`, 
+      end: `${datePart}T${endTime}:00+07:00` 
     };
   } catch (e) {
     const today = new Date().toISOString().split('T')[0];

@@ -48,7 +48,8 @@ export function getGoogleAuthUrl(): string {
  * Get calendar name from environment or default
  */
 export function getCalendarName(): string {
-  return import.meta.env.VITE_CALENDAR_NAME || 'Schedule Teaching';
+  // Mặc định nạp vào lịch chính của người dùng
+  return import.meta.env.VITE_CALENDAR_NAME || 'primary';
 }
 
 /**

@@ -32,6 +32,7 @@ export interface SyncResponse {
     total: number;
     success: number;
     failed: number;
+    skipped: number;
     errors?: Array<{
       index: number;
       title: string;

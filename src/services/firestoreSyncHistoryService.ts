@@ -1,5 +1,5 @@
 import { collection, query, where, orderBy, limit, getDocs, addDoc } from 'firebase/firestore';
-import { db } from '../src/config/firebase';
+import { db } from '../config/firebase';
 
 export interface SyncHistoryRecord {
     id: string;

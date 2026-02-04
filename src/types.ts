@@ -28,9 +28,10 @@ export interface RowNormalized {
   endTime: string; // ISO string
   person: string;
   email?: string;
-  task: string;
+  task?: string;
   location?: string;
-  raw: Record<string, string>; // Lưu data gốc để làm description
+  raw?: Record<string, string>; // Lưu data gốc để làm description
+  rawRow?: any[]; // ✅ NEW: Lưu data gốc dạng array (string[])
   status?: 'pending' | 'synced' | 'failed';
   error?: string;
   // ✅ For grouped events (from flattenRow)

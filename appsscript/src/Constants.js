@@ -1,20 +1,17 @@
 const CONSTANTS = {
-  // Calendar settings
   CALENDAR_NAME: 'Schedule Teaching',
   TIMEZONE: 'Asia/Ho_Chi_Minh',
-
-  // Response codes
+  FIREBASE_URL: 'https://scheduleteaching-default-rtdb.asia-southeast1.firebasedatabase.app/',
+  FIREBASE_WEB_API_KEY: 'AIzaSyDRwHY6mgdHKjkanLJk8BFpOQSeV5sqvaY',
+  ADMIN_EMAILS: [
+    'duongkien.090905@gmail.com',
+    'ngohoangtruongdat2@gmail.com'
+  ],
   SUCCESS: 'success',
   ERROR: 'error',
-  PENDING: 'pending',
-
-  // Error messages
   ERRORS: {
-    INVALID_PAYLOAD: 'Invalid request payload',
-    MISSING_EVENTS: 'Events array is required',
-    MISSING_CALENDAR: 'Calendar name is required',
-    CALENDAR_NOT_FOUND: 'Calendar not found',
-    INVALID_DATE: 'Invalid date format',
-    INTERNAL_ERROR: 'Internal server error'
+    INVALID_PAYLOAD: 'Dữ liệu yêu cầu không hợp lệ',
+    MISSING_EVENTS: 'Danh sách sự kiện không được để trống',
+    INVALID_DATE: 'Định dạng ngày tháng không hợp lệ'
   }
 };

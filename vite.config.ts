@@ -9,24 +9,28 @@ export default defineConfig(({ mode }) => {
       port: 3000,
       host: '0.0.0.0',
       proxy: {
-        '/api/appscript': {
+        '/api': {
           target: 'https://script.google.com',
           changeOrigin: true,
           followRedirects: true,
           rewrite: (path) => {
-            const backendUrl = env.VITE_BACKEND_URL;
-            if (!backendUrl) return path;
+            const url = env.GAS_EXEC_URL || env.VITE_BACKEND_URL;
+            if (!url) return path;
+            
             try {
-              const urlObj = new URL(backendUrl);
-              return path.replace(/^\/api\/appscript/, urlObj.pathname + urlObj.search);
+              const urlObj = new URL(url);
+              // Lấy phần /macros/s/XXX/exec
+              const targetBase = urlObj.pathname;
+              // Thay thế /api/readSheet bằng /macros/s/XXX/exec
+              // Giữ nguyên phần query string (?action=...)
+              return path.replace(/^\/api\/[a-zA-Z0-9_-]+/, targetBase);
             } catch (e) {
-              console.error('Invalid VITE_BACKEND_URL:', backendUrl);
               return path;
             }
           },
           secure: true,
-        }
-      }
+        },
+      },
     },
     plugins: [react()],
     define: {

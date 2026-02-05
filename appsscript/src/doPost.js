@@ -1,30 +1,6 @@
 /**
  * HTTP POST handler
- * Nhận request từ React frontend
- *
- * Expected payload:
- * {
- *   "calendarName": "Schedule Teaching",
- *   "events": [
- *     {
- *       "title": "Họp lớp",
- *       "start": "2024-02-01T09:00:00",
- *       "end": "2024-02-01T11:00:00",
- *       "location": "P.401"
- *     }
- *   ]
- * }
- */
-/**
- * HTTP POST handler
- * Nhận request từ React frontend
- *
- * Expected payload:
- * {
- *   "idToken": "FIREBASE_ID_TOKEN",
- *   "calendarName": "Schedule Teaching", // Optional
- *   "events": [ ... ]
- * }
+ * Nhận request thông qua Vercel Proxy
  */
 function doPost(e) {
   const startTime = new Date();
@@ -37,7 +13,7 @@ function doPost(e) {
   };
 
   try {
-    AppLogger.info('=== POST Request Received ===');
+    AppLogger.info('=== POST Request Received (Proxy) ===');
     
     // Parse request body
     let payload;
@@ -47,7 +23,7 @@ function doPost(e) {
     } catch (parseError) {
       AppLogger.error('JSON parse error', parseError);
       response.message = 'Invalid JSON in request body';
-      return buildHttpResponse(response, 400);
+      return buildResponse(response);
     }
 
     // 🔴 SECURITY: Verify Firebase ID token FIRST
@@ -55,15 +31,15 @@ function doPost(e) {
     if (!token) {
       AppLogger.error('Missing Firebase ID token');
       response.message = 'Unauthorized: Missing authentication token';
-      return buildHttpResponse(response, 401);
+      return buildResponse(response);
     }
 
-    // Verify token (call Firebase Auth REST API)
+    // Verify token
     const verificationResult = verifyFirebaseToken(token);
     if (!verificationResult.valid) {
       AppLogger.error('Invalid Firebase token', verificationResult.error);
       response.message = 'Unauthorized: Invalid or expired token';
-      return buildHttpResponse(response, 401);
+      return buildResponse(response);
     }
 
     const userEmail = verificationResult.email;
@@ -73,19 +49,13 @@ function doPost(e) {
     if (!payload.events || !Array.isArray(payload.events)) {
       AppLogger.warn('Missing or invalid events array');
       response.message = CONSTANTS.ERRORS.MISSING_EVENTS;
-      return buildHttpResponse(response, 400);
+      return buildResponse(response);
     }
 
     // Use default calendar if not provided
     const calendarName = payload.calendarName || 'Schedule Teaching';
 
-    AppLogger.info('Payload validated', {
-      calendarName: calendarName,
-      eventCount: payload.events.length,
-      userEmail: userEmail
-    });
-
-    // Create events using Apps Script's authority
+    // Create events
     const result = CalendarService.createEvents(
       calendarName,
       payload.events
@@ -102,13 +72,13 @@ function doPost(e) {
       errors: result.errors.length > 0 ? result.errors : null
     };
 
-    return buildHttpResponse(response, 200);
+    return buildResponse(response);
 
   } catch (error) {
     AppLogger.error('Unhandled error in doPost', error);
     response.status = CONSTANTS.ERROR;
     response.message = error.message || CONSTANTS.ERRORS.INTERNAL_ERROR;
-    return buildHttpResponse(response, 500);
+    return buildResponse(response);
   } finally {
     const endTime = new Date();
     response.executionTime = (endTime.getTime() - startTime.getTime()) + 'ms';
@@ -120,71 +90,11 @@ function doPost(e) {
 }
 
 /**
- * Build HTTP response with CORS headers
- * @param {Object} data - Response data
- * @param {number} statusCode - HTTP status code
- * @returns {HtmlOutput} HTTP response
+ * Helper to build JSON response
  */
-function buildHttpResponse(data, statusCode) {
-  const output = ContentService.createTextOutput(
-    JSON.stringify(data)
-  );
-  output.setMimeType(ContentService.MimeType.JSON);
-  
-  // 🔐 SECURITY: Restrict CORS to allowed origins only
-  // In production, replace with your actual Vercel domain
-  const allowedOrigins = [
-    'http://localhost:3000',
-    'http://localhost:5173',
-    'https://your-app.vercel.app' // Replace with your actual domain
-  ];
-  
-  // Get request origin from e object (if available)
-  const requestOrigin = e && e.requestHeaders && e.requestHeaders['origin'] ? e.requestHeaders['origin'] : '';
-  const isAllowedOrigin = allowedOrigins.includes(requestOrigin) || requestOrigin.includes('vercel.app');
-  
-  if (isAllowedOrigin) {
-    output.setHeader('Access-Control-Allow-Origin', requestOrigin);
-  } else {
-    // Fallback: only allow from same origin
-    output.setHeader('Access-Control-Allow-Origin', 'null');
-  }
-  
-  output.setHeader('Access-Control-Allow-Methods', 'POST');
-  output.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
-  output.setHeader('Access-Control-Max-Age', '3600');
-
-  // Note: Apps Script không hỗ trợ custom HTTP status code
-  // Dùng header hoặc payload để indicate status
-  return output;
-}
-
-/**
- * Handle OPTIONS requests for CORS preflight
- */
-function doOptions(e) {
-  const output = ContentService.createTextOutput('');
-  
-  // 🔐 SECURITY: Restrict CORS to allowed origins only
-  const allowedOrigins = [
-    'http://localhost:3000',
-    'http://localhost:5173',
-    'https://your-app.vercel.app' // Replace with your actual domain
-  ];
-  
-  const requestOrigin = e && e.requestHeaders && e.requestHeaders['origin'] ? e.requestHeaders['origin'] : '';
-  const isAllowedOrigin = allowedOrigins.includes(requestOrigin) || requestOrigin.includes('vercel.app');
-  
-  if (isAllowedOrigin) {
-    output.setHeader('Access-Control-Allow-Origin', requestOrigin);
-  } else {
-    output.setHeader('Access-Control-Allow-Origin', 'null');
-  }
-  
-  output.setHeader('Access-Control-Allow-Methods', 'POST');
-  output.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
-  output.setHeader('Access-Control-Max-Age', '3600');
-  return output;
+function buildResponse(data) {
+  return ContentService.createTextOutput(JSON.stringify(data))
+    .setMimeType(ContentService.MimeType.JSON);
 }
 
 /**
@@ -193,7 +103,7 @@ function doOptions(e) {
  */
 function verifyFirebaseToken(idToken) {
   try {
-    const firebaseProjectId = 'shedule-teaching'; // Change to your project ID
+    const firebaseProjectId = 'shedule-teaching'; 
     const url = `https://identitytoolkit.googleapis.com/v1/accounts:lookup?key=${CONSTANTS.FIREBASE_WEB_API_KEY}`;
     
     const payload = JSON.stringify({ idToken });
@@ -227,20 +137,4 @@ function verifyFirebaseToken(idToken) {
       error: error.toString()
     };
   }
-}
-
-/**
- * GET handler (optional - cho testing)
- */
-function doGet(e) {
-  const output = ContentService.createTextOutput(
-    JSON.stringify({
-      status: 'ok',
-      message: 'Apps Script API is running',
-      timestamp: new Date().toISOString()
-    })
-  );
-  output.setMimeType(ContentService.MimeType.JSON);
-  output.setHeader('Access-Control-Allow-Origin', '*');
-  return output;
 }

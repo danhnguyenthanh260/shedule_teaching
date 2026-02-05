@@ -7,6 +7,8 @@
 import { getCalendarName } from '../config/auth';
 import { logInfo, logSuccess, logError } from '../utils/logger';
 import { auth } from '../config/firebase';
+import { rateLimiter } from '../utils/rateLimiter';
+import { addCSRFTokenToHeaders } from '../utils/csrfToken';
 
 export interface CalendarEvent {
     title: string;
@@ -125,11 +127,18 @@ export const syncEventsToCalendar = async (
 
         logInfo('Syncing events via proxy...');
 
+        // 🛡️ RATE LIMITING: Check if user is spamming (1 request every 5 seconds)
+        const rateLimitKey = `sync_${currentUser.uid}`;
+        if (rateLimiter.isRateLimited(rateLimitKey)) {
+            const remaining = Math.ceil(rateLimiter.getRemainingCooldown(rateLimitKey) / 1000);
+            throw new Error(`⏳ Vui lòng đợi ${remaining} giây trước khi đồng bộ lại.`);
+        }
+
         const response = await fetch(PROXY_API_URL, {
             method: 'POST',
-            headers: {
+            headers: addCSRFTokenToHeaders({
                 'Content-Type': 'application/json',
-            },
+            }),
             body: JSON.stringify(payload),
         });
 

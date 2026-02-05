@@ -1,11 +1,26 @@
 /**
  * HTTP POST handler
- * Nhận request thông qua Vercel Proxy
+ * Nhận request thông qua Vercel Proxy (v7.0)
+ *
+ * Expected payload:
+ * {
+ *   "idToken": "FIREBASE_ID_TOKEN",
+ *   "calendarName": "Schedule Teaching", // Optional
+ *   "events": [ ... ]
+ * }
  */
+
+// 🔒 SECURITY: List of allowed admin/lecturer emails
+const ALLOWED_EMAILS = [
+  'duongkien.090905@gmail.com', 
+  'ngohoangtruongdat2@gmail.com',
+  'ngohoangtruongdat@gmail.com'
+];
+
 function doPost(e) {
   const startTime = new Date();
   let response = {
-    status: CONSTANTS.ERROR,
+    status: 'error',
     message: '',
     data: null,
     timestamp: startTime.toISOString(),
@@ -13,57 +28,55 @@ function doPost(e) {
   };
 
   try {
-    AppLogger.info('=== POST Request Received (Proxy) ===');
-    
     // Parse request body
     let payload;
     try {
       const contents = e.postData.contents;
       payload = JSON.parse(contents);
     } catch (parseError) {
-      AppLogger.error('JSON parse error', parseError);
       response.message = 'Invalid JSON in request body';
-      return buildResponse(response);
+      return buildHttpResponse(response);
     }
 
     // 🔴 SECURITY: Verify Firebase ID token FIRST
     const token = payload.idToken;
     if (!token) {
-      AppLogger.error('Missing Firebase ID token');
       response.message = 'Unauthorized: Missing authentication token';
-      return buildResponse(response);
+      return buildHttpResponse(response);
     }
 
-    // Verify token
+    // Verify token (call Firebase Auth REST API)
     const verificationResult = verifyFirebaseToken(token);
     if (!verificationResult.valid) {
-      AppLogger.error('Invalid Firebase token', verificationResult.error);
       response.message = 'Unauthorized: Invalid or expired token';
-      return buildResponse(response);
+      return buildHttpResponse(response);
     }
 
     const userEmail = verificationResult.email;
-    AppLogger.info('✅ Request authenticated for user: ' + userEmail);
+
+    // 🔴 AUTHORIZATION: Check if user is allowed
+    if (!ALLOWED_EMAILS.includes(userEmail.toLowerCase())) {
+        response.message = 'Forbidden: You are not authorized to perform this sync.';
+        return buildHttpResponse(response);
+    }
 
     // Validate events
     if (!payload.events || !Array.isArray(payload.events)) {
-      AppLogger.warn('Missing or invalid events array');
-      response.message = CONSTANTS.ERRORS.MISSING_EVENTS;
-      return buildResponse(response);
+      response.message = 'Events array is required';
+      return buildHttpResponse(response);
     }
 
     // Use default calendar if not provided
     const calendarName = payload.calendarName || 'Schedule Teaching';
 
-    // Create events
+    // Create events using CalendarService (Hàm này giả định đã có sẵn trong project Apps Script)
+    // Nếu bạn chưa có CalendarService, hãy đảm bảo đã copy file CalendarService.gs từ repo
     const result = CalendarService.createEvents(
       calendarName,
       payload.events
     );
 
-    AppLogger.info('Events creation completed', result);
-
-    response.status = CONSTANTS.SUCCESS;
+    response.status = 'success';
     response.message = `Successfully processed ${result.total} events`;
     response.data = {
       total: result.total,
@@ -72,29 +85,25 @@ function doPost(e) {
       errors: result.errors.length > 0 ? result.errors : null
     };
 
-    return buildResponse(response);
+    return buildHttpResponse(response);
 
   } catch (error) {
-    AppLogger.error('Unhandled error in doPost', error);
-    response.status = CONSTANTS.ERROR;
-    response.message = error.message || CONSTANTS.ERRORS.INTERNAL_ERROR;
-    return buildResponse(response);
+    response.status = 'error';
+    response.message = error.message || 'Internal server error';
+    return buildHttpResponse(response);
   } finally {
     const endTime = new Date();
     response.executionTime = (endTime.getTime() - startTime.getTime()) + 'ms';
-    AppLogger.info('=== POST Request Completed ===', {
-      status: response.status,
-      executionTime: response.executionTime
-    });
   }
 }
 
 /**
- * Helper to build JSON response
+ * Build HTTP response
  */
-function buildResponse(data) {
-  return ContentService.createTextOutput(JSON.stringify(data))
-    .setMimeType(ContentService.MimeType.JSON);
+function buildHttpResponse(data) {
+  const output = ContentService.createTextOutput(JSON.stringify(data));
+  output.setMimeType(ContentService.MimeType.JSON);
+  return output;
 }
 
 /**
@@ -103,8 +112,13 @@ function buildResponse(data) {
  */
 function verifyFirebaseToken(idToken) {
   try {
-    const firebaseProjectId = 'shedule-teaching'; 
-    const url = `https://identitytoolkit.googleapis.com/v1/accounts:lookup?key=${CONSTANTS.FIREBASE_WEB_API_KEY}`;
+    // Get FIREBASE_WEB_API_KEY from Constants.js
+    const apiKey = CONSTANTS.FIREBASE_WEB_API_KEY;
+    if (!apiKey || apiKey.includes('YOUR_FIREBASE_WEB_API_KEY')) {
+      throw new Error('FIREBASE_WEB_API_KEY not configured in Constants.js');
+    }
+
+    const url = `https://identitytoolkit.googleapis.com/v1/accounts:lookup?key=${apiKey}`;
     
     const payload = JSON.stringify({ idToken });
     const options = {
@@ -131,7 +145,6 @@ function verifyFirebaseToken(idToken) {
       };
     }
   } catch (error) {
-    AppLogger.error('Token verification error', error);
     return {
       valid: false,
       error: error.toString()

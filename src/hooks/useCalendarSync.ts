@@ -1,6 +1,6 @@
 
 import { useState, useCallback } from 'react';
-import { syncToGoogleCalendarAPI } from '../services/calendarApiService';
+import { syncEventsToCalendar } from '../services/appsScriptService';
 import { RowNormalized, SyncResult } from '../types';
 
 interface UseCalendarSyncProps {
@@ -31,11 +31,11 @@ export const useCalendarSync = ({ accessToken }: UseCalendarSyncProps) => {
         description: `Đồng bộ từ FPT Scheduler\nNội dung: ${r.person}\nPhòng: ${r.location}`
       }));
 
-      const res: any = await syncToGoogleCalendarAPI(events, accessToken);
+      const res = await syncEventsToCalendar(events);
 
-      const successCount = res.data?.success ?? res.success ?? 0;
-      const failedCount = res.data?.failed ?? res.failed ?? 0;
-      const skippedCount = res.data?.skipped ?? res.skipped ?? 0;
+      const successCount = res.data?.success ?? 0;
+      const failedCount = res.data?.failed ?? 0;
+      const skippedCount = res.data?.skipped ?? 0;
 
       const result: SyncResult = {
         created: successCount,

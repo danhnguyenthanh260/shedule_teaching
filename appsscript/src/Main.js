@@ -17,7 +17,9 @@ const CONSTANTS = {
     'ngohoangtruongdat2@gmail.com'
   ],
   SUCCESS: 'success',
-  ERROR: 'error'
+  ERROR: 'error',
+  // 🔑 SECURITY: Replace this with your actual Web API Key from Firebase Console
+  FIREBASE_WEB_API_KEY: 'AIzaSy...YourActualKey...' 
 };
 
 

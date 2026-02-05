@@ -12,6 +12,7 @@ export default defineConfig(({ mode }) => {
         '/api/appscript': {
           target: 'https://script.google.com',
           changeOrigin: true,
+          followRedirects: true,
           rewrite: (path) => {
             const backendUrl = env.VITE_BACKEND_URL;
             if (!backendUrl) return path;

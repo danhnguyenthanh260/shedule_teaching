@@ -10,6 +10,8 @@ export const useAppPersistence = () => {
   const [headerRowIndex, setHeaderRowIndex] = useState<number>(0);
   const [columnMap, setColumnMap] = useState<ColumnMapping>({});
   const [personFilter, setPersonFilter] = useState('');
+  const [startRow, setStartRow] = useState<number>(1);
+  const [columnsConfig, setColumnsConfig] = useState<string>('');
   const [allRows, setAllRows] = useState<string[][]>([]);
   const [fullHeaders, setFullHeaders] = useState<string[]>([]);
   const [fullDetailHeaders, setFullDetailHeaders] = useState<string[]>([]);
@@ -27,13 +29,15 @@ export const useAppPersistence = () => {
     if (restored.headerRowIndex !== undefined) setHeaderRowIndex(restored.headerRowIndex);
     if (restored.columnMap) setColumnMap(restored.columnMap);
     if (restored.personFilter) setPersonFilter(restored.personFilter);
+    if (restored.startRow !== undefined) setStartRow(restored.startRow);
+    if (restored.columnsConfig) setColumnsConfig(restored.columnsConfig);
     if (restored.allRows?.length) setAllRows(restored.allRows);
     if (restored.fullHeaders?.length) setFullHeaders(restored.fullHeaders);
     if (restored.fullDetailHeaders?.length) setFullDetailHeaders(restored.fullDetailHeaders);
     if (restored.titleRow?.length) setTitleRow(restored.titleRow);
     if (restored.fullRows?.length) setFullRows(restored.fullRows);
     if (restored.selectedIds?.length) setSelectedIds(new Set(restored.selectedIds));
-    
+
     console.log('✓ App state restored from localStorage');
   }, []);
 
@@ -44,6 +48,8 @@ export const useAppPersistence = () => {
   useEffect(() => { persistStateService.saveState({ headerRowIndex }); }, [headerRowIndex]);
   useEffect(() => { persistStateService.saveState({ columnMap }); }, [columnMap]);
   useEffect(() => { persistStateService.saveState({ personFilter }); }, [personFilter]);
+  useEffect(() => { persistStateService.saveState({ startRow }); }, [startRow]);
+  useEffect(() => { persistStateService.saveState({ columnsConfig }); }, [columnsConfig]);
   useEffect(() => { if (allRows.length) persistStateService.saveState({ allRows }); }, [allRows]);
   useEffect(() => { if (fullHeaders.length) persistStateService.saveState({ fullHeaders }); }, [fullHeaders]);
   useEffect(() => { if (fullDetailHeaders.length) persistStateService.saveState({ fullDetailHeaders }); }, [fullDetailHeaders]);
@@ -63,6 +69,8 @@ export const useAppPersistence = () => {
     headerRowIndex, setHeaderRowIndex,
     columnMap, setColumnMap,
     personFilter, setPersonFilter,
+    startRow, setStartRow,
+    columnsConfig, setColumnsConfig,
     allRows, setAllRows,
     fullHeaders, setFullHeaders,
     fullDetailHeaders, setFullDetailHeaders,

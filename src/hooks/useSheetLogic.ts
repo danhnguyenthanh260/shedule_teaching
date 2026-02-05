@@ -6,8 +6,8 @@ import { syncToGoogleCalendarAPI } from '../services/calendarApiService';
 import { firestoreSyncHistoryService } from '../services/firestoreSyncHistoryService';
 import { logInfo, logSuccess, logWarning, logError } from '../utils/logger';
 import { RowNormalized, SyncResult, ColumnMapping } from '../types';
-import { 
-  mergeHeaderRows, 
+import {
+  mergeHeaderRows,
   fillForwardHeaders,
   looksLikeDataRow
 } from '../utils/sheetUtils';
@@ -92,8 +92,8 @@ export const useSheetLogic = ({
 
   const examinerColumnIndices = useMemo(() => {
     const keywords = [
-      'ho va ten', 'thanh vien hoi dong', 'reviewer', 'reviewer 1', 'reviewer 2', 
-      'chu tich', 'thu ky', 'uy vien', 'can bo'
+      'ho va ten', 'thanh vien hoi dong', 'reviewer', 'reviewer 1', 'reviewer 2',
+      'chu tich', 'thu ky', 'uy vien', 'can bo', 'giang vien'
     ];
     return fullHeaders.reduce((acc, header, index) => {
       const h = khongDau(header);
@@ -107,7 +107,7 @@ export const useSheetLogic = ({
   const updateSelections = useCallback((data: RowNormalized[], filterValue?: string) => {
     const fValue = filterValue !== undefined ? filterValue : personFilter;
     const rawFilter = (fValue || '').trim();
-    
+
     if (!rawFilter) {
       setSelectedIds(new Set(data.map(r => r.id)));
       return;
@@ -122,10 +122,10 @@ export const useSheetLogic = ({
         row.person,
         row.groupName
       ].map(v => khongDau(v)).join(' ');
-      
+
       return filters.some(f => searchSpace.includes(f));
     });
-    
+
     setSelectedIds(new Set(matches.map(m => m.id)));
   }, [personFilter, setSelectedIds, examinerColumnIndices]);
 
@@ -221,7 +221,7 @@ export const useSheetLogic = ({
 
       // ✅ NEW: Direct Google API sync (Always goes to user's primary calendar)
       const res: any = await syncToGoogleCalendarAPI(events, firebaseAccessToken!);
-      
+
       // Flexible result parsing (handle different possible GAS response structures)
       const successCount = res.data?.success ?? res.success ?? 0;
       const failedCount = res.data?.failed ?? res.failed ?? 0;
@@ -261,7 +261,7 @@ export const useSheetLogic = ({
     const primary = headerRowIndex > 0 ? allRows[headerRowIndex - 1] : [];
     const options: { label: string; value: number }[] = [];
     const seen = new Set<string>();
-    
+
     // Đếm số lần xuất hiện của mỗi label (cho chế độ Review)
     const labelCounts = new Map<string, number>();
     const isReview = sheetMeta?.isDataMau;
@@ -277,7 +277,7 @@ export const useSheetLogic = ({
       if (!label || label.startsWith('Column_')) return;
 
       const count = labelCounts.get(label) || 0;
-      
+
       // Nếu là sheet Review: 
       // - Chấp nhận cột xuất hiện 1 lần (Shared)
       // - Chấp nhận cột xuất hiện đúng 3 lần (Repeated)
@@ -311,9 +311,9 @@ export const useSheetLogic = ({
   const filteredRows = useMemo(() => {
     const rawFilter = (personFilter || '').trim();
     if (!rawFilter) return rows;
-    
+
     const filters = rawFilter.split(',').map(f => khongDau(f)).filter(Boolean);
-    
+
     return rows.filter(row => {
       // CHỈ lọc trên các cột chấm thi
       const searchValues = examinerColumnIndices.map(idx => row.rawRow[idx] || "");
@@ -322,7 +322,7 @@ export const useSheetLogic = ({
         row.person,
         row.groupName
       ].map(v => khongDau(v)).join(' ');
-      
+
       return filters.some(f => searchSpace.includes(f));
     });
   }, [rows, personFilter, examinerColumnIndices]);

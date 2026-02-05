@@ -1,6 +1,8 @@
 
-import React, { useState } from 'react';
-import { googleService } from '../services/googleService';
+import React, { useState, useEffect, useRef } from 'react';
+import * as XLSX from 'xlsx';
+import { readSheet } from '../services/appsScriptService';
+import { configService, SemesterConfig } from '../services/configService';
 
 interface ExcelImportProps {
   onDataLoaded: (data: {
@@ -16,6 +18,10 @@ interface ExcelImportProps {
   setSheetUrl: (url: string) => void;
   tabName: string;
   setTabName: (tab: string) => void;
+  startRow: number;
+  setStartRow: (row: number) => void;
+  columnsConfig: string;
+  setColumnsConfig: (cols: string) => void;
   accessToken: string | null;
 }
 
@@ -27,94 +33,231 @@ export const ExcelImport: React.FC<ExcelImportProps> = ({
   setSheetUrl,
   tabName,
   setTabName,
+  startRow,
+  setStartRow,
+  columnsConfig,
+  setColumnsConfig,
   accessToken
 }) => {
   const [isProcessing, setIsProcessing] = useState(false);
+  const [semesters, setSemesters] = useState<Record<string, SemesterConfig>>({});
+  const [selectedSemesterId, setSelectedSemesterId] = useState<string>('');
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
-  const handleImport = async (overrideTab?: string) => {
-    if (!sheetUrl) {
-      setError('Vui lòng nhập URL Google Sheet');
-      return;
+  // Fetch configs on mount
+  useEffect(() => {
+    const fetchConfigs = async () => {
+      try {
+        setLoading(true);
+        setError(null);
+        const configs = await configService.fetchConfigs();
+        setSemesters(configs);
+
+        // Auto-select first semester if available
+        const firstId = Object.keys(configs)[0];
+        if (firstId) {
+          handleSemesterChange(firstId, configs);
+        }
+      } catch (err: any) {
+        // ✅ TASK 2 & 3: Show error immediately if config fetch fails
+        const errorMsg = err.message || '❌ Không thể tải danh sách học kỳ';
+        setError(errorMsg);
+        console.error('Failed to fetch configs:', err);
+      } finally {
+        setLoading(false);
+      }
+    };
+    fetchConfigs();
+  }, []);
+
+  // ✅ AUTO-LOAD when semester changes
+  useEffect(() => {
+    if (selectedSemesterId && sheetUrl) {
+      handleShowData();
+    }
+  }, [selectedSemesterId]);
+
+  const handleSemesterChange = (semesterId: string, currentSemesters = semesters) => {
+    setSelectedSemesterId(semesterId);
+    setError(null); // Clear previous errors
+
+    if (semesterId && currentSemesters[semesterId]) {
+      const config = currentSemesters[semesterId];
+
+      // ✅ TASK 3: Validate config before applying
+      if (!config.sheetUrl) {
+        setError('❌ Cấu hình học kỳ thiếu URL Sheet');
+        return;
+      }
+      if (!config.startRow) {
+        setError('❌ Cấu hình học kỳ thiếu dòng bắt đầu');
+        return;
+      }
+      if (!config.columns) {
+        setError('❌ Cấu hình học kỳ thiếu danh sách cột');
+        return;
+      }
+
+      setSheetUrl(config.sheetUrl);
+      setStartRow(parseInt(config.startRow) || 1);
+      setColumnsConfig(config.columns);
+    }
+  };
+
+  const processRawData = (rows: string[][], source: string) => {
+    if (!rows || rows.length === 0) {
+      throw new Error('❌ Dữ liệu trống');
     }
 
-    const targetTab = overrideTab || tabName;
+    const isReviewMode = tabName.toLowerCase().includes('review');
+
+    onDataLoaded({
+      rawRows: rows,
+      sheetId: source,
+      tabName: tabName || 'Sheet1',
+      headerRowIndex: startRow - 1,
+      isDataMau: isReviewMode
+    });
+  };
+
+  const handleShowData = async () => {
+    // ✅ TASK 3: Strict validation before proceeding
+    if (!sheetUrl) {
+      setError('❌ Vui lòng chọn học kỳ hoặc nhập URL Sheet');
+      return;
+    }
 
     setIsProcessing(true);
     setLoading(true);
     setError(null);
 
     try {
-      const token = accessToken || localStorage.getItem('google_access_token');
-      if (!token) {
-        throw new Error('Bạn cần đăng nhập lại để thực hiện thao tác này.');
-      }
-
-      const result = await googleService.loadSheet(sheetUrl, targetTab, token);
-      
-      const isReviewTab = targetTab.toLowerCase().includes('review');
-      
-      onDataLoaded({
-        rawRows: result.rawRows,
-        sheetId: result.sheetId,
-        tabName: targetTab,
-        headerRowIndex: result.headerRowIndex,
-        isDataMau: isReviewTab || result.isDataMau
-      });
-      
+      const rows = await readSheet(sheetUrl, startRow);
+      processRawData(rows, 'GoogleSheet');
+      // ✅ TASK 2: Only show success if actually successful
+      setError(null);
     } catch (err: any) {
-      console.error('Import error:', err);
-      // Detailed error for 403 Forbidden to help users
-      if (err.message?.includes('permission') || err.message?.includes('403')) {
-        setError(`Lỗi phân quyền: Tài khoản đang đăng nhập không có quyền truy cập File Sheets này. Hãy đảm bảo bạn đã Share file này cho email hiện tại.`);
-      } else {
-        setError(err.message || 'Không thể tải dữ liệu từ Google Sheet');
-      }
+      // ✅ TASK 2: Always show error in red, never success
+      console.error('Fetch data error:', err);
+      const errorMsg = err.message || '❌ Không thể lấy dữ liệu từ Sheets';
+      setError(errorMsg);
     } finally {
       setIsProcessing(false);
       setLoading(false);
     }
   };
 
+  const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    setIsProcessing(true);
+    setLoading(true);
+    setError(null);
+
+    const reader = new FileReader();
+    reader.onload = (evt) => {
+      try {
+        const bstr = evt.target?.result;
+        const wb = XLSX.read(bstr, { type: 'binary' });
+        const wsname = wb.SheetNames[0];
+        const ws = wb.Sheets[wsname];
+        const data = XLSX.utils.sheet_to_json(ws, { header: 1 }) as string[][];
+
+        processRawData(data, 'LocalFile');
+      } catch (err: any) {
+        console.error('XLSX process error:', err);
+        setError('Lỗi đọc file Excel: ' + err.message);
+      } finally {
+        setIsProcessing(false);
+        setLoading(false);
+        if (fileInputRef.current) fileInputRef.current.value = '';
+      }
+    };
+    reader.onerror = () => {
+      setError('Lỗi khi đọc file.');
+      setIsProcessing(false);
+      setLoading(false);
+    };
+    reader.readAsBinaryString(file);
+  };
+
   return (
-    <div className="flex flex-col xl:flex-row gap-3 items-end">
-      <div className="flex-1 w-full">
-        <label className="block text-[10px] font-black text-slate-400 mb-1.5 ml-1 uppercase tracking-widest">Google Sheet URL</label>
-        <div className="relative group">
-          <input
-            type="text"
-            placeholder="Dán link Google Sheet vào đây..."
-            className="w-full pl-4 pr-12 py-2 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-fpt-orange outline-none transition-all text-xs text-slate-600 placeholder:text-slate-300 font-bold h-11 shadow-inner group-focus-within:bg-white"
-            value={sheetUrl}
-            onChange={(e) => setSheetUrl(e.target.value)}
-          />
-          <div className="absolute right-3.5 top-3 text-slate-300 group-focus-within:text-fpt-orange transition-colors">
-            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101" />
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M10.172 13.828a4 4 0 015.656 0l4-4a4 4 0 10-5.656-5.656-1.102 1.101" />
-            </svg>
+    <div className="flex flex-col gap-3">
+      {/* Simplify Step 1: Just Semester Selection & Auto-load status */}
+      <div className="flex flex-col sm:flex-row items-end gap-3">
+        <div className="flex-1 w-full">
+          <label className="block text-[10px] font-black text-slate-400 mb-1.5 ml-1 uppercase tracking-widest">Chọn Học kỳ để lấy lịch</label>
+          <div className="relative group">
+            <select
+              className="w-full pl-4 pr-10 py-2.5 bg-white border border-slate-200 rounded-xl focus:ring-2 focus:ring-fpt-orange outline-none text-sm font-bold text-slate-700 h-12 shadow-sm appearance-none transition-all group-hover:border-slate-300"
+              value={selectedSemesterId}
+              onChange={(e) => handleSemesterChange(e.target.value)}
+            >
+              <option value="">-- Chọn học kỳ --</option>
+              {(Object.values(semesters) as SemesterConfig[]).map((s) => (
+                <option key={s.id} value={s.id}>{s.semester}</option>
+              ))}
+            </select>
+            <div className="absolute right-4 top-4 text-slate-400 pointer-events-none group-focus-within:text-fpt-orange transition-colors">
+              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M19 9l-7 7-7-7" /></svg>
+            </div>
           </div>
+        </div>
+
+        <div className="flex-none flex items-center gap-2 mb-0.5">
+          <button
+            onClick={handleShowData}
+            disabled={isProcessing || !sheetUrl}
+            className="px-6 h-12 bg-[#F27024] text-white rounded-xl hover:bg-orange-600 active:scale-95 transition-all font-black shadow-lg shadow-orange-200 flex items-center justify-center gap-2 disabled:bg-slate-100 disabled:text-slate-400 disabled:shadow-none min-w-[140px]"
+          >
+            {isProcessing ? (
+              <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+            ) : (
+              <>
+                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                </svg>
+                <span className="text-[10px] uppercase tracking-wider">Tải lại</span>
+              </>
+            )}
+          </button>
+
+          <button
+            onClick={() => fileInputRef.current?.click()}
+            disabled={isProcessing}
+            className="w-12 h-12 bg-slate-100 text-slate-500 rounded-xl hover:bg-slate-200 active:scale-95 transition-all flex items-center justify-center border border-slate-200 shadow-sm"
+            title="Tải file .xlsx từ máy"
+          >
+            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12" />
+            </svg>
+            <input
+              type="file"
+              ref={fileInputRef}
+              onChange={handleFileUpload}
+              className="hidden"
+              accept=".xlsx, .xls"
+            />
+          </button>
         </div>
       </div>
 
-      <div className="flex-none flex items-center gap-2">
-        <button 
-          onClick={() => handleImport('test1')}
-          disabled={isProcessing || !sheetUrl}
-          className="px-6 h-11 bg-[#F27024] text-white rounded-xl hover:bg-orange-600 active:scale-95 transition-all font-black shadow-lg shadow-orange-200 flex items-center justify-center gap-2 disabled:bg-slate-100 disabled:text-slate-400 disabled:shadow-none disabled:border-slate-200 border border-transparent text-xs uppercase tracking-tighter"
-        >
-          <span className="opacity-60 text-[9px] font-black font-mono">TAB</span>
-          <span>test1</span>
-        </button>
-        
-        <button 
-          onClick={() => handleImport('Review')}
-          disabled={isProcessing || !sheetUrl}
-          className="px-6 h-11 bg-slate-700 text-white rounded-xl hover:bg-slate-800 active:scale-95 transition-all font-black shadow-lg shadow-slate-200 flex items-center justify-center gap-2 disabled:bg-slate-100 disabled:text-slate-400 disabled:shadow-none disabled:border-slate-200 border border-transparent text-xs uppercase tracking-tighter"
-        >
-          <span className="opacity-60 text-[9px] font-black font-mono">TAB</span>
-          <span>Review</span>
-        </button>
-      </div>
+      {/* Admin Info (Hidden but functional) - You could also just remove these inputs if they are not needed for teachers to edit at all */}
+      {/* 
+      <div className="hidden">
+        <input value={sheetUrl} onChange={e => setSheetUrl(e.target.value)} />
+        <input value={startRow} onChange={e => setStartRow(parseInt(e.target.value))} />
+        <input value={columnsConfig} onChange={e => setColumnsConfig(e.target.value)} />
+      </div> 
+      */}
+
+      {isProcessing && (
+        <div className="flex items-center gap-2 px-3 py-2 bg-orange-50 rounded-lg animate-pulse border border-orange-100">
+          <div className="w-2 h-2 bg-orange-400 rounded-full animate-bounce"></div>
+          <span className="text-[9px] font-black text-orange-600 uppercase tracking-widest">Đang tải dữ liệu từ Google Sheets...</span>
+        </div>
+      )}
     </div>
   );
 };

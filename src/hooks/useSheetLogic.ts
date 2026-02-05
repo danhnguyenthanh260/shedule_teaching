@@ -212,12 +212,38 @@ export const useSheetLogic = ({
 
     try {
       const rowsToSync = rows.filter(r => selectedIds.has(r.id));
-      const events = rowsToSync.map(r => ({
-        title: r.person, // Lấy trực tiếp thông tin người dùng chọn làm tiêu đề
-        start: r.startTime.includes('+') ? r.startTime : `${r.startTime}+07:00`,
-        end: r.endTime.includes('+') ? r.endTime : `${r.endTime}+07:00`,
-        location: r.location || '',
-        description: `Đồng bộ từ FPT Scheduler\nNội dung: ${r.person}\nPhòng: ${r.location}`
+
+      // ✅ Import signature generator
+      const { generateEventSignature } = await import('../utils/eventSignature');
+
+      const events = await Promise.all(rowsToSync.map(async (r) => {
+        // Formulate a Better Title
+        // If task is present: "[Task] Person" or "Task - Person"
+        // If only person: "Person"
+        // If only task: "Task"
+
+        // Clean up values
+        const task = (r.task || '').trim();
+        const person = (r.person || r.personRaw || '').trim();
+        const fullTitle = (task && person && task !== person)
+          ? `[${task}] ${person}`
+          : (person || task || 'Sự kiện');
+
+        const event = {
+          title: fullTitle,
+          start: r.startTime.includes('+') ? r.startTime : `${r.startTime}+07:00`,
+          end: r.endTime.includes('+') ? r.endTime : `${r.endTime}+07:00`,
+          location: r.location || '',
+          description: `Đồng bộ từ FPT Scheduler\n------------------\nNhiệm vụ: ${task}\nGiảng viên: ${person}\nPhòng: ${r.location}\n`
+        };
+
+        // ✅ Generate unique signature for duplicate detection
+        const signature = await generateEventSignature(event);
+
+        return {
+          ...event,
+          signature
+        };
       }));
 
       // ✅ NEW: Direct Google API sync (Always goes to user's primary calendar)
@@ -237,7 +263,23 @@ export const useSheetLogic = ({
       };
 
       setResult(syncRes);
-      showToast(`Đồng bộ xong! Thành công: ${syncRes.created}, Lỗi: ${syncRes.failed}`);
+
+      // ✅ Provide helpful message about calendar refresh
+      const refreshMessage = syncRes.created > 0
+        ? `✅ Đã tạo ${syncRes.created} sự kiện! Nếu chưa thấy trên lịch, hãy F5 (refresh) trang Google Calendar.`
+        : `⚠️ Không có sự kiện nào được tạo. Lỗi: ${syncRes.failed}`;
+
+      showToast(refreshMessage);
+
+      // ✅ Auto-open Google Calendar in new tab after successful sync
+      if (syncRes.created > 0) {
+        setTimeout(() => {
+          window.open('https://calendar.google.com/calendar/u/0/r', '_blank');
+        }, 500); // Small delay to ensure events are created
+      }
+
+      // Log calendar link for debugging
+      console.log('📅 Kiểm tra lịch tại: https://calendar.google.com/calendar/u/0/r');
 
       if (firebaseUser && sheetMeta) {
         firestoreSyncHistoryService.saveSyncResult(
@@ -252,7 +294,13 @@ export const useSheetLogic = ({
       }
     } catch (err: any) {
       console.error("Sync error:", err);
-      setError("Lỗi đồng bộ: " + err.message);
+
+      // ✅ Provide clear guidance for token errors
+      if (err.message?.includes('Token') || err.message?.includes('Unauthorized')) {
+        setError("⚠️ Phiên đăng nhập đã hết hạn. Vui lòng đăng xuất và đăng nhập lại để tiếp tục.");
+      } else {
+        setError("Lỗi đồng bộ: " + err.message);
+      }
     } finally {
       setSyncing(false);
     }

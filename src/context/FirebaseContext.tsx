@@ -62,7 +62,13 @@ export const FirebaseProvider: React.FC<{ children: React.ReactNode }> = ({ chil
           if (credential?.accessToken) {
             console.log('✅ Access token obtained');
             setAccessToken(credential.accessToken);
+
+            // ✅ Store token with expiry time
+            const expiryTime = Date.now() + (3600 * 1000); // 1 hour from now
             await saveAuthTokens(credential.accessToken, '', 3600);
+            localStorage.setItem('google_access_token', credential.accessToken);
+            localStorage.setItem('google_token_expiry', expiryTime.toString());
+
             logSuccess('Google login successful (redirect)');
           }
         } else {
@@ -87,10 +93,22 @@ export const FirebaseProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       // If user is logged in and we don't have access token, try to restore from localStorage
       if (currentUser && !accessToken) {
         const stored = localStorage.getItem('google_access_token');
-        if (stored) {
-          console.log('✅ Restored access token from localStorage');
-          setAccessToken(stored);
-          logInfo('Restored access token from localStorage');
+        const expiryStr = localStorage.getItem('google_token_expiry');
+
+        if (stored && expiryStr) {
+          const expiryTime = parseInt(expiryStr, 10);
+
+          // Check if token is still valid
+          if (Date.now() < expiryTime) {
+            console.log('✅ Restored valid access token from localStorage');
+            setAccessToken(stored);
+            logInfo('Restored access token from localStorage');
+          } else {
+            console.warn('⚠️ Stored token has expired, clearing...');
+            localStorage.removeItem('google_access_token');
+            localStorage.removeItem('google_token_expiry');
+            logError('Stored token expired. Please login again.');
+          }
         }
       }
     });
@@ -153,7 +171,7 @@ export const FirebaseProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       const provider = new GoogleAuthProvider();
       provider.addScope('https://www.googleapis.com/auth/spreadsheets.readonly');
       provider.addScope('https://www.googleapis.com/auth/calendar.events');
-      
+
       // ✅ FORCE Google to show the account picker and consent screen to avoid 403 session confusion
       provider.setCustomParameters({
         prompt: 'select_account'
@@ -166,10 +184,14 @@ export const FirebaseProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       if (credential?.accessToken) {
         console.log('✅ Access token obtained from popup');
         setAccessToken(credential.accessToken);
+
+        // ✅ Store token with expiry time (Google tokens expire in 1 hour)
+        const expiryTime = Date.now() + (3600 * 1000); // 1 hour from now
         await saveAuthTokens(credential.accessToken, '', 3600);
 
-        // Also store in legacy key for components that might use it
+        // Also store in legacy key with expiry
         localStorage.setItem('google_access_token', credential.accessToken);
+        localStorage.setItem('google_token_expiry', expiryTime.toString());
 
         logSuccess('Google login successful');
       }
@@ -223,6 +245,21 @@ export const FirebaseProvider: React.FC<{ children: React.ReactNode }> = ({ chil
   };
 
   const getAccessToken = async (): Promise<string | null> => {
+    // Check if current token is still valid
+    const expiryStr = localStorage.getItem('google_token_expiry');
+    if (expiryStr) {
+      const expiryTime = parseInt(expiryStr, 10);
+      if (Date.now() >= expiryTime) {
+        // Token has expired, clear it
+        console.warn('⚠️ Access token has expired');
+        setAccessToken(null);
+        localStorage.removeItem('google_access_token');
+        localStorage.removeItem('google_token_expiry');
+        logError('Access token expired. Please login again.');
+        return null;
+      }
+    }
+
     // Return stored access token or try to restore from localStorage
     if (accessToken) return accessToken;
 

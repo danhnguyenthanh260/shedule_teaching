@@ -11,7 +11,7 @@ export const syncToGoogleCalendarAPI = async (
   calendarId: string = 'primary'
 ): Promise<SyncResponse> => {
   logInfo(`🚀 Bắt đầu đồng bộ trực tiếp qua Google API (${events.length} sự kiện)...`);
-  
+
   const results = {
     success: 0,
     failed: 0,
@@ -20,12 +20,16 @@ export const syncToGoogleCalendarAPI = async (
 
   const startTime = Date.now();
 
+  // ✅ Log which calendar we're syncing to
+  console.log(`📅 Syncing to calendar: ${calendarId}`);
+  logInfo(`Target calendar: ${calendarId}`);
+
   // Đồng bộ tuần tự để tránh Rate Limit và dễ kiểm soát lỗi
   for (const event of events) {
     try {
       // 1. Kiểm tra lặp trước khi tạo (Tùy chọn, nâng cao sau)
       // Hiện tại: Tạo trực tiếp để người dùng thấy kết quả ngay
-      
+
       const response = await fetch(
         `https://www.googleapis.com/calendar/v3/calendars/${calendarId}/events`,
         {
@@ -40,10 +44,11 @@ export const syncToGoogleCalendarAPI = async (
             description: event.description || '',
             start: {
               dateTime: event.start,
-              // Google API yêu cầu ISO string có múi giờ
+              timeZone: 'Asia/Ho_Chi_Minh' // ✅ Explicit timezone for Vietnam
             },
             end: {
               dateTime: event.end,
+              timeZone: 'Asia/Ho_Chi_Minh' // ✅ Explicit timezone for Vietnam
             },
             reminders: {
               useDefault: true
@@ -53,9 +58,29 @@ export const syncToGoogleCalendarAPI = async (
       );
 
       if (response.ok) {
+        const eventData = await response.json();
+        console.log(`✅ Event created successfully:`, {
+          id: eventData.id,
+          title: event.title,
+          start: event.start,
+          htmlLink: eventData.htmlLink
+        });
+        logInfo(`✅ Created: ${event.title} (ID: ${eventData.id})`);
         results.success++;
       } else {
         const errorText = await response.text();
+
+        // ✅ Handle 401 Unauthorized (expired/invalid token)
+        if (response.status === 401) {
+          logError('❌ Token hết hạn hoặc không hợp lệ. Vui lòng đăng xuất và đăng nhập lại.');
+          throw new Error('Token đã hết hạn. Vui lòng đăng xuất và đăng nhập lại để làm mới quyền truy cập.');
+        }
+
+        console.error(`❌ Failed to create event:`, {
+          title: event.title,
+          status: response.status,
+          error: errorText
+        });
         logError('Google API Event Creation Failed:', errorText);
         results.failed++;
       }
@@ -69,8 +94,8 @@ export const syncToGoogleCalendarAPI = async (
 
   return {
     status: results.success > 0 ? 'success' : 'error',
-    message: results.success > 0 
-      ? `Đã đồng bộ thành công ${results.success} sự kiện vào lịch cá nhân.` 
+    message: results.success > 0
+      ? `Đã đồng bộ thành công ${results.success} sự kiện vào lịch cá nhân.`
       : 'Không có sự kiện nào được tạo thành công.',
     data: {
       total: results.total,

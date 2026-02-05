@@ -19,12 +19,12 @@ export interface ParsedDateTime {
  * Định nghĩa các slot chuẩn
  */
 const STANDARD_SLOTS: TimeSlot[] = [
-  { slot: 1, startTime: '07:00', endTime: '09:15', display: '07:00 - 09:15' },
-  { slot: 2, startTime: '09:30', endTime: '11:45', display: '09:30 - 11:45' },
-  { slot: 3, startTime: '12:30', endTime: '14:45', display: '12:30 - 14:45' },
-  { slot: 4, startTime: '15:00', endTime: '17:15', display: '15:00 - 17:15' },
-  { slot: 5, startTime: '17:30', endTime: '19:45', display: '17:30 - 19:45' },
-  { slot: 6, startTime: '20:00', endTime: '22:15', display: '20:00 - 22:15' }
+  { slot: 1, startTime: '07:30', endTime: '09:00', display: '07:30 - 09:00' },
+  { slot: 2, startTime: '09:10', endTime: '10:40', display: '09:10 - 10:40' },
+  { slot: 3, startTime: '10:50', endTime: '12:20', display: '10:50 - 12:20' },
+  { slot: 4, startTime: '12:50', endTime: '14:20', display: '12:50 - 14:20' },
+  { slot: 5, startTime: '14:30', endTime: '16:00', display: '14:30 - 16:00' },
+  { slot: 6, startTime: '16:10', endTime: '17:40', display: '16:10 - 17:40' }
 ];
 
 /**
@@ -35,6 +35,7 @@ export function parseDate(value: any): Date | null {
 
   // Nếu đã là Date object
   if (value instanceof Date && isValid(value)) {
+    console.log(`📅 parseDate: Received Date object: ${value.toISOString()} (Local: ${value.toLocaleString('vi-VN')})`);
     return value;
   }
 
@@ -46,27 +47,41 @@ export function parseDate(value: any): Date | null {
   }
 
   // Excel serial date number (ví dụ: 44927 = 2023-01-01)
+  // ⚠️ Excel dates are stored as days since 1900-01-01
   if (typeof value === 'number' && value > 40000 && value < 60000) {
-    const date = new Date((value - 25569) * 86400 * 1000);
-    if (isValid(date)) return date;
+    // Excel epoch: 1900-01-01 (but Excel incorrectly treats 1900 as a leap year)
+    // Unix epoch offset: 25569 days (from 1900-01-01 to 1970-01-01)
+    const unixTimestamp = (value - 25569) * 86400 * 1000;
+    const date = new Date(unixTimestamp);
+
+    // ✅ Use UTC methods to avoid timezone offset issues
+    const year = date.getUTCFullYear();
+    const month = date.getUTCMonth();
+    const day = date.getUTCDate();
+    const correctedDate = new Date(year, month, day); // Create date in local timezone
+
+    console.log(`📅 parseDate: Excel serial ${value} → ${correctedDate.toISOString()} (${correctedDate.toLocaleDateString('vi-VN')})`);
+    if (isValid(correctedDate)) return correctedDate;
   }
 
-  // Các format date thường gặp
+  // ✅ Các format date thường gặp - ƯU TIÊN FORMAT VIỆT NAM
   const dateFormats = [
-    'M/d/yyyy',      // 1/27/2026
-    'd/M/yyyy',      // 27/1/2026
-    'dd/MM/yyyy',    // 27/01/2026
-    'MM/dd/yyyy',    // 01/27/2026
-    'yyyy-MM-dd',    // 2026-01-27
-    'yyyy/MM/dd',    // 2026/01/27
-    'd-M-yyyy',      // 27-1-2026
-    'M-d-yyyy',      // 1-27-2026
+    'dd/MM/yyyy',    // 27/01/2026 (VN) - Ưu tiên cao nhất
+    'd/M/yyyy',      // 27/1/2026 (VN) - Ưu tiên cao
+    'dd-MM-yyyy',    // 27-01-2026 (VN)
+    'd-M-yyyy',      // 27-1-2026 (VN)
+    'yyyy-MM-dd',    // 2026-01-27 (ISO)
+    'yyyy/MM/dd',    // 2026/01/27 (ISO)
+    'MM/dd/yyyy',    // 01/27/2026 (US) - Format Mỹ xuống cuối
+    'M/d/yyyy',      // 1/27/2026 (US) - Format Mỹ xuống cuối
+    'M-d-yyyy',      // 1-27-2026 (US)
   ];
 
   for (const fmt of dateFormats) {
     try {
       const parsed = parse(strValue, fmt, new Date());
       if (isValid(parsed)) {
+        console.log(`📅 parseDate: "${strValue}" matched format "${fmt}" → ${parsed.toISOString()}`);
         return parsed;
       }
     } catch {

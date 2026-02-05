@@ -8,6 +8,7 @@ import { StatusAlerts } from './components/StatusAlerts';
 import { LoginScreen } from './components/LoginScreen';
 import SyncHistoryModal from './components/SyncHistoryModal';
 import { AdminPage } from './pages/AdminPage';
+import { SheetTypeBadge } from './components/SheetTypeBadge';
 import { useFirebase } from './context/FirebaseContext';
 import { useSheetLogic } from './hooks/useSheetLogic';
 import { useFirebaseMapping } from './hooks/useFirebaseMapping';
@@ -45,6 +46,7 @@ const App: React.FC = () => {
     titleRow, setTitleRow,
     fullRows, setFullRows,
     selectedIds, setSelectedIds,
+    sheetType, setSheetType,
   } = persistence;
 
   // ✅ Create a unique ID for each sheet-tab combination to prevent settings overlap
@@ -189,15 +191,25 @@ const App: React.FC = () => {
                   setRows([]);
                   setResult(null);
                   setError(null);
+                  setFullDetailHeaders([]); // ✅ Clear old headers
+                  setFullHeaders([]); // ✅ Clear old merged headers
 
                   setAllRows(data.rawRows);
                   const meta = {
                     sheetId: data.sheetId,
                     tab: data.tabName,
                     isDataMau: data.isDataMau,
-                    headerRowIndex: data.headerRowIndex
+                    headerRowIndex: data.headerRowIndex,
+                    sheetType: data.sheetType
                   };
                   setSheetMeta(meta);
+
+                  // ✅ Save sheet type for display badge
+                  if (data.sheetType) {
+                    setSheetType(data.sheetType);
+                  }
+
+                  setHeaderRowIndex(data.headerRowIndex);
                   applyHeaderRow(data.headerRowIndex, data.rawRows, { sheetId: data.sheetId, tab: data.tabName });
                   setLoading(false);
                   showToast(`✓ Đã tải ${data.rawRows.length} dòng dữ liệu (${data.isDataMau ? 'Review Mode' : 'Normal'})`);

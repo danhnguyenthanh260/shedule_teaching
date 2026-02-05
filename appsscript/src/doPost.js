@@ -24,8 +24,16 @@
  *   "idToken": "FIREBASE_ID_TOKEN",
  *   "calendarName": "Schedule Teaching", // Optional
  *   "events": [ ... ]
+ *   "events": [ ... ]
  * }
  */
+
+// 🔒 SECURITY: List of allowed admin emails
+const ALLOWED_EMAILS = [
+  'duongkien.090905@gmail.com', 
+  'ngohoangtruongdat2@gmail.com'
+]; // Ensure this matches src/config/admin.ts
+
 function doPost(e) {
   const startTime = new Date();
   let response = {
@@ -68,6 +76,13 @@ function doPost(e) {
 
     const userEmail = verificationResult.email;
     AppLogger.info('✅ Request authenticated for user: ' + userEmail);
+
+    // 🔴 AUTHORIZATION: Check if user is allowed
+    if (!ALLOWED_EMAILS.includes(userEmail.toLowerCase())) {
+        AppLogger.warn(`⛔ Access denied for user: ${userEmail}`);
+        response.message = 'Forbidden: You are not authorized to perform this action.';
+        return buildHttpResponse(response, 403);
+    }
 
     // Validate events
     if (!payload.events || !Array.isArray(payload.events)) {

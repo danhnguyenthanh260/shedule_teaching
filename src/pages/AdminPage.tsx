@@ -3,6 +3,7 @@ import { useFirebase } from '../context/FirebaseContext';
 import { configService, SemesterConfig } from '../services/configService';
 import { database } from '../config/firebase';
 import { ref, set, push } from 'firebase/database';
+import { readSheet } from '../services/appsScriptService';
 
 export const AdminPage: React.FC = () => {
     const { user, logout } = useFirebase();
@@ -18,6 +19,9 @@ export const AdminPage: React.FC = () => {
         startRow: '1',
         columns: ''
     });
+
+    // Edit mode state
+    const [editMode, setEditMode] = useState<string | null>(null); // semesterId being edited
 
     useEffect(() => {
         fetchConfigs();
@@ -49,7 +53,7 @@ export const AdminPage: React.FC = () => {
             setLoading(true);
             setError(null);
 
-            const semesterId = newSemester.semester.replace(/\s+/g, '_');
+            const semesterId = editMode || newSemester.semester.replace(/\s+/g, '_');
             const configRef = ref(database, `configs/${semesterId}`);
 
             await set(configRef, {
@@ -60,13 +64,14 @@ export const AdminPage: React.FC = () => {
                 columns: newSemester.columns
             });
 
-            setSuccess('✅ Tạo học kỳ thành công!');
+            setSuccess(editMode ? '✅ Cập nhật học kỳ thành công!' : '✅ Tạo học kỳ thành công!');
             setNewSemester({ semester: '', sheetUrl: '', startRow: '1', columns: '' });
+            setEditMode(null);
             fetchConfigs();
 
             setTimeout(() => setSuccess(null), 3000);
         } catch (err: any) {
-            setError(`❌ Lỗi khi tạo học kỳ: ${err.message}`);
+            setError(`❌ Lỗi khi ${editMode ? 'cập nhật' : 'tạo'} học kỳ: ${err.message}`);
             console.error(err);
         } finally {
             setLoading(false);
@@ -86,6 +91,84 @@ export const AdminPage: React.FC = () => {
             setTimeout(() => setSuccess(null), 3000);
         } catch (err: any) {
             setError(`❌ Lỗi khi xóa: ${err.message}`);
+        } finally {
+            setLoading(false);
+        }
+    };
+
+    const handleEditSemester = (semester: SemesterConfig) => {
+        setNewSemester({
+            semester: semester.semester,
+            sheetUrl: semester.sheetUrl,
+            startRow: semester.startRow,
+            columns: semester.columns
+        });
+        setEditMode(semester.id);
+        // Scroll to form
+        window.scrollTo({ top: 0, behavior: 'smooth' });
+    };
+
+    const handleCancelEdit = () => {
+        setNewSemester({ semester: '', sheetUrl: '', startRow: '1', columns: '' });
+        setEditMode(null);
+    };
+
+    const handleAutoFetchColumns = async () => {
+        if (!newSemester.sheetUrl) {
+            setError('❌ Vui lòng nhập URL Sheet trước');
+            return;
+        }
+
+        if (!newSemester.startRow || parseInt(newSemester.startRow) < 1) {
+            setError('❌ Vui lòng chọn dòng bắt đầu hợp lệ');
+            return;
+        }
+
+        try {
+            setLoading(true);
+            setError(null);
+
+            const startRowNum = parseInt(newSemester.startRow);
+            const rows = await readSheet(newSemester.sheetUrl, startRowNum);
+
+            if (!rows || rows.length === 0) {
+                setError('❌ Không thể đọc dữ liệu từ Sheet. Vui lòng kiểm tra URL và quyền truy cập.');
+                return;
+            }
+
+            // Get the first row (header row)
+            const headers = rows[0];
+
+            // Extract Sheet ID from URL
+            const sheetIdMatch = newSemester.sheetUrl.match(/\/d\/([a-zA-Z0-9-_]+)/);
+            const currentSheetId = sheetIdMatch ? sheetIdMatch[1] : '';
+
+            // "Data Mẫu" Sheet ID - only slice columns for this specific sheet
+            const DATA_MAU_SHEET_ID = '1nshAfx6vf11FUDOTOTiLu0D-zulNfM5uKoCI0A106Sk';
+
+            // ✅ SMART FILTERING: Only slice columns J-AM for "Data Mẫu" sheet
+            let relevantHeaders = headers;
+            if (currentSheetId === DATA_MAU_SHEET_ID) {
+                // Skip columns A-I (index 0-8) which contain project info
+                relevantHeaders = headers.slice(9, 39); // J to AM (columns 9-38)
+            }
+
+            // Filter out empty headers and join with comma
+            const columnNames = relevantHeaders
+                .filter(h => h && String(h).trim())
+                .map(h => String(h).trim())
+                .join(', ');
+
+            if (!columnNames) {
+                setError('❌ Không tìm thấy tiêu đề cột trong dòng đã chọn');
+                return;
+            }
+
+            setNewSemester({ ...newSemester, columns: columnNames });
+            setSuccess(`✅ Đã tải ${relevantHeaders.filter(h => h && String(h).trim()).length} cột tự động!`);
+            setTimeout(() => setSuccess(null), 3000);
+        } catch (err: any) {
+            setError(`❌ Lỗi khi tải cột: ${err.message}`);
         } finally {
             setLoading(false);
         }
@@ -155,9 +238,9 @@ export const AdminPage: React.FC = () => {
                     <div className="bg-white rounded-2xl shadow-sm border border-slate-200 p-6">
                         <h2 className="text-lg font-black text-slate-800 mb-4 flex items-center gap-2">
                             <svg className="w-5 h-5 text-orange-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M12 4v16m8-8H4" />
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d={editMode ? "M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" : "M12 4v16m8-8H4"} />
                             </svg>
-                            Tạo học kỳ mới
+                            {editMode ? 'Sửa học kỳ' : 'Tạo học kỳ mới'}
                         </h2>
 
                         <form onSubmit={handleCreateSemester} className="space-y-4">
@@ -198,7 +281,20 @@ export const AdminPage: React.FC = () => {
                             </div>
 
                             <div>
-                                <label className="block text-xs font-bold text-slate-600 mb-1.5">Danh sách cột (phân cách bằng dấu phẩy)</label>
+                                <div className="flex items-center justify-between mb-1.5">
+                                    <label className="block text-xs font-bold text-slate-600">Danh sách cột (phân cách bằng dấu phẩy)</label>
+                                    <button
+                                        type="button"
+                                        onClick={handleAutoFetchColumns}
+                                        disabled={loading || !newSemester.sheetUrl || !newSemester.startRow}
+                                        className="px-3 py-1 bg-blue-500 hover:bg-blue-600 text-white rounded-lg text-xs font-bold transition-all disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-1.5"
+                                    >
+                                        <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                                        </svg>
+                                        Tải tự động
+                                    </button>
+                                </div>
                                 <textarea
                                     placeholder="Ví dụ: Mã đề tài, Tên đề tài, GVHD, Ngày, Giờ, Địa điểm"
                                     className="w-full px-4 py-2.5 border border-slate-200 rounded-xl focus:ring-2 focus:ring-orange-500 outline-none text-sm resize-none"
@@ -209,13 +305,24 @@ export const AdminPage: React.FC = () => {
                                 />
                             </div>
 
-                            <button
-                                type="submit"
-                                disabled={loading}
-                                className="w-full py-3 bg-gradient-to-r from-orange-500 to-red-500 text-white rounded-xl font-bold hover:shadow-lg transition-all disabled:opacity-50 disabled:cursor-not-allowed"
-                            >
-                                {loading ? 'Đang tạo...' : 'Tạo học kỳ'}
-                            </button>
+                            <div className="flex gap-3">
+                                <button
+                                    type="submit"
+                                    disabled={loading}
+                                    className="flex-1 py-3 bg-gradient-to-r from-orange-500 to-red-500 text-white rounded-xl font-bold hover:shadow-lg transition-all disabled:opacity-50 disabled:cursor-not-allowed"
+                                >
+                                    {loading ? (editMode ? 'Đang cập nhật...' : 'Đang tạo...') : (editMode ? 'Cập nhật học kỳ' : 'Tạo học kỳ')}
+                                </button>
+                                {editMode && (
+                                    <button
+                                        type="button"
+                                        onClick={handleCancelEdit}
+                                        className="px-6 py-3 bg-slate-200 hover:bg-slate-300 text-slate-700 rounded-xl font-bold transition-all"
+                                    >
+                                        Hủy
+                                    </button>
+                                )}
+                            </div>
                         </form>
                     </div>
 
@@ -233,15 +340,26 @@ export const AdminPage: React.FC = () => {
                                 <div key={sem.id} className="p-4 border border-slate-200 rounded-xl hover:border-orange-300 transition-all">
                                     <div className="flex items-start justify-between mb-2">
                                         <h3 className="font-bold text-slate-800">{sem.semester}</h3>
-                                        <button
-                                            onClick={() => handleDeleteSemester(sem.id)}
-                                            className="text-red-400 hover:text-red-600 transition-colors"
-                                            title="Xóa học kỳ"
-                                        >
-                                            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
-                                            </svg>
-                                        </button>
+                                        <div className="flex gap-2">
+                                            <button
+                                                onClick={() => handleEditSemester(sem)}
+                                                className="text-blue-400 hover:text-blue-600 transition-colors"
+                                                title="Sửa học kỳ"
+                                            >
+                                                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
+                                                </svg>
+                                            </button>
+                                            <button
+                                                onClick={() => handleDeleteSemester(sem.id)}
+                                                className="text-red-400 hover:text-red-600 transition-colors"
+                                                title="Xóa học kỳ"
+                                            >
+                                                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                                                </svg>
+                                            </button>
+                                        </div>
                                     </div>
                                     <div className="space-y-1 text-xs text-slate-600">
                                         <p><span className="font-semibold">Dòng:</span> {sem.startRow}</p>

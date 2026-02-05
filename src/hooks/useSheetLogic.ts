@@ -145,6 +145,7 @@ export const useSheetLogic = ({
     setTitleRow(titleR);
     setFullHeaders(idx > 0 && isReview ? fillForwardHeaders(primaryHeaders) : filled); // Row 2 headers for groups
     setFullDetailHeaders(secondaryHeaders); // Row 3 headers for details
+    console.log('🔍 applyHeaderRow - fullDetailHeaders set to:', secondaryHeaders.slice(0, 15));
     setFullRows(rowsData.slice(idx + 1));
 
     if (meta) {
@@ -267,13 +268,13 @@ export const useSheetLogic = ({
     const isReview = sheetMeta?.isDataMau;
 
     fullDetailHeaders.forEach((h, i) => {
-      let label = (h || "").trim();
+      let label = String(h || "").trim();
       if (!label || label.startsWith('Column_')) return;
       labelCounts.set(label, (labelCounts.get(label) || 0) + 1);
     });
 
     fullDetailHeaders.forEach((h, i) => {
-      let label = (h || "").trim();
+      let label = String(h || "").trim();
       if (!label || label.startsWith('Column_')) return;
 
       const count = labelCounts.get(label) || 0;

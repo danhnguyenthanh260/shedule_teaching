@@ -3,6 +3,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import * as XLSX from 'xlsx';
 import { readSheet } from '../services/appsScriptService';
 import { configService, SemesterConfig } from '../services/configService';
+import { detectSheetType, SheetTypeInfo } from '../utils/sheetTypeDetection';
 
 interface ExcelImportProps {
   onDataLoaded: (data: {
@@ -11,6 +12,7 @@ interface ExcelImportProps {
     tabName: string;
     headerRowIndex: number;
     isDataMau: boolean;
+    sheetType?: SheetTypeInfo;
   }) => void;
   setLoading: (loading: boolean) => void;
   setError: (error: string | null) => void;
@@ -111,12 +113,42 @@ export const ExcelImport: React.FC<ExcelImportProps> = ({
 
     const isReviewMode = tabName.toLowerCase().includes('review');
 
+    // ✅ Detect sheet type based on tab name or sheet URL
+    const sheetType = detectSheetType(tabName || sheetUrl);
+
+    // ✅ SMART FILTERING: For Review Mode, check if first 9 columns contain "Project Info"
+    // If yes, slice all rows to remove columns A-I (index 0-8)
+    let processedRows = rows;
+
+    // Extract Sheet ID from URL
+    const sheetIdMatch = sheetUrl.match(/\/d\/([a-zA-Z0-9-_]+)/);
+    const currentSheetId = sheetIdMatch ? sheetIdMatch[1] : '';
+
+    // "Data Mẫu" Sheet ID - only apply filtering to this specific sheet
+    const DATA_MAU_SHEET_ID = '1nshAfx6vf11FUDOTOTiLu0D-zulNfM5uKoCI0A106Sk';
+
+    if (currentSheetId === DATA_MAU_SHEET_ID && rows.length > 0) {
+      const firstRow = rows[0];
+      const firstColumns = firstRow.slice(0, 9).map(h => String(h || '').toLowerCase().trim());
+      const projectInfoKeywords = ['stt', 'mã nhóm', 'mã đề tài', 'tên đề tài', 'gvhd'];
+      const hasProjectInfoGarbage = firstColumns.filter(h =>
+        projectInfoKeywords.some(k => h.includes(k))
+      ).length >= 2;
+
+      if (hasProjectInfoGarbage) {
+        // Slice all rows to remove first 9 columns (A-I)
+        processedRows = rows.map(row => row.slice(9));
+        console.log('✂️ Review Mode: Removed columns A-I (Project Info). Remaining columns:', processedRows[0]?.length);
+      }
+    }
+
     onDataLoaded({
-      rawRows: rows,
+      rawRows: processedRows,
       sheetId: source,
       tabName: tabName || 'Sheet1',
-      headerRowIndex: startRow - 1,
-      isDataMau: isReviewMode
+      headerRowIndex: 0, // ✅ FIX: readSheet already starts from startRow, so first row is header
+      isDataMau: isReviewMode,
+      sheetType: sheetType
     });
   };
 
@@ -136,6 +168,11 @@ export const ExcelImport: React.FC<ExcelImportProps> = ({
       processRawData(rows, 'GoogleSheet');
       // ✅ TASK 2: Only show success if actually successful
       setError(null);
+
+      // 🔍 DEBUG: Log raw data validation
+      console.log('🔍 Loaded Rows (First 5):', rows.slice(0, 5));
+      console.log('🔍 Columns detected:', rows[0] ? rows[0].map((c, i) => `${i}:${c}`).join('|') : 'Empty');
+
     } catch (err: any) {
       // ✅ TASK 2: Always show error in red, never success
       console.error('Fetch data error:', err);

@@ -7,6 +7,7 @@ import { getCalendarName } from '../config/auth';
 import { logInfo, logSuccess, logError } from '../utils/logger';
 import { auth } from '../config/firebase';
 import { addCSRFTokenToHeaders } from '../utils/csrfToken';
+import { rateLimiter } from '../utils/rateLimiter';
 
 export interface CalendarEvent {
     title: string;
@@ -139,59 +140,72 @@ export const syncEventsToCalendar = async (
         // Use provided calendar name or get from config
         const targetCalendar = calendarName || getCalendarName();
 
-        const payload: SyncPayload = {
-            idToken, // Send ID token for backend verification
-            calendarName: targetCalendar,
-            events,
-            userEmail: currentUser.email || undefined,
-        };
+        // 🛡️ RATE LIMITING: Check if user is spamming (1 request every 5 seconds)
+        const rateLimitKey = `sync_${currentUser.uid}`;
+        if (rateLimiter.isRateLimited(rateLimitKey)) {
+            const remaining = Math.ceil(rateLimiter.getRemainingCooldown(rateLimitKey) / 1000);
+            throw new Error(`⏳ Vui lòng đợi ${remaining} giây trước khi đồng bộ lại.`);
+        }
 
-        logInfo('Syncing events to Apps Script:', {
-            eventCount: events.length,
-            calendarName: targetCalendar,
-            userEmail: currentUser.email
+        // Execute with Rate Limiter (Debounce 300ms, Cooldown 5000ms)
+        return await rateLimiter.execute(rateLimitKey, async () => {
+            const payload: SyncPayload = {
+                idToken, // Send ID token for backend verification
+                calendarName: targetCalendar,
+                events,
+                userEmail: currentUser.email || undefined,
+            };
+
+            logInfo('Syncing events to Apps Script:', {
+                eventCount: events.length,
+                calendarName: targetCalendar,
+                userEmail: currentUser.email
+            });
+
+            // ✅ CORS FIX: Use text/plain and no custom headers to avoid Preflight (OPTIONS)
+            // Google Apps Script handles POST requests better with text/plain or default content type
+            // when called from browser to avoid strict CORS preflight checks.
+
+            // Determine URL: Use Proxy in DEV needed for localhost to bypass CORS
+            const isDev = import.meta.env.DEV;
+            const url = isDev ? '/api/appscript' : APPS_SCRIPT_URL;
+
+            logInfo(`Sending request to: ${url} (Dev mode: ${isDev})`);
+
+            const response = await fetch(url, {
+                method: 'POST',
+                // ⚠️ CRITICAL: Do NOT set Content-Type to application/json, it triggers Preflight
+                // ⚠️ CRITICAL: Do NOT add custom headers like X-CSRF-Token
+                // Browser will auto-detect or default to text/plain which is a "Simple Request"
+                body: JSON.stringify(payload),
+            });
+
+            if (!response.ok) {
+                throw new Error(`HTTP error! status: ${response.status}`);
+            }
+
+            // Read text first to enable logging raw response even if JSON parsing fails
+            const text = await response.text();
+
+            let data: SyncResponse;
+            try {
+                data = JSON.parse(text);
+            } catch (jsonError) {
+                logError('Failed to parse JSON response. Raw text:', text);
+                throw new Error(`Apps Script returned invalid JSON. Possible auth or config issue. Raw: ${text.substring(0, 200)}...`);
+            }
+
+            logSuccess('Sync response:', data);
+
+            if (data.status === 'error') {
+                throw new Error(data.message || 'Unknown error from Apps Script');
+            }
+
+            return data;
+        }, { delayMs: 300, cooldownMs: 5000 }).then(res => {
+            if (!res) throw new Error('Request was rate limited.');
+            return res;
         });
-
-        // ✅ CORS FIX: Use text/plain and no custom headers to avoid Preflight (OPTIONS)
-        // Google Apps Script handles POST requests better with text/plain or default content type
-        // when called from browser to avoid strict CORS preflight checks.
-
-        // Determine URL: Use Proxy in DEV needed for localhost to bypass CORS
-        const isDev = import.meta.env.DEV;
-        const url = isDev ? '/api/appscript' : APPS_SCRIPT_URL;
-
-        logInfo(`Sending request to: ${url} (Dev mode: ${isDev})`);
-
-        const response = await fetch(url, {
-            method: 'POST',
-            // ⚠️ CRITICAL: Do NOT set Content-Type to application/json, it triggers Preflight
-            // ⚠️ CRITICAL: Do NOT add custom headers like X-CSRF-Token
-            // Browser will auto-detect or default to text/plain which is a "Simple Request"
-            body: JSON.stringify(payload),
-        });
-
-        if (!response.ok) {
-            throw new Error(`HTTP error! status: ${response.status}`);
-        }
-
-        // Read text first to enable logging raw response even if JSON parsing fails
-        const text = await response.text();
-
-        let data: SyncResponse;
-        try {
-            data = JSON.parse(text);
-        } catch (jsonError) {
-            logError('Failed to parse JSON response. Raw text:', text);
-            throw new Error(`Apps Script returned invalid JSON. Possible auth or config issue. Raw: ${text.substring(0, 200)}...`);
-        }
-
-        logSuccess('Sync response:', data);
-
-        if (data.status === 'error') {
-            throw new Error(data.message || 'Unknown error from Apps Script');
-        }
-
-        return data;
     } catch (error) {
         const errorMessage = error instanceof Error ? error.message : 'Failed to sync events';
         logError('Sync error:', errorMessage);

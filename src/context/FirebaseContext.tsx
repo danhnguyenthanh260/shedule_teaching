@@ -63,7 +63,13 @@ export const FirebaseProvider: React.FC<{ children: React.ReactNode }> = ({ chil
           if (credential?.accessToken) {
             console.log('✅ Access token obtained');
             setAccessToken(credential.accessToken);
+
+            // ✅ Store token with expiry time
+            const expiryTime = Date.now() + (3600 * 1000); // 1 hour from now
             await saveAuthTokens(credential.accessToken, '', 3600);
+            localStorage.setItem('google_access_token', credential.accessToken);
+            localStorage.setItem('google_token_expiry', expiryTime.toString());
+
             logSuccess('Google login successful (redirect)');
           }
         } else {
@@ -157,7 +163,7 @@ export const FirebaseProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       const provider = new GoogleAuthProvider();
       provider.addScope('https://www.googleapis.com/auth/spreadsheets.readonly');
       provider.addScope('https://www.googleapis.com/auth/calendar.events');
-      
+
       // ✅ FORCE Google to show the account picker and consent screen to avoid 403 session confusion
       provider.setCustomParameters({
         prompt: 'select_account'
@@ -170,6 +176,9 @@ export const FirebaseProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       if (credential?.accessToken) {
         console.log('✅ Access token obtained from popup');
         setAccessToken(credential.accessToken);
+
+        // ✅ Store token with expiry time (Google tokens expire in 1 hour)
+        const expiryTime = Date.now() + (3600 * 1000); // 1 hour from now
         await saveAuthTokens(credential.accessToken, '', 3600);
 
         // ✅ Also store SECURELY (encrypted) for components that might use it

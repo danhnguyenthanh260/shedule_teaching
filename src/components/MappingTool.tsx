@@ -26,7 +26,8 @@ export const MappingTool: React.FC<MappingToolProps> = ({
   const fields: { key: keyof ColumnMapping; label: string; icon: string }[] = [
     { key: 'date', label: 'Ngày', icon: '📅' },
     { key: 'time', label: 'Thời gian', icon: '⏰' },
-    { key: 'person', label: 'Tên đề tài/Người dạy', icon: '📋' },
+    { key: 'task', label: 'Nhiệm vụ / Đề tài', icon: '📝' },
+    { key: 'person', label: 'Giảng viên', icon: '👤' },
     { key: 'location', label: 'Phòng', icon: '📍' },
   ];
 
@@ -59,11 +60,12 @@ export const MappingTool: React.FC<MappingToolProps> = ({
           </button>
         </div>
 
-        <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+        <div className="grid grid-cols-2 lg:grid-cols-5 gap-3">
           {[
             { key: 'date', label: 'NGÀY', icon: '📅' },
             { key: 'time', label: 'THỜI GIAN', icon: '⏰' },
-            { key: 'person', label: 'TÊN ĐỀ TÀI', icon: '📋' },
+            { key: 'task', label: 'NHIỆM VỤ / ĐỀ TÀI', icon: '📝' }, // ✅ Added Task
+            { key: 'person', label: 'GIẢNG VIÊN', icon: '👤' },      // ✅ Renamed Person
             { key: 'location', label: 'PHÒNG', icon: '📍' },
           ].map((field) => (
             <div key={field.key} className="space-y-1.5">

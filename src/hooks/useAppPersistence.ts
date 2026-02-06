@@ -2,11 +2,12 @@
 import { useState, useEffect } from 'react';
 import { persistStateService } from '../utils/persistState';
 import { ColumnMapping } from '../types';
+import { SheetTypeInfo } from '../utils/sheetTypeDetection';
 
 export const useAppPersistence = () => {
   const [sheetUrl, setSheetUrl] = useState('');
   const [tabName, setTabName] = useState('Sheet1');
-  const [sheetMeta, setSheetMeta] = useState<{ sheetId: string; tab: string; headerRowIndex: number; isDataMau?: boolean } | null>(null);
+  const [sheetMeta, setSheetMeta] = useState<{ sheetId: string; tab: string; headerRowIndex: number; isDataMau?: boolean; sheetType?: SheetTypeInfo } | null>(null);
   const [headerRowIndex, setHeaderRowIndex] = useState<number>(0);
   const [columnMap, setColumnMap] = useState<ColumnMapping>({});
   const [personFilter, setPersonFilter] = useState('');
@@ -18,6 +19,7 @@ export const useAppPersistence = () => {
   const [titleRow, setTitleRow] = useState<string[]>([]);
   const [fullRows, setFullRows] = useState<string[][]>([]);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const [sheetType, setSheetType] = useState<SheetTypeInfo | null>(null);
 
   // Restore state on mount
   useEffect(() => {
@@ -80,6 +82,7 @@ export const useAppPersistence = () => {
     titleRow, setTitleRow,
     fullRows, setFullRows,
     selectedIds, setSelectedIds,
+    sheetType, setSheetType,
     clearPersistence
   };
 };

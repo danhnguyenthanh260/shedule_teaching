@@ -22,37 +22,52 @@ function isLikelyPersonName(val: string): boolean {
 
 function parseVNTime(dateStr: string, timeStr: string): { start: string; end: string } {
   try {
+    // ✅ Log input để debug
+    console.log(`🔍 parseVNTime Input: date="${dateStr}", time="${timeStr}"`);
+
     const parsedDate = parseDateTime(dateStr);
     const parsedTime = parseDateTime(timeStr);
-    
-    // Fallback if basic parsing fails
-    const today = new Date().toISOString().split('T')[0];
-    const datePart = parsedDate.dateString || today;
-    
+
+    console.log(`📅 Parsed Date:`, parsedDate);
+    console.log(`⏰ Parsed Time:`, parsedTime);
+
+    // ⚠️ KHÔNG dùng fallback ngày hiện tại - báo lỗi rõ ràng
+    if (!parsedDate.dateString) {
+      console.error(`❌ Cannot parse date: "${dateStr}"`);
+      throw new Error(`Invalid date format: "${dateStr}". Expected format: dd/MM/yyyy or dd-MM-yyyy`);
+    }
+
+    const datePart = parsedDate.dateString;
+
     let startTime = "08:00";
     let endTime = "09:00";
 
     if (parsedTime.timeSlot) {
       startTime = parsedTime.timeSlot.startTime;
       endTime = parsedTime.timeSlot.endTime;
+    } else {
+      console.warn(`⚠️ Time slot not found for "${timeStr}", using default 08:00-09:00`);
     }
 
-    return { 
-      start: `${datePart}T${startTime}:00+07:00`, 
-      end: `${datePart}T${endTime}:00+07:00` 
+    const result = {
+      start: `${datePart}T${startTime}:00+07:00`,
+      end: `${datePart}T${endTime}:00+07:00`
     };
+
+    console.log(`✅ parseVNTime Result:`, result);
+    return result;
   } catch (e) {
-    const today = new Date().toISOString().split('T')[0];
-    return { start: `${today}T08:00`, end: `${today}T09:00` };
+    console.error(`❌ parseVNTime Error:`, e);
+    throw e; // Re-throw để caller biết có lỗi
   }
 }
 
 function inferSchema(headers: string[], sampleRows: string[][]): InferredSchema {
   const mapping: Record<string, number> = {};
-  
+
   headers.forEach((h, i) => {
     const head = (h || "").toLowerCase();
-    
+
     // Ưu tiên Ngày
     if (head === "ngày" || head === "date" || (head.includes("ngày") && !head.includes("ký"))) mapping.date = i;
     // Ưu tiên Giờ
@@ -63,7 +78,7 @@ function inferSchema(headers: string[], sampleRows: string[][]): InferredSchema 
     }
     // Ưu tiên Tên đề tài/Nhiệm vụ
     else if (head.includes("tên đề tài") || head.includes("nhiệm vụ") || head.includes("topic") || head.includes("project") || head.includes("đề tài")) {
-       if (!mapping.task) mapping.task = i;
+      if (!mapping.task) mapping.task = i;
     }
     // Ưu tiên Phòng
     else if (head.includes("phòng") || head.includes("location") || head.includes("room")) mapping.location = i;
@@ -115,11 +130,11 @@ export class GoogleSyncService {
   } {
     const rows = values.slice(0, 5).map(r => r.join("").toLowerCase());
     const lowTab = (tabName || "").toLowerCase();
-    
+
     // Nhận diện Review: Qua tên tab hoặc nội dung row đầu
-    const isReview = lowTab.includes("review") || values.some((row, idx) => 
-      idx < 3 && row.some(cell => 
-        cell?.toString().toLowerCase().includes("review 1") || 
+    const isReview = lowTab.includes("review") || values.some((row, idx) =>
+      idx < 3 && row.some(cell =>
+        cell?.toString().toLowerCase().includes("review 1") ||
         cell?.toString().toLowerCase().includes("review 2")
       )
     );
@@ -127,17 +142,17 @@ export class GoogleSyncService {
     if (isReview) {
       // Tìm dòng chứa Review 1/2/3
       const reviewRowIdx = values.findIndex(row => row.some(c => c?.toString().toLowerCase().includes("review 1")));
-      return { 
-        headerRowIndex: reviewRowIdx !== -1 ? reviewRowIdx + 1 : 1, 
-        isDataMau: true, 
-        confidence: 100, 
-        formatName: 'Review' 
+      return {
+        headerRowIndex: reviewRowIdx !== -1 ? reviewRowIdx + 1 : 1,
+        isDataMau: true,
+        confidence: 100,
+        formatName: 'Review'
       };
     }
-    
+
     const isTest1 = rows.some(r => (r.includes("ngành") && r.includes("mã đề tài")) || r.includes("hội đồng"));
     if (isTest1) return { headerRowIndex: 0, isDataMau: false, confidence: 90, formatName: 'test1' };
-    
+
     return { headerRowIndex: 0, isDataMau: false, confidence: 50, formatName: 'Mặc định' };
   }
 
@@ -190,7 +205,7 @@ export class GoogleSyncService {
     const { sheetId, tab, mapping, rawRows, headerRowIndex } = params;
     // Bắt đầu từ dòng tiếp theo của header đã chọn
     const dataRows = rawRows.slice(headerRowIndex + 1);
-    
+
     console.log(`[GoogleService] normalizeRows: processing ${dataRows.length} rows, headerRowIndex: ${headerRowIndex}`);
 
     return dataRows.map((row, idx) => {
@@ -202,13 +217,13 @@ export class GoogleSyncService {
 
       const date = (mapping.date !== undefined ? (row[mapping.date] || "") : "").toString().trim();
       const time = (mapping.time !== undefined ? (row[mapping.time] || "") : "").toString().trim();
-      
+
       // Chỉ bỏ qua nếu thiếu cả ngày và giờ
       if (!date && !time) return null;
 
       const { start, end } = parseVNTime(date, time);
       let person = (mapping.person !== undefined ? (row[mapping.person] || "") : "").toString().trim();
-      
+
       // Cố gắng lấy person từ các cột lân cận nếu cột mapping đang trống
       if (!person || !isLikelyPersonName(person)) {
         // Thử lấy task name làm person
@@ -275,7 +290,7 @@ export class GoogleSyncService {
 
       // Tự động nhận diện tất cả các khối (Review 1, 2, 3...)
       let reviewGroups = new Map<string, number[]>();
-      
+
       if (groupHeaders) {
         groupHeaders.forEach((gName, colIdx) => {
           const name = (gName || "").trim();
@@ -292,10 +307,10 @@ export class GoogleSyncService {
         detailHeaders.forEach((h, i) => {
           const lbl = (h || "").toLowerCase();
           // Tìm mọi cột có chứa reviewer, giảng viên, cb chấm, giám khảo... kèm số 1 hoặc đứng đầu khối
-          if ((lbl.includes('reviewer') || lbl.includes('giảng viên') || lbl.includes('cb chấm') || lbl.includes('giám khảo')) && 
-              (lbl.includes('1') || !lbl.match(/\d/))) {
-            if (blockIndices.length === 0 || (i - blockIndices[blockIndices.length-1] > 2)) {
-               blockIndices.push(i);
+          if ((lbl.includes('reviewer') || lbl.includes('giảng viên') || lbl.includes('cb chấm') || lbl.includes('giám khảo')) &&
+            (lbl.includes('1') || !lbl.match(/\d/))) {
+            if (blockIndices.length === 0 || (i - blockIndices[blockIndices.length - 1] > 2)) {
+              blockIndices.push(i);
             }
           }
         });
@@ -321,7 +336,7 @@ export class GoogleSyncService {
           const startCol = mapping.date !== undefined ? Math.min(mapping.date, mapping.time || 999) : 0;
           const usefulCols = totalCols - startCol;
           const blockSize = Math.max(3, Math.floor(usefulCols / 3));
-          
+
           for (let i = 0; i < 3; i++) {
             const start = startCol + (i * blockSize);
             const end = i === 2 ? totalCols - 1 : startCol + ((i + 1) * blockSize) - 1;
@@ -349,7 +364,7 @@ export class GoogleSyncService {
           const getMappedValue = (field: keyof ColumnMapping) => {
             const mappedIdx = mapping[field];
             if (mappedIdx === undefined) return "";
-            
+
             const label = (detailHeaders[mappedIdx] || "").trim();
             const allMatchIndices = detailHeaders.reduce((acc, h, i) => {
               if (h.trim() === label) acc.push(i);
@@ -358,7 +373,7 @@ export class GoogleSyncService {
 
             const localIdx = allMatchIndices.find(idx => idx >= groupStart && idx <= groupEnd);
             const finalIdx = localIdx !== undefined ? localIdx : mappedIdx;
-            
+
             return (row[finalIdx] || "").toString().trim();
           };
 
@@ -370,18 +385,18 @@ export class GoogleSyncService {
           const rDate = getMappedValue('date') || lastDate;
           const rTime = getMappedValue('time') || lastTime;
           const rLocation = getMappedValue('location') || lastLocation;
-          
+
           const { start, end } = parseVNTime(rDate, rTime);
           const reviewerNames = reviewers.join(" & ");
-          
+
           let personValue = "";
           if (baseTask && reviewerNames) {
             personValue = `${baseTask} - ${reviewerNames}`;
           } else {
             personValue = reviewerNames || baseTask || gName;
           }
-          
-          if (!reviewerNames && !baseTask) return; 
+
+          if (!reviewerNames && !baseTask) return;
 
           allEvents.push({
             id: `${sheetId}-${tab}-${rowIndex}-${gName}`,

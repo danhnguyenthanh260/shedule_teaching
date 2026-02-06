@@ -1,24 +1,19 @@
 /**
- * Admin configuration and role management
+ * Configuration for administrator emails
+ * Add admin emails to this list to grant them access to the Admin Dashboard
  */
-
-// Hard-coded admin emails
 export const ADMIN_EMAILS = [
-    'duongkien.090905@gmail.com',
-    'ngohoangtruongdat2@gmail.com'
+    'danhnguyenthanh260@gmail.com', // Primary Admin
+    'thanhnd26@fe.edu.vn',           // Organization Admin
+    'admin@example.com',               // Placeholder
 ];
 
 /**
- * Check if user is admin
+ * Checks if a given email address belongs to an administrator
+ * @param email The email address to check
+ * @returns true if the email is an admin, false otherwise
  */
 export const isAdmin = (email: string | null | undefined): boolean => {
     if (!email) return false;
     return ADMIN_EMAILS.includes(email.toLowerCase());
-};
-
-/**
- * Get user role
- */
-export const getUserRole = (email: string | null | undefined): 'admin' | 'lecturer' => {
-    return isAdmin(email) ? 'admin' : 'lecturer';
 };

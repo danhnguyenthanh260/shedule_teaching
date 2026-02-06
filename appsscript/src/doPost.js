@@ -56,6 +56,10 @@ function doPost(e) {
 
     // 🔴 AUTHORIZATION: Check if user is allowed
     if (!ALLOWED_EMAILS.includes(userEmail.toLowerCase())) {
+        // AppLogger is assumed to be available or added if needed
+        if (typeof AppLogger !== 'undefined') {
+            AppLogger.warn(`⛔ Access denied for user: ${userEmail}`);
+        }
         response.message = 'Forbidden: You are not authorized to perform this sync.';
         return buildHttpResponse(response);
     }

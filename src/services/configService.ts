@@ -5,6 +5,7 @@ export interface SemesterConfig {
     sheetUrl: string;
     startRow: string;
     columns: string;
+    dateFormat?: import('../types').DateFormat;
 }
 
 export const configService = {

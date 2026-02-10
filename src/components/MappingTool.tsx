@@ -41,11 +41,11 @@ export const MappingTool: React.FC<MappingToolProps> = ({
       {/* Column Mapping Grid */}
       <div className="flex flex-col gap-4">
         <div className="flex items-center justify-between">
-          <h3 className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">Ánh xạ cột dữ liệu</h3>
+          <h3 className="text-[10px] font-bold text-slate-400 uppercase tracking-widest ml-1">Ánh xạ cột dữ liệu</h3>
           <button
             onClick={onApply}
             disabled={isLoading}
-            className="px-6 h-10 bg-slate-800 text-white font-black rounded-xl hover:bg-slate-900 active:scale-95 transition-all shadow-lg shadow-slate-200 flex items-center justify-center gap-2 disabled:bg-slate-100 disabled:text-slate-400 disabled:shadow-none text-xs uppercase tracking-tight"
+            className="px-6 h-10 bg-slate-800 text-white font-bold rounded-xl hover:bg-slate-900 active:scale-95 transition-all shadow-lg shadow-slate-200 flex items-center justify-center gap-2 disabled:bg-slate-100 disabled:text-slate-400 disabled:shadow-none text-xs uppercase tracking-tight"
           >
             {isLoading ? (
               <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
@@ -69,13 +69,13 @@ export const MappingTool: React.FC<MappingToolProps> = ({
             { key: 'location', label: 'PHÒNG', icon: '📍' },
           ].map((field) => (
             <div key={field.key} className="space-y-1.5">
-              <label className="flex items-center gap-2 text-[9px] font-black text-slate-400 ml-1 uppercase tracking-[0.15em]">
+              <label className="flex items-center gap-2 text-[9px] font-bold text-slate-400 ml-1 uppercase tracking-[0.15em]">
                 <span className="text-xs">{field.icon}</span>
                 {field.label}
               </label>
               <div className="relative group">
                 <select
-                  className="w-full px-3 py-2.5 bg-white border border-slate-200 rounded-xl focus:ring-2 focus:ring-[#F27024] outline-none text-[11px] font-extrabold text-slate-600 transition-all shadow-sm appearance-none group-hover:border-slate-300"
+                  className="w-full px-3 py-2.5 bg-white border border-slate-200 rounded-xl focus:ring-2 focus:ring-[#F27024] outline-none text-[11px] font-semibold text-slate-600 appearance-none group-hover:border-slate-300 pointer-events-auto cursor-pointer relative z-10"
                   value={columnMap[field.key as keyof ColumnMapping] ?? ''}
                   onChange={(e) => {
                     const val = e.target.value;

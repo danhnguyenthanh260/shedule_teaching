@@ -67,7 +67,7 @@ export const persistStateService = {
       'sheetUrl', 'tabName', 'sheetMeta', 'headerRowIndex', 
       'columnMap', 'personFilter', 'allRows', 'fullHeaders', 
       'fullDetailHeaders', 'titleRow', 'fullRows', 'selectedIds',
-      'startRow', 'columnsConfig'
+      'startRow', 'columnsConfig', 'dateFormat', 'searchColumnIndices', 'selectedSemesterId'
     ];
     
     const state: Record<string, any> = {};
@@ -112,7 +112,7 @@ export const persistStateService = {
       'sheetUrl', 'tabName', 'sheetMeta', 'headerRowIndex', 
       'columnMap', 'personFilter', 'allRows', 'fullHeaders', 
       'fullDetailHeaders', 'titleRow', 'fullRows', 'selectedIds',
-      'startRow', 'columnsConfig'
+      'startRow', 'columnsConfig', 'dateFormat', 'searchColumnIndices', 'selectedSemesterId'
     ];
     keys.forEach(key => localStorage.removeItem(STORAGE_KEY_PREFIX + key));
   }

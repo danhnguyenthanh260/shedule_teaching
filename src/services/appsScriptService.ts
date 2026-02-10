@@ -18,6 +18,7 @@ export interface CalendarEvent {
     description?: string;
     guests?: string;
     signature?: string; 
+    resources?: string[]; // ✅ ADDED: For conflict detection
 }
 
 export interface SyncPayload {
@@ -25,6 +26,14 @@ export interface SyncPayload {
     calendarName: string;
     events: CalendarEvent[];
     userEmail?: string;
+    secret?: string; // 🔐 Required for direct GAS calls (local proxy)
+}
+
+export interface ClearPayload {
+    idToken?: string;
+    action: 'clearCalendar';
+    calendarName: string;
+    secret?: string;
 }
 
 export interface SyncResponse {
@@ -45,8 +54,8 @@ export interface SyncResponse {
     executionTime: string;
 }
 
-// ✅ Use local API route for both DEV and PROD
-const PROXY_API_URL = '/api/readSheet';
+// ✅ API Base URL handles different environments Correctly
+const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || '';
 
 /**
  * Read sheet data via Vercel Proxy
@@ -66,7 +75,7 @@ export const readSheet = async (
             startRow: startRow.toString()
         });
 
-        const fetchUrl = `${PROXY_API_URL}?${queryParams.toString()}`;
+        const fetchUrl = `${API_BASE_URL}/api/readSheet?${queryParams.toString()}`;
         logInfo(`Reading sheet via proxy: ${fetchUrl}`);
 
         const response = await fetch(fetchUrl);
@@ -123,30 +132,39 @@ export const syncEventsToCalendar = async (
             calendarName: targetCalendar,
             events,
             userEmail: currentUser.email || undefined,
+            secret: import.meta.env.VITE_GAS_SECRET, // 🔐 Automatically include secret from env
         };
 
-        logInfo('Syncing events via proxy...');
-
-        // 🛡️ RATE LIMITING: Check if user is spamming (1 request every 5 seconds)
-        const rateLimitKey = `sync_${currentUser.uid}`;
-        if (rateLimiter.isRateLimited(rateLimitKey)) {
-            const remaining = Math.ceil(rateLimiter.getRemainingCooldown(rateLimitKey) / 1000);
-            throw new Error(`⏳ Vui lòng đợi ${remaining} giây trước khi đồng bộ lại.`);
-        }
-
-        const response = await fetch(PROXY_API_URL, {
+        const syncUrl = `${API_BASE_URL}/api/sync`;
+        logInfo(`Syncing events via proxy: ${syncUrl}`);
+        const response = await fetch(syncUrl, {
             method: 'POST',
             headers: addCSRFTokenToHeaders({
                 'Content-Type': 'application/json',
+                'Authorization': `Bearer ${idToken}`
             }),
             body: JSON.stringify(payload),
         });
 
         if (!response.ok) {
-            throw new Error(`Proxy error! status: ${response.status}`);
+            logError(`Sync returned status ${response.status}: ${response.statusText}`);
+            const data = await response.json().catch(() => ({}));
+            throw new Error(data.message || data.error || `Proxy error! status: ${response.status}`);
         }
 
         const data = await response.json();
+
+        // 🚨 HANDLE CONFLICTS (409)
+        if (response.status === 409) {
+            const conflictMsg = data.conflicts 
+              ? `Xung đột lịch trình: ${data.conflicts.map((c: any) => c.message).join(' | ')}`
+              : 'Phát hiện xung đột lịch trình với dữ liệu đã có trong hệ thống.';
+            throw new Error(conflictMsg);
+        }
+
+        if (!response.ok) {
+            throw new Error(data.message || data.error || `Proxy error! status: ${response.status}`);
+        }
 
         if (data.status === 'error') {
             throw new Error(data.message || 'Unknown error from backend');
@@ -157,6 +175,55 @@ export const syncEventsToCalendar = async (
     } catch (error) {
         const errorMessage = error instanceof Error ? error.message : 'Failed to sync events';
         logError('Sync error:', errorMessage);
+        throw new Error(errorMessage);
+    }
+};
+
+/**
+ * Clear all events created by the app
+ */
+export const clearCalendar = async (
+    calendarName?: string
+): Promise<SyncResponse> => {
+    try {
+        const currentUser = auth.currentUser;
+        const idToken = currentUser ? await currentUser.getIdToken() : undefined;
+        
+        const targetCalendar = calendarName || getCalendarName();
+
+        const payload: ClearPayload = {
+            idToken,
+            action: 'clearCalendar',
+            calendarName: targetCalendar,
+            secret: import.meta.env.VITE_GAS_SECRET,
+        };
+
+        const syncUrl = `${API_BASE_URL}/api/sync`;
+        logInfo(`Clearing calendar via proxy: ${syncUrl}`);
+        
+        const response = await fetch(syncUrl, {
+            method: 'POST',
+            headers: addCSRFTokenToHeaders({
+                'Content-Type': 'application/json',
+                ...(idToken ? { 'Authorization': `Bearer ${idToken}` } : {})
+            }),
+            body: JSON.stringify(payload),
+        });
+
+        if (!response.ok) {
+            throw new Error(`Proxy error! status: ${response.status}`);
+        }
+
+        const data = await response.json();
+        if (data.status === 'error') {
+            throw new Error(data.message || 'Unknown error from backend during clear');
+        }
+
+        logSuccess('Calendar cleared successfully');
+        return data;
+    } catch (error) {
+        const errorMessage = error instanceof Error ? error.message : 'Failed to clear calendar';
+        logError('Clear error:', errorMessage);
         throw new Error(errorMessage);
     }
 };

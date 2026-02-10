@@ -1,23 +1,45 @@
 import React, { useState, useEffect } from 'react';
+import { useNavigate, Link } from 'react-router-dom';
 import { useFirebase } from '../context/FirebaseContext';
 import { configService, SemesterConfig } from '../services/configService';
 import { database } from '../config/firebase';
-import { ref, set, push } from 'firebase/database';
+import { isSuperAdmin } from '../config/admin';
+import { ref, set, push, onValue, remove } from 'firebase/database';
 import { readSheet } from '../services/appsScriptService';
+import ConfirmModal from '../components/ConfirmModal';
 
 export const AdminPage: React.FC = () => {
     const { user, logout } = useFirebase();
+    const navigate = useNavigate();
     const [semesters, setSemesters] = useState<Record<string, SemesterConfig>>({});
+    const [adminWhitelist, setAdminWhitelist] = useState<Record<string, string>>({});
+    const [newAdminEmail, setNewAdminEmail] = useState('');
     const [loading, setLoading] = useState(false);
     const [error, setError] = useState<string | null>(null);
     const [success, setSuccess] = useState<string | null>(null);
+
+    // Modal state
+    const [confirmState, setConfirmState] = useState<{
+        isOpen: boolean;
+        title: string;
+        message: string;
+        onConfirm: () => void;
+        variant: 'danger' | 'warning' | 'info';
+    }>({
+        isOpen: false,
+        title: '',
+        message: '',
+        onConfirm: () => { },
+        variant: 'danger'
+    });
 
     // Form state for new semester
     const [newSemester, setNewSemester] = useState({
         semester: '',
         sheetUrl: '',
         startRow: '1',
-        columns: ''
+        columns: '',
+        dateFormat: 'dd/MM/yyyy'
     });
 
     // Edit mode state
@@ -25,6 +47,7 @@ export const AdminPage: React.FC = () => {
 
     useEffect(() => {
         fetchConfigs();
+        fetchAdminWhitelist();
     }, []);
 
     const fetchConfigs = async () => {
@@ -39,6 +62,14 @@ export const AdminPage: React.FC = () => {
         } finally {
             setLoading(false);
         }
+    };
+
+    const fetchAdminWhitelist = () => {
+        const whitelistRef = ref(database, 'admin_whitelist');
+        onValue(whitelistRef, (snapshot) => {
+            const data = snapshot.val();
+            setAdminWhitelist(data || {});
+        });
     };
 
     const handleCreateSemester = async (e: React.FormEvent) => {
@@ -61,11 +92,12 @@ export const AdminPage: React.FC = () => {
                 semester: newSemester.semester,
                 sheetUrl: newSemester.sheetUrl,
                 startRow: newSemester.startRow,
-                columns: newSemester.columns
+                columns: newSemester.columns,
+                dateFormat: newSemester.dateFormat
             });
 
             setSuccess(editMode ? '✅ Cập nhật học kỳ thành công!' : '✅ Tạo học kỳ thành công!');
-            setNewSemester({ semester: '', sheetUrl: '', startRow: '1', columns: '' });
+            setNewSemester({ semester: '', sheetUrl: '', startRow: '1', columns: '', dateFormat: 'dd/MM/yyyy' });
             setEditMode(null);
             fetchConfigs();
 
@@ -78,22 +110,29 @@ export const AdminPage: React.FC = () => {
         }
     };
 
-    const handleDeleteSemester = async (semesterId: string) => {
-        if (!confirm(`Xác nhận xóa học kỳ "${semesterId}"?`)) return;
+    const handleDeleteSemester = (semesterId: string) => {
+        setConfirmState({
+            isOpen: true,
+            title: 'Xóa học kỳ',
+            message: `Bạn có chắc chắn muốn xóa học kỳ "${semesterId}"? Hành động này không thể hoàn tác.`,
+            variant: 'danger',
+            onConfirm: async () => {
+                try {
+                    setLoading(true);
+                    const configRef = ref(database, `configs/${semesterId}`);
+                    await set(configRef, null);
 
-        try {
-            setLoading(true);
-            const configRef = ref(database, `configs/${semesterId}`);
-            await set(configRef, null);
-
-            setSuccess('✅ Đã xóa học kỳ');
-            fetchConfigs();
-            setTimeout(() => setSuccess(null), 3000);
-        } catch (err: any) {
-            setError(`❌ Lỗi khi xóa: ${err.message}`);
-        } finally {
-            setLoading(false);
-        }
+                    setSuccess('✅ Đã xóa học kỳ');
+                    fetchConfigs();
+                    setTimeout(() => setSuccess(null), 3000);
+                } catch (err: any) {
+                    setError(`❌ Lỗi khi xóa: ${err.message}`);
+                } finally {
+                    setLoading(false);
+                    setConfirmState(prev => ({ ...prev, isOpen: false }));
+                }
+            }
+        });
     };
 
     const handleEditSemester = (semester: SemesterConfig) => {
@@ -101,7 +140,8 @@ export const AdminPage: React.FC = () => {
             semester: semester.semester,
             sheetUrl: semester.sheetUrl,
             startRow: semester.startRow,
-            columns: semester.columns
+            columns: semester.columns,
+            dateFormat: semester.dateFormat || 'dd/MM/yyyy'
         });
         setEditMode(semester.id);
         // Scroll to form
@@ -109,7 +149,7 @@ export const AdminPage: React.FC = () => {
     };
 
     const handleCancelEdit = () => {
-        setNewSemester({ semester: '', sheetUrl: '', startRow: '1', columns: '' });
+        setNewSemester({ semester: '', sheetUrl: '', startRow: '1', columns: '', dateFormat: 'dd/MM/yyyy' });
         setEditMode(null);
     };
 
@@ -174,6 +214,43 @@ export const AdminPage: React.FC = () => {
         }
     };
 
+    const handleAddAdmin = async (e: React.FormEvent) => {
+        e.preventDefault();
+        if (!newAdminEmail) return;
+
+        try {
+            const whitelistRef = ref(database, 'admin_whitelist');
+            const newAdminRef = push(whitelistRef);
+            await set(newAdminRef, newAdminEmail.trim().toLowerCase());
+            setNewAdminEmail('');
+            setSuccess('✅ Đã thêm admin mới');
+            setTimeout(() => setSuccess(null), 3000);
+        } catch (err: any) {
+            setError('❌ Lỗi khi thêm admin: ' + err.message);
+        }
+    };
+
+    const handleDeleteAdmin = (key: string) => {
+        setConfirmState({
+            isOpen: true,
+            title: 'Xóa Admin',
+            message: 'Bạn có chắc chắn muốn gỡ bỏ quyền Admin của người này?',
+            variant: 'danger',
+            onConfirm: async () => {
+                try {
+                    const adminRef = ref(database, `admin_whitelist/${key}`);
+                    await remove(adminRef);
+                    setSuccess('✅ Đã xóa admin');
+                    setTimeout(() => setSuccess(null), 3000);
+                } catch (err: any) {
+                    setError('❌ Lỗi khi xóa admin: ' + err.message);
+                } finally {
+                    setConfirmState(prev => ({ ...prev, isOpen: false }));
+                }
+            }
+        });
+    };
+
     return (
         <div className="min-h-screen bg-gradient-to-br from-slate-50 to-slate-100">
             {/* Header */}
@@ -187,11 +264,20 @@ export const AdminPage: React.FC = () => {
                             </svg>
                         </div>
                         <div>
-                            <h1 className="text-xl font-black text-slate-800">Admin Dashboard</h1>
+                            <h1 className="text-xl font-bold text-slate-800">Admin Dashboard</h1>
                             <p className="text-xs text-slate-500 font-semibold">Quản lý cấu hình hệ thống</p>
                         </div>
                     </div>
                     <div className="flex items-center gap-3">
+                        <Link
+                            to="/"
+                            className="px-4 py-2 bg-slate-100 hover:bg-slate-200 rounded-lg text-xs font-bold text-slate-700 transition-all flex items-center gap-2"
+                        >
+                            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M10 19l-7-7m0 0l7-7m-7 7h18" />
+                            </svg>
+                            Quay lại
+                        </Link>
                         <div className="text-right">
                             <p className="text-xs font-bold text-slate-600">{user?.displayName}</p>
                             <p className="text-[10px] text-slate-400">{user?.email}</p>
@@ -236,7 +322,7 @@ export const AdminPage: React.FC = () => {
                 <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
                     {/* Create Semester Form */}
                     <div className="bg-white rounded-2xl shadow-sm border border-slate-200 p-6">
-                        <h2 className="text-lg font-black text-slate-800 mb-4 flex items-center gap-2">
+                        <h2 className="text-lg font-bold text-slate-800 mb-4 flex items-center gap-2">
                             <svg className="w-5 h-5 text-orange-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d={editMode ? "M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" : "M12 4v16m8-8H4"} />
                             </svg>
@@ -268,16 +354,31 @@ export const AdminPage: React.FC = () => {
                                 />
                             </div>
 
-                            <div>
-                                <label className="block text-xs font-bold text-slate-600 mb-1.5">Dòng bắt đầu (Header Row)</label>
-                                <input
-                                    type="number"
-                                    min="1"
-                                    className="w-full px-4 py-2.5 border border-slate-200 rounded-xl focus:ring-2 focus:ring-orange-500 outline-none text-sm"
-                                    value={newSemester.startRow}
-                                    onChange={(e) => setNewSemester({ ...newSemester, startRow: e.target.value })}
-                                    required
-                                />
+                            <div className="grid grid-cols-2 gap-4">
+                                <div>
+                                    <label className="block text-xs font-bold text-slate-600 mb-1.5">Dòng bắt đầu (Header Row)</label>
+                                    <input
+                                        type="number"
+                                        min="1"
+                                        className="w-full px-4 py-2.5 border border-slate-200 rounded-xl focus:ring-2 focus:ring-orange-500 outline-none text-sm"
+                                        value={newSemester.startRow}
+                                        onChange={(e) => setNewSemester({ ...newSemester, startRow: e.target.value })}
+                                        required
+                                    />
+                                </div>
+                                <div>
+                                    <label className="block text-xs font-bold text-slate-600 mb-1.5">Định dạng Ngày mẫu</label>
+                                    <select
+                                        className="w-full px-4 py-2.5 border border-slate-200 rounded-xl focus:ring-2 focus:ring-orange-500 outline-none text-sm bg-white"
+                                        value={newSemester.dateFormat}
+                                        onChange={(e) => setNewSemester({ ...newSemester, dateFormat: e.target.value })}
+                                    >
+                                        <option value="dd/MM/yyyy">VN (27/01/2026)</option>
+                                        <option value="MM/dd/yyyy">US (01/27/2026)</option>
+                                        <option value="yyyy-MM-dd">ISO (2026-01-27)</option>
+                                        <option value="dd-MM-yyyy">VN2 (27-01-2026)</option>
+                                    </select>
+                                </div>
                             </div>
 
                             <div>
@@ -326,52 +427,111 @@ export const AdminPage: React.FC = () => {
                         </form>
                     </div>
 
-                    {/* Existing Semesters List */}
-                    <div className="bg-white rounded-2xl shadow-sm border border-slate-200 p-6">
-                        <h2 className="text-lg font-black text-slate-800 mb-4 flex items-center gap-2">
-                            <svg className="w-5 h-5 text-blue-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2" />
-                            </svg>
-                            Học kỳ hiện có ({Object.keys(semesters).length})
-                        </h2>
+                    <div className="space-y-6">
+                        {/* Admin Whitelist Management (Only for Super Admin) */}
+                        {isSuperAdmin(user?.email) && (
+                            <div className="bg-white rounded-2xl shadow-sm border border-slate-200 p-6">
+                                <h2 className="text-lg font-bold text-slate-800 mb-4 flex items-center gap-2">
+                                    <svg className="w-5 h-5 text-indigo-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M12 4.354a4 4 0 110 5.292M15 21H3v-1a6 6 0 0112 0v1zm0 0h6v-1a6 6 0 00-9-5.197M13 7a4 4 0 11-8 0 4 4 0 018 0z" />
+                                    </svg>
+                                    Quản lý Admin Whitelist
+                                </h2>
+                                
+                                <form onSubmit={handleAddAdmin} className="flex gap-2 mb-4">
+                                    <input
+                                        type="email"
+                                        placeholder="Nhập email admin mới..."
+                                        className="flex-1 px-4 py-2 border border-slate-200 rounded-xl focus:ring-2 focus:ring-indigo-500 outline-none text-sm"
+                                        value={newAdminEmail}
+                                        onChange={(e) => setNewAdminEmail(e.target.value)}
+                                        required
+                                    />
+                                    <button
+                                        type="submit"
+                                        className="px-4 py-2 bg-indigo-600 text-white rounded-xl font-bold hover:bg-indigo-700 transition-all text-xs"
+                                    >
+                                        Thêm
+                                    </button>
+                                </form>
 
-                        <div className="space-y-3 max-h-[500px] overflow-y-auto">
-                            {(Object.values(semesters) as SemesterConfig[]).map((sem) => (
-                                <div key={sem.id} className="p-4 border border-slate-200 rounded-xl hover:border-orange-300 transition-all">
-                                    <div className="flex items-start justify-between mb-2">
-                                        <h3 className="font-bold text-slate-800">{sem.semester}</h3>
-                                        <div className="flex gap-2">
+                                <div className="space-y-2 max-h-48 overflow-y-auto">
+                                    {Object.entries(adminWhitelist).map(([key, email]) => (
+                                        <div key={key} className="flex items-center justify-between p-3 bg-slate-50 rounded-xl border border-slate-100">
+                                            <span className="text-sm font-semibold text-slate-700">{email}</span>
                                             <button
-                                                onClick={() => handleEditSemester(sem)}
-                                                className="text-blue-400 hover:text-blue-600 transition-colors"
-                                                title="Sửa học kỳ"
-                                            >
-                                                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
-                                                </svg>
-                                            </button>
-                                            <button
-                                                onClick={() => handleDeleteSemester(sem.id)}
-                                                className="text-red-400 hover:text-red-600 transition-colors"
-                                                title="Xóa học kỳ"
+                                                onClick={() => handleDeleteAdmin(key)}
+                                                className="p-1.5 text-red-500 hover:bg-red-50 rounded-lg transition-colors"
                                             >
                                                 <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
                                                 </svg>
                                             </button>
                                         </div>
-                                    </div>
-                                    <div className="space-y-1 text-xs text-slate-600">
-                                        <p><span className="font-semibold">Dòng:</span> {sem.startRow}</p>
-                                        <p><span className="font-semibold">Cột:</span> {sem.columns}</p>
-                                        <p className="truncate"><span className="font-semibold">Sheet:</span> {sem.sheetUrl}</p>
-                                    </div>
+                                    ))}
+                                    {Object.keys(adminWhitelist).length === 0 && (
+                                        <p className="text-center text-xs text-slate-400 py-4 italic">Chưa có admin phụ nào</p>
+                                    )}
                                 </div>
-                            ))}
+                            </div>
+                        )}
+
+                        {/* Existing Semesters List */}
+                        <div className="bg-white rounded-2xl shadow-sm border border-slate-200 p-6">
+                            <h2 className="text-lg font-bold text-slate-800 mb-4 flex items-center gap-2">
+                                <svg className="w-5 h-5 text-blue-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2" />
+                                </svg>
+                                Học kỳ hiện có ({Object.keys(semesters).length})
+                            </h2>
+
+                            <div className="space-y-3 max-h-[400px] overflow-y-auto">
+                                {(Object.values(semesters) as SemesterConfig[]).map((sem) => (
+                                    <div key={sem.id} className="p-4 border border-slate-200 rounded-xl hover:border-orange-300 transition-all">
+                                        <div className="flex items-start justify-between mb-2">
+                                            <h3 className="font-bold text-slate-800">{sem.semester}</h3>
+                                            <div className="flex gap-2">
+                                                <button
+                                                    onClick={() => handleEditSemester(sem)}
+                                                    className="p-1.5 text-blue-400 hover:bg-blue-50 rounded-lg transition-colors"
+                                                    title="Sửa học kỳ"
+                                                >
+                                                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
+                                                    </svg>
+                                                </button>
+                                                <button
+                                                    onClick={() => handleDeleteSemester(sem.id)}
+                                                    className="p-1.5 text-red-400 hover:bg-red-50 rounded-lg transition-colors"
+                                                    title="Xóa học kỳ"
+                                                >
+                                                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                                                    </svg>
+                                                </button>
+                                            </div>
+                                        </div>
+                                        <div className="space-y-1 text-xs text-slate-600">
+                                            <p><span className="font-semibold">Dòng:</span> {sem.startRow}</p>
+                                            <p><span className="font-semibold">Cột:</span> {sem.columns}</p>
+                                            <p className="truncate"><span className="font-semibold">Sheet:</span> {sem.sheetUrl}</p>
+                                        </div>
+                                    </div>
+                                ))}
+                            </div>
                         </div>
                     </div>
                 </div>
             </div>
+            {/* Confirmation Modal */}
+            <ConfirmModal
+                isOpen={confirmState.isOpen}
+                title={confirmState.title}
+                message={confirmState.message}
+                variant={confirmState.variant}
+                onConfirm={confirmState.onConfirm}
+                onCancel={() => setConfirmState(prev => ({ ...prev, isOpen: false }))}
+            />
         </div>
     );
 };

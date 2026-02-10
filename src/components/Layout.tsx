@@ -1,7 +1,9 @@
 
 import React, { useState } from 'react';
+import { Link } from 'react-router-dom';
 import { UserProfile } from '../types';
 import SyncHistoryModal from './SyncHistoryModal';
+import { isAdmin } from '../config/admin';
 
 interface Props {
   children: React.ReactNode;
@@ -27,8 +29,8 @@ const Layout: React.FC<Props> = ({ children, user, userId, onLogout, syncHistory
           </div>
           <div className="h-8 w-px bg-slate-200 ml-2"></div>
           <div>
-            <h1 className="font-black text-2xl text-slate-900 leading-none tracking-tight">FPTU Synchronizer</h1>
-            <p className="text-sm font-black text-[#F27024] uppercase tracking-[0.3em] mt-2">Schedule Importer</p>
+            <h1 className="font-bold text-2xl text-slate-900 leading-none tracking-tight">FPTU Synchronizer</h1>
+            <p className="text-sm font-bold text-[#F27024] uppercase tracking-[0.3em] mt-2">Schedule Importer</p>
           </div>
         </div>
 
@@ -45,6 +47,20 @@ const Layout: React.FC<Props> = ({ children, user, userId, onLogout, syncHistory
             </svg>
             <span className="hidden sm:inline">Lịch sử</span>
           </button>
+
+          {isAdmin(user.email) && (
+            <Link
+              to="/admin"
+              className="flex items-center gap-1.5 px-3 py-1.5 bg-orange-50 hover:bg-orange-100 text-[#F27024] rounded-md transition-colors font-bold text-xs border border-orange-100"
+              title="Quản lý hệ thống"
+            >
+              <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                <circle cx="12" cy="12" r="3"></circle>
+                <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"></path>
+              </svg>
+              <span className="hidden sm:inline">Quản trị</span>
+            </Link>
+          )}
 
           <div className="text-right hidden sm:block">
             <div className="font-bold text-xs text-slate-800 leading-none">{user.name}</div>

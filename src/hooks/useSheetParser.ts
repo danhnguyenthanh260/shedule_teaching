@@ -1,7 +1,7 @@
 
 import { useState, useMemo, useCallback } from 'react';
 import { googleService } from '../services/googleService';
-import { ColumnMapping, RowNormalized } from '../types';
+import { ColumnMapping, RowNormalized, DateFormat } from '../types';
 import {
   mergeHeaderRows,
   fillForwardHeaders,
@@ -23,6 +23,9 @@ interface UseSheetParserProps {
   setFullRows: (rows: string[][]) => void;
   fullHeaders: string[];
   fullDetailHeaders: string[];
+  dateFormat: DateFormat;
+  searchColumnIndices: number[];
+  setSearchColumnIndices: (indices: number[]) => void;
 }
 
 export const useSheetParser = ({
@@ -37,7 +40,10 @@ export const useSheetParser = ({
   setTitleRow,
   setFullRows,
   fullHeaders,
-  fullDetailHeaders
+  fullDetailHeaders,
+  dateFormat,
+  searchColumnIndices,
+  setSearchColumnIndices
 }: UseSheetParserProps) => {
   const [loading, setLoading] = useState(false);
   const [rows, setRows] = useState<RowNormalized[]>([]);
@@ -84,7 +90,8 @@ export const useSheetParser = ({
           rawRows: rowsToUse,
           mapping,
           headerRowIndex,
-          isDataMau: true
+          isDataMau: true,
+          preferredFormat: dateFormat
         });
       } else {
         normalized = googleService.normalizeRows({
@@ -93,7 +100,8 @@ export const useSheetParser = ({
           headers: fullHeaders,
           rawRows: rowsToUse,
           mapping,
-          headerRowIndex
+          headerRowIndex,
+          preferredFormat: dateFormat
         });
       }
       setRows(normalized);
@@ -107,7 +115,7 @@ export const useSheetParser = ({
     } finally {
       setLoading(false);
     }
-  }, [allRows, fullHeaders, fullDetailHeaders, headerRowIndex, sheetMeta, tabName]);
+  }, [allRows, fullHeaders, fullDetailHeaders, headerRowIndex, sheetMeta, tabName, dateFormat]);
 
   const headerOptions = useMemo(() => {
     const options: { label: string; value: number }[] = [];
@@ -151,10 +159,10 @@ export const useSheetParser = ({
     return options;
   }, [allRows]);
 
-  const examinerColumnIndices = useMemo(() => {
+  const inferredSearchIndices = useMemo(() => {
     const keywords = [
       'ho va ten', 'thanh vien hoi dong', 'reviewer', 'reviewer 1', 'reviewer 2',
-      'chu tich', 'thu ky', 'uy vien', 'can bo', 'giang vien'
+      'chu tich', 'thu ky', 'uy vien', 'can bo', 'giang vien', 'giang vien 1', 'giang vien 2'
     ];
     return fullHeaders.reduce((acc, header, index) => {
       const h = khongDau(header);
@@ -164,6 +172,13 @@ export const useSheetParser = ({
       return acc;
     }, [] as number[]);
   }, [fullHeaders]);
+
+  const effectiveSearchColumns = useMemo(() => {
+    if (searchColumnIndices && searchColumnIndices.length > 0) {
+      return searchColumnIndices;
+    }
+    return inferredSearchIndices;
+  }, [searchColumnIndices, inferredSearchIndices]);
 
   return {
     loading,
@@ -175,6 +190,6 @@ export const useSheetParser = ({
     applyMapping,
     headerOptions,
     headerRowOptions,
-    examinerColumnIndices
+    effectiveSearchColumns
   };
 };

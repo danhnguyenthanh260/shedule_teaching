@@ -1,5 +1,5 @@
 
-import { RowNormalized, InferredSchema, SyncResult, ColumnMapping } from '../types';
+import { RowNormalized, InferredSchema, SyncResult, ColumnMapping, DateFormat } from '../types';
 import { parseDateTime } from '../utils/dateTimeParser';
 
 /**
@@ -7,7 +7,8 @@ import { parseDateTime } from '../utils/dateTimeParser';
  */
 
 function generateRowId(sheetId: string, tab: string, rowIdx: number, prefix: string = 'row'): string {
-  return `${prefix}-${sheetId.substring(0, 5)}-${tab}-${rowIdx}`;
+  const cleanTab = (tab || 'Sheet1').replace(/[^a-zA-Z0-9]/g, '');
+  return `${prefix}-${sheetId.substring(0, 5)}-${cleanTab}-${rowIdx}`;
 }
 
 function isLikelyPersonName(val: string): boolean {
@@ -20,12 +21,15 @@ function isLikelyPersonName(val: string): boolean {
   return true;
 }
 
-function parseVNTime(dateStr: string, timeStr: string): { start: string; end: string } {
+function parseVNTime(dateStr: string, timeStr: string, preferredFormat?: DateFormat): { start: string; end: string } {
   try {
-    // ✅ Log input để debug
-    console.log(`🔍 parseVNTime Input: date="${dateStr}", time="${timeStr}"`);
+    // 🚨 DEFENSIVE: Nếu nhận vào chuỗi rỗng, trả về fallback an toàn thay vì crash
+    if (!dateStr || !timeStr) {
+       console.warn(`⚠️ parseVNTime received empty input: date="${dateStr}", time="${timeStr}". Returning fallback.`);
+       return { start: "1970-01-01T08:00:00+07:00", end: "1970-01-01T09:00:00+07:00" };
+    }
 
-    const parsedDate = parseDateTime(dateStr);
+    const parsedDate = parseDateTime(dateStr, preferredFormat);
     const parsedTime = parseDateTime(timeStr);
 
     console.log(`📅 Parsed Date:`, parsedDate);
@@ -33,8 +37,8 @@ function parseVNTime(dateStr: string, timeStr: string): { start: string; end: st
 
     // ⚠️ KHÔNG dùng fallback ngày hiện tại - báo lỗi rõ ràng
     if (!parsedDate.dateString) {
-      console.error(`❌ Cannot parse date: "${dateStr}"`);
-      throw new Error(`Invalid date format: "${dateStr}". Expected format: dd/MM/yyyy or dd-MM-yyyy`);
+      console.error(`❌ Cannot parse date: "${dateStr}" (Detected type: ${parsedDate.type})`);
+      throw new Error(`Không thể phân tích ngày: "${dateStr}". Vui lòng kiểm tra định dạng (Hỗ trợ VN: dd/MM/yyyy hoặc US: M/d/yyyy).`);
     }
 
     const datePart = parsedDate.dateString;
@@ -62,7 +66,7 @@ function parseVNTime(dateStr: string, timeStr: string): { start: string; end: st
   }
 }
 
-function inferSchema(headers: string[], sampleRows: string[][]): InferredSchema {
+export function inferSchema(headers: string[], sampleRows: string[][]): InferredSchema {
   const mapping: Record<string, number> = {};
 
   headers.forEach((h, i) => {
@@ -201,52 +205,88 @@ export class GoogleSyncService {
     rawRows: string[][];
     mapping: ColumnMapping;
     headerRowIndex: number;
+    preferredFormat?: DateFormat;
   }): RowNormalized[] {
-    const { sheetId, tab, mapping, rawRows, headerRowIndex } = params;
+    const { sheetId, tab, mapping, rawRows, headerRowIndex, preferredFormat } = params;
     // Bắt đầu từ dòng tiếp theo của header đã chọn
     const dataRows = rawRows.slice(headerRowIndex + 1);
+    console.log(`[GoogleService] normalizeRows START: ${dataRows.length} rows`);
+    console.log(`[GoogleService] Target Date Col Index: ${mapping.date}, Time Col Index: ${mapping.time}`);
 
-    console.log(`[GoogleService] normalizeRows: processing ${dataRows.length} rows, headerRowIndex: ${headerRowIndex}`);
+    if (mapping.date === undefined || mapping.time === undefined) {
+      console.error(`[GoogleService] CRITICAL: Mapping is missing Date (${mapping.date}) or Time (${mapping.time})!`);
+    }
+    
+    let lastDate = "";
+    let lastLocation = "";
+    let successCount = 0;
+    let failCount = 0;
 
-    return dataRows.map((row, idx) => {
-      // Bỏ qua dòng nếu trông giống header (chứa các từ khóa tiêu đề)
-      const joinedRow = row.join(" ").toLowerCase();
-      if (joinedRow.includes("ngày") || joinedRow.includes("thời gian") || joinedRow.includes("phòng")) {
+    const results = dataRows.map((row, idx) => {
+      // 🚨 Bỏ qua dòng trống
+      if (!row || row.length === 0 || row.join("").trim() === "") return null;
+
+      const dateRaw = (mapping.date !== undefined && mapping.date < row.length ? (row[mapping.date] || "") : "").toString().trim();
+      const timeRaw = (mapping.time !== undefined && mapping.time < row.length ? (row[mapping.time] || "") : "").toString().trim();
+      const locationRaw = (mapping.location !== undefined && mapping.location < row.length ? (row[mapping.location] || "") : "").toString().trim();
+
+      if (dateRaw) lastDate = dateRaw;
+      if (locationRaw) lastLocation = locationRaw;
+
+      // 🚨 KIỂM TRA QUAN TRỌNG: Cần có GIỜ mới coi là 1 sự kiện
+      if (!timeRaw) {
+        // Chỉ log nếu dòng có vẻ là dữ liệu (ví dụ có cột person ở đầu)
+        const hasData = row.slice(0, 5).some(c => c && c.length > 2);
+        if (hasData) console.warn(`[Normalized] Dòng ${idx} SKIP: Thiếu GIỜ (Col ${mapping.time}). Raw:`, row.slice(0, 8));
+        failCount++;
         return null;
       }
 
-      const date = (mapping.date !== undefined ? (row[mapping.date] || "") : "").toString().trim();
-      const time = (mapping.time !== undefined ? (row[mapping.time] || "") : "").toString().trim();
-
-      // Chỉ bỏ qua nếu thiếu cả ngày và giờ
-      if (!date && !time) return null;
-
-      const { start, end } = parseVNTime(date, time);
-      let person = (mapping.person !== undefined ? (row[mapping.person] || "") : "").toString().trim();
-
-      // Cố gắng lấy person từ các cột lân cận nếu cột mapping đang trống
-      if (!person || !isLikelyPersonName(person)) {
-        // Thử lấy task name làm person
-        const taskVal = (mapping.task !== undefined ? row[mapping.task] : "");
-        person = (taskVal || person || "Cán bộ/GV").toString().trim();
+      // 🚨 Cần có NGÀY (tự có hoặc lấy từ dòng trên)
+      if (!lastDate) {
+        console.warn(`[Normalized] Dòng ${idx} SKIP: Thiếu NGÀY (Col ${mapping.date}). Raw:`, row.slice(0, 8));
+        failCount++;
+        return null;
       }
 
-      return {
-        id: generateRowId(sheetId, tab, idx + headerRowIndex + 1),
-        date: date || "Chưa rõ",
-        startTime: start,
-        endTime: end,
-        person: person,
-        task: (mapping.task !== undefined ? (row[mapping.task] || "Nhiệm vụ") : "Nhiệm vụ").toString().trim(),
-        location: (mapping.location !== undefined ? (row[mapping.location] || "Chưa xác định") : "Chưa xác định").toString().trim(),
-        dateRaw: date,
-        timeRaw: time,
-        personRaw: (mapping.person !== undefined ? row[mapping.person] : "").toString().trim(),
-        locationRaw: (mapping.location !== undefined ? row[mapping.location] : "").toString().trim(),
-        status: 'pending',
-        rawRow: row
-      };
+      try {
+        const { start, end } = parseVNTime(lastDate, timeRaw, preferredFormat);
+        let person = (mapping.person !== undefined && mapping.person < row.length ? (row[mapping.person] || "") : "").toString().trim();
+
+        if (!person || !isLikelyPersonName(person)) {
+          const taskVal = (mapping.task !== undefined && mapping.task < row.length ? row[mapping.task] : "");
+          person = (taskVal || person || "Cán bộ/GV").toString().trim();
+        }
+
+        successCount++;
+        return {
+          id: generateRowId(sheetId, tab, idx + headerRowIndex + 1),
+          date: lastDate,
+          startTime: start,
+          endTime: end,
+          person: person,
+          task: (mapping.task !== undefined && mapping.task < row.length ? (row[mapping.task] || "Nhiệm vụ") : "Nhiệm vụ").toString().trim(),
+          location: lastLocation || "Chưa xác định",
+          resources: [
+            person ? `teacher:${person}` : null,
+            lastLocation ? `room:${lastLocation}` : null
+          ].filter(Boolean) as string[],
+          dateRaw: lastDate,
+          timeRaw: timeRaw,
+          personRaw: (mapping.person !== undefined && mapping.person < row.length ? row[mapping.person] : "").toString().trim(),
+          locationRaw: lastLocation,
+          status: 'pending',
+          rawRow: row
+        };
+      } catch (err) {
+        console.error(`[Normalized] Lỗi parse dòng ${idx}:`, err);
+        failCount++;
+        return null;
+      }
     }).filter(r => r !== null) as RowNormalized[];
+
+    console.log(`[GoogleService] normalizeRows DONE: Success=${successCount}, Skipped/Failed=${failCount}`);
+    return results;
   }
 
   normalizeRowsWithGrouping(params: {
@@ -258,8 +298,9 @@ export class GoogleSyncService {
     mapping: ColumnMapping;
     headerRowIndex: number;
     isDataMau?: boolean;
+    preferredFormat?: DateFormat;
   }): RowNormalized[] {
-    const { sheetId, tab, groupHeaders, detailHeaders, rawRows, mapping, headerRowIndex, isDataMau } = params;
+    const { sheetId, tab, groupHeaders, detailHeaders, rawRows, mapping, headerRowIndex, isDataMau, preferredFormat } = params;
     const allEvents: RowNormalized[] = [];
     const dataRows = rawRows.slice(headerRowIndex + 1);
 
@@ -282,10 +323,11 @@ export class GoogleSyncService {
       if (currentTime) lastTime = currentTime;
       if (currentLocation) lastLocation = currentLocation;
 
-      // Không có date/time thì không xử lý dòng này
-      if (!lastDate && !lastTime) return;
+      // 🚨 Bắt buộc có đủ ngày và giờ mới xử lý
+      if (!lastDate || !lastTime) return;
 
-      const { start, end } = parseVNTime(lastDate, lastTime);
+      console.log(`[Grouping-Row] Check row ${rowIndex}: date="${lastDate}", time="${lastTime}"`);
+      const { start, end } = parseVNTime(lastDate, lastTime, preferredFormat);
       const baseTask = (mapping.task !== undefined ? (row[mapping.task] || "Review") : "Review").toString().trim();
 
       // Tự động nhận diện tất cả các khối (Review 1, 2, 3...)
@@ -386,7 +428,16 @@ export class GoogleSyncService {
           const rTime = getMappedValue('time') || lastTime;
           const rLocation = getMappedValue('location') || lastLocation;
 
-          const { start, end } = parseVNTime(rDate, rTime);
+          // 🚨 Kiểm tra ngày trước khi parse
+          if (!rDate) {
+            console.warn(`[Grouping] Bỏ qua vì thiếu ngày: Review=${gName}, Row=${rowIndex}`);
+            return;
+          }
+          if (!rTime) {
+            return; // Không có giờ thì thôi
+          }
+
+          const { start, end } = parseVNTime(rDate, rTime, preferredFormat);
           const reviewerNames = reviewers.join(" & ");
 
           let personValue = "";
@@ -407,6 +458,10 @@ export class GoogleSyncService {
             endTime: end,
             task: baseTask,
             location: rLocation || "Chưa xác định",
+            resources: [
+              reviewerNames ? `teacher:${reviewerNames}` : null,
+              rLocation ? `room:${rLocation}` : null
+            ].filter(Boolean) as string[],
             dateRaw: rDate,
             timeRaw: rTime,
             personRaw: reviewerNames,
@@ -420,6 +475,10 @@ export class GoogleSyncService {
         const personValue = (mapping.person !== undefined ? (row[mapping.person] || "") : "").toString().trim();
         if (!personValue && !baseTask) return;
 
+        if (!lastDate || !lastTime) return;
+        console.log(`[Grouping-Normal] date="${lastDate}", time="${lastTime}"`);
+        const { start, end } = parseVNTime(lastDate, lastTime, preferredFormat);
+
         allEvents.push({
           id: `${sheetId}-${tab}-${rowIndex}`,
           person: personValue || baseTask,
@@ -428,6 +487,10 @@ export class GoogleSyncService {
           endTime: end,
           task: baseTask,
           location: lastLocation || "Chưa xác định",
+          resources: [
+            personValue ? `teacher:${personValue}` : null,
+            lastLocation ? `room:${lastLocation}` : null
+          ].filter(Boolean) as string[],
           dateRaw: lastDate,
           timeRaw: lastTime,
           personRaw: personValue || baseTask,

@@ -10,6 +10,7 @@ import {
   fillForwardHeaders,
   looksLikeDataRow
 } from '../utils/sheetUtils';
+import { DateFormat } from '../types';
 
 interface UseSheetLogicProps {
   sheetUrl: string;
@@ -18,6 +19,7 @@ interface UseSheetLogicProps {
   firebaseUser: any;
   columnMap: ColumnMapping;
   setColumnMap: (map: ColumnMapping) => void;
+  dateFormat: DateFormat;
   allRows: string[][];
   setAllRows: (rows: string[][]) => void;
   sheetMeta: any;
@@ -60,7 +62,8 @@ export const useSheetLogic = ({
   setFullRows,
   selectedIds,
   setSelectedIds,
-  personFilter
+  personFilter,
+  dateFormat
 }: UseSheetLogicProps) => {
   const [loading, setLoading] = useState(false);
   const [loadingMode, setLoadingMode] = useState<'test1' | 'review' | null>(null);
@@ -173,7 +176,8 @@ export const useSheetLogic = ({
           rawRows: rowsToUse,
           mapping,
           headerRowIndex,
-          isDataMau: true
+          isDataMau: true,
+          preferredFormat: dateFormat
         });
       } else {
         normalized = googleService.normalizeRows({
@@ -182,7 +186,8 @@ export const useSheetLogic = ({
           headers: fullHeaders,
           rawRows: rowsToUse,
           mapping,
-          headerRowIndex
+          headerRowIndex,
+          preferredFormat: dateFormat
         });
       }
       setRows(normalized);
@@ -239,9 +244,16 @@ export const useSheetLogic = ({
         // ✅ Generate unique signature for duplicate detection
         const signature = await generateEventSignature(event);
 
+        // ✅ Define resources for conflict detection
+        const resources = [
+          `teacher:${(r.person || r.personRaw || '').trim()}`,
+          `room:${(r.location || r.locationRaw || '').trim()}`
+        ].filter(res => !res.endsWith(':')); // Remove empty resources
+
         return {
           ...event,
-          signature
+          signature,
+          resources
         };
       }));
 

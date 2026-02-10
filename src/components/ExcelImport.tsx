@@ -4,6 +4,7 @@ import * as XLSX from 'xlsx';
 import { readSheet } from '../services/appsScriptService';
 import { configService, SemesterConfig } from '../services/configService';
 import { detectSheetType, SheetTypeInfo } from '../utils/sheetTypeDetection';
+import { DateFormat } from '../types';
 
 interface ExcelImportProps {
   onDataLoaded: (data: {
@@ -25,6 +26,11 @@ interface ExcelImportProps {
   columnsConfig: string;
   setColumnsConfig: (cols: string) => void;
   accessToken: string | null;
+  dateFormat: DateFormat;
+  setDateFormat: (format: DateFormat) => void;
+  selectedSemesterId: string;
+  setSelectedSemesterId: (id: string) => void;
+  isAdmin?: boolean;
 }
 
 export const ExcelImport: React.FC<ExcelImportProps> = ({
@@ -39,11 +45,15 @@ export const ExcelImport: React.FC<ExcelImportProps> = ({
   setStartRow,
   columnsConfig,
   setColumnsConfig,
-  accessToken
+  accessToken,
+  dateFormat,
+  setDateFormat,
+  selectedSemesterId,
+  setSelectedSemesterId,
+  isAdmin = false
 }) => {
   const [isProcessing, setIsProcessing] = useState(false);
   const [semesters, setSemesters] = useState<Record<string, SemesterConfig>>({});
-  const [selectedSemesterId, setSelectedSemesterId] = useState<string>('');
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   // Fetch configs on mount
@@ -55,10 +65,16 @@ export const ExcelImport: React.FC<ExcelImportProps> = ({
         const configs = await configService.fetchConfigs();
         setSemesters(configs);
 
-        // Auto-select first semester if available
-        const firstId = Object.keys(configs)[0];
-        if (firstId) {
-          handleSemesterChange(firstId, configs);
+
+        // ✅ SESSION PERSISTENCE: Use persisted semester if available, otherwise auto-select first
+        if (selectedSemesterId && configs[selectedSemesterId]) {
+          console.log('🔄 Session Persistence: Restoring semester:', selectedSemesterId);
+          handleSemesterChange(selectedSemesterId, configs);
+        } else if (!selectedSemesterId) {
+          const firstId = Object.keys(configs)[0];
+          if (firstId) {
+            handleSemesterChange(firstId, configs);
+          }
         }
       } catch (err: any) {
         // ✅ TASK 2 & 3: Show error immediately if config fetch fails
@@ -77,7 +93,7 @@ export const ExcelImport: React.FC<ExcelImportProps> = ({
     if (selectedSemesterId && sheetUrl) {
       handleShowData();
     }
-  }, [selectedSemesterId]);
+  }, [selectedSemesterId, sheetUrl]);
 
   const handleSemesterChange = (semesterId: string, currentSemesters = semesters) => {
     setSelectedSemesterId(semesterId);
@@ -103,6 +119,9 @@ export const ExcelImport: React.FC<ExcelImportProps> = ({
       setSheetUrl(config.sheetUrl);
       setStartRow(parseInt(config.startRow) || 1);
       setColumnsConfig(config.columns);
+      if (config.dateFormat) {
+        setDateFormat(config.dateFormat);
+      }
     }
   };
 
@@ -220,14 +239,14 @@ export const ExcelImport: React.FC<ExcelImportProps> = ({
   };
 
   return (
-    <div className="flex flex-col gap-3">
+    <div className="flex flex-col gap-3 p-1">
       {/* Simplify Step 1: Just Semester Selection & Auto-load status */}
       <div className="flex flex-col sm:flex-row items-end gap-3">
         <div className="flex-1 w-full">
-          <label className="block text-[10px] font-black text-slate-400 mb-1.5 ml-1 uppercase tracking-widest">Chọn Học kỳ để lấy lịch</label>
+          <label className="block text-[10px] font-bold text-slate-400 mb-1.5 ml-1 uppercase tracking-widest">Chọn Học kỳ để lấy lịch</label>
           <div className="relative group">
             <select
-              className="w-full pl-4 pr-10 py-2.5 bg-white border border-slate-200 rounded-xl focus:ring-2 focus:ring-fpt-orange outline-none text-sm font-bold text-slate-700 h-12 shadow-sm appearance-none transition-all group-hover:border-slate-300"
+              className="w-full pl-4 pr-10 py-2.5 bg-white border border-slate-200 rounded-xl focus:ring-2 focus:ring-fpt-orange outline-none text-sm font-bold text-slate-700 h-12 appearance-none transition-all group-hover:border-slate-300 pointer-events-auto cursor-pointer relative z-10"
               value={selectedSemesterId}
               onChange={(e) => handleSemesterChange(e.target.value)}
             >
@@ -242,11 +261,12 @@ export const ExcelImport: React.FC<ExcelImportProps> = ({
           </div>
         </div>
 
+
         <div className="flex-none flex items-center gap-2 mb-0.5">
           <button
             onClick={handleShowData}
             disabled={isProcessing || !sheetUrl}
-            className="px-6 h-12 bg-[#F27024] text-white rounded-xl hover:bg-orange-600 active:scale-95 transition-all font-black shadow-lg shadow-orange-200 flex items-center justify-center gap-2 disabled:bg-slate-100 disabled:text-slate-400 disabled:shadow-none min-w-[140px]"
+            className="px-6 h-12 bg-[#F27024] text-white rounded-xl hover:bg-orange-600 active:scale-95 transition-all font-bold shadow-lg shadow-orange-200 flex items-center justify-center gap-2 disabled:bg-slate-100 disabled:text-slate-400 disabled:shadow-none min-w-[140px]"
           >
             {isProcessing ? (
               <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
@@ -260,23 +280,25 @@ export const ExcelImport: React.FC<ExcelImportProps> = ({
             )}
           </button>
 
-          <button
-            onClick={() => fileInputRef.current?.click()}
-            disabled={isProcessing}
-            className="w-12 h-12 bg-slate-100 text-slate-500 rounded-xl hover:bg-slate-200 active:scale-95 transition-all flex items-center justify-center border border-slate-200 shadow-sm"
-            title="Tải file .xlsx từ máy"
-          >
-            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12" />
-            </svg>
-            <input
-              type="file"
-              ref={fileInputRef}
-              onChange={handleFileUpload}
-              className="hidden"
-              accept=".xlsx, .xls"
-            />
-          </button>
+          {isAdmin && (
+            <button
+              onClick={() => fileInputRef.current?.click()}
+              disabled={isProcessing}
+              className="w-12 h-12 bg-slate-100 text-slate-500 rounded-xl hover:bg-slate-200 active:scale-95 transition-all flex items-center justify-center border border-slate-200 shadow-sm"
+              title="Tải file .xlsx từ máy"
+            >
+              <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12" />
+              </svg>
+              <input
+                type="file"
+                ref={fileInputRef}
+                onChange={handleFileUpload}
+                className="hidden"
+                accept=".xlsx, .xls"
+              />
+            </button>
+          )}
         </div>
       </div>
 
@@ -292,7 +314,7 @@ export const ExcelImport: React.FC<ExcelImportProps> = ({
       {isProcessing && (
         <div className="flex items-center gap-2 px-3 py-2 bg-orange-50 rounded-lg animate-pulse border border-orange-100">
           <div className="w-2 h-2 bg-orange-400 rounded-full animate-bounce"></div>
-          <span className="text-[9px] font-black text-orange-600 uppercase tracking-widest">Đang tải dữ liệu từ Google Sheets...</span>
+          <span className="text-[9px] font-bold text-orange-600 uppercase tracking-widest">Đang tải dữ liệu từ Google Sheets...</span>
         </div>
       )}
     </div>

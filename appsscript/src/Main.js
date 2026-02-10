@@ -24,33 +24,30 @@ const CONSTANTS = {
 
 
 /* =========================
- * 2. doGet – API ENTRY POINT
+ * 2. doGet – XỬ LÝ ĐỌC DỮ LIỆU (GET)
  * ========================= */
 function doGet(e) {
   try {
     const action = e.parameter.action;
 
-    /* ===== CASE 1: READ GOOGLE SHEET ===== */
+    // Trường hợp 1: Nhấn "Hiện dữ liệu" trên React (Proxy gọi)
     if (action === 'readSheet') {
       return handleReadSheet_(e);
     }
 
-    /* ===== CASE 2: ADMIN UI ===== */
+    // Trường hợp 2: Truy cập trang Admin trực tiếp
     if (e.parameter.view === 'true') {
       return handleAdminView_();
     }
 
-    /* ===== DEFAULT ===== */
+    // Mặc định: Trả về trạng thái hoạt động
     return jsonResponse_({
       status: CONSTANTS.SUCCESS,
-      message: 'Schedule Teaching API is running'
+      message: 'API is running smoothly via Proxy'
     });
 
   } catch (err) {
-    return jsonResponse_({
-      status: CONSTANTS.ERROR,
-      message: err.toString()
-    });
+    return jsonResponse_({ status: CONSTANTS.ERROR, message: err.toString() });
   }
 }
 
@@ -58,35 +55,18 @@ function doGet(e) {
 /* =========================
  * 3. READ GOOGLE SHEET LOGIC
  * ========================= */
+// Đọc Google Sheet
 function handleReadSheet_(e) {
-  const sheetUrl = e.parameter.url;
+  const url = e.parameter.url;
   const startRow = parseInt(e.parameter.startRow || '1', 10);
+  if (!url) throw new Error('Missing sheet url');
 
-  if (!sheetUrl) {
-    return jsonResponse_({
-      status: CONSTANTS.ERROR,
-      message: 'Missing sheet url'
-    });
-  }
+  const ss = SpreadsheetApp.openByUrl(url);
+  const sheet = ss.getSheets()[0];
+  const data = sheet.getDataRange().getValues();
+  const filtered = data.slice(startRow - 1);
 
-  try {
-    const ss = SpreadsheetApp.openByUrl(sheetUrl);
-    const sheet = ss.getSheets()[0];
-
-    const values = sheet.getDataRange().getValues();
-    const filtered = values.slice(startRow - 1);
-
-    return jsonResponse_({
-      status: CONSTANTS.SUCCESS,
-      data: filtered
-    });
-
-  } catch (err) {
-    return jsonResponse_({
-      status: CONSTANTS.ERROR,
-      message: 'Read sheet failed: ' + err.toString()
-    });
-  }
+  return jsonResponse_({ status: CONSTANTS.SUCCESS, data: filtered });
 }
 
 

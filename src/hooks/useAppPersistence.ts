@@ -1,7 +1,7 @@
 
 import { useState, useEffect } from 'react';
 import { persistStateService } from '../utils/persistState';
-import { ColumnMapping } from '../types';
+import { ColumnMapping, DateFormat } from '../types';
 import { SheetTypeInfo } from '../utils/sheetTypeDetection';
 
 export const useAppPersistence = () => {
@@ -20,6 +20,9 @@ export const useAppPersistence = () => {
   const [fullRows, setFullRows] = useState<string[][]>([]);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [sheetType, setSheetType] = useState<SheetTypeInfo | null>(null);
+  const [dateFormat, setDateFormat] = useState<DateFormat>('dd/MM/yyyy');
+  const [searchColumnIndices, setSearchColumnIndices] = useState<number[]>([]);
+  const [selectedSemesterId, setSelectedSemesterId] = useState<string>('');
 
   // Restore state on mount
   useEffect(() => {
@@ -40,6 +43,9 @@ export const useAppPersistence = () => {
       if (restored.titleRow?.length) setTitleRow(restored.titleRow);
       if (restored.fullRows?.length) setFullRows(restored.fullRows);
       if (restored.selectedIds?.length) setSelectedIds(new Set(restored.selectedIds));
+      if (restored.dateFormat) setDateFormat(restored.dateFormat as DateFormat);
+      if (restored.searchColumnIndices) setSearchColumnIndices(restored.searchColumnIndices);
+      if (restored.selectedSemesterId) setSelectedSemesterId(restored.selectedSemesterId);
 
       console.log('✓ App state restored from secure storage');
     };
@@ -61,6 +67,9 @@ export const useAppPersistence = () => {
   useEffect(() => { if (titleRow.length) persistStateService.saveState({ titleRow }); }, [titleRow]);
   useEffect(() => { if (fullRows.length) persistStateService.saveState({ fullRows }); }, [fullRows]);
   useEffect(() => { if (selectedIds.size) persistStateService.saveState({ selectedIds: Array.from(selectedIds) }); }, [selectedIds]);
+  useEffect(() => { persistStateService.saveState({ dateFormat }); }, [dateFormat]);
+  useEffect(() => { persistStateService.saveState({ searchColumnIndices }); }, [searchColumnIndices]);
+  useEffect(() => { persistStateService.saveState({ selectedSemesterId }); }, [selectedSemesterId]);
 
   const clearPersistence = () => {
     persistStateService.clearState();
@@ -83,6 +92,9 @@ export const useAppPersistence = () => {
     fullRows, setFullRows,
     selectedIds, setSelectedIds,
     sheetType, setSheetType,
+    dateFormat, setDateFormat,
+    searchColumnIndices, setSearchColumnIndices,
+    selectedSemesterId, setSelectedSemesterId,
     clearPersistence
   };
 };

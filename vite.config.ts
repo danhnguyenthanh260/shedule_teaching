@@ -8,25 +8,17 @@ export default defineConfig(({ mode }) => {
     server: {
       port: 3000,
       host: '0.0.0.0',
+      // ✅ Local Dev Proxy: Handles /api calls during 'npm run dev'
+      // This is required because Vite doesn't natively handle Vercel's /api folder.
       proxy: {
         '/api': {
-          target: 'https://script.google.com',
+          target: env.GAS_EXEC_URL || env.VITE_BACKEND_URL || 'https://script.google.com',
           changeOrigin: true,
           followRedirects: true,
           rewrite: (path) => {
-            const url = env.GAS_EXEC_URL || env.VITE_BACKEND_URL;
-            if (!url) return path;
-            
-            try {
-              const urlObj = new URL(url);
-              // Lấy phần /macros/s/XXX/exec
-              const targetBase = urlObj.pathname;
-              // Thay thế /api/readSheet bằng /macros/s/XXX/exec
-              // Giữ nguyên phần query string (?action=...)
-              return path.replace(/^\/api\/[a-zA-Z0-9_-]+/, targetBase);
-            } catch (e) {
-              return path;
-            }
+            const newPath = path.replace(/^\/api\/[^/?]+/, '');
+            console.log(`🔄 Proxy: ${path} -> ${newPath}`);
+            return newPath;
           },
           secure: true,
         },

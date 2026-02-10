@@ -1,4 +1,5 @@
 import { format, parse, isValid } from 'date-fns';
+import { DateFormat } from '../types';
 
 export interface TimeSlot {
   slot: number;
@@ -30,7 +31,7 @@ const STANDARD_SLOTS: TimeSlot[] = [
 /**
  * Parse ngày tháng với nhiều format khác nhau
  */
-export function parseDate(value: any): Date | null {
+export function parseDate(value: any, preferredFormat?: DateFormat): Date | null {
   if (!value) return null;
 
   // Nếu đã là Date object
@@ -65,24 +66,42 @@ export function parseDate(value: any): Date | null {
   }
 
   // ✅ Các format date thường gặp - ƯU TIÊN FORMAT VIỆT NAM
-  const dateFormats = [
+  let dateFormats: string[] = [
     'dd/MM/yyyy',    // 27/01/2026 (VN) - Ưu tiên cao nhất
     'd/M/yyyy',      // 27/1/2026 (VN) - Ưu tiên cao
     'dd-MM-yyyy',    // 27-01-2026 (VN)
     'd-M-yyyy',      // 27-1-2026 (VN)
+    'MM/dd/yyyy',    // 01/27/2026 (US)
+    'M/d/yyyy',      // 1/27/2026 (US)
     'yyyy-MM-dd',    // 2026-01-27 (ISO)
     'yyyy/MM/dd',    // 2026/01/27 (ISO)
-    'MM/dd/yyyy',    // 01/27/2026 (US) - Format Mỹ xuống cuối
-    'M/d/yyyy',      // 1/27/2026 (US) - Format Mỹ xuống cuối
     'M-d-yyyy',      // 1-27-2026 (US)
   ];
 
+  // Nếu người dùng có format ưu tiên, đẩy lên đầu danh sách
+  if (preferredFormat) {
+    dateFormats = [preferredFormat, ...dateFormats.filter(f => f !== preferredFormat)];
+    console.log(`📅 parseDate: Using preferred format "${preferredFormat}" first`);
+  }
+
   for (const fmt of dateFormats) {
     try {
+      // 🚨 QUAN TRỌNG: parse của date-fns có thể trả về ngày "hợp lệ" nhưng sai logic 
+      // nếu format không khớp tuyệt đối (ví dụ parse 1/27/2026 với dd/MM/yyyy)
       const parsed = parse(strValue, fmt, new Date());
+      
       if (isValid(parsed)) {
-        console.log(`📅 parseDate: "${strValue}" matched format "${fmt}" → ${parsed.toISOString()}`);
-        return parsed;
+        // Kiểm tra xem chuỗi đã parse có format lại giống y hệt chuỗi gốc không
+        // Điều này đảm bảo format khớp hoàn toàn chứ không phải parse "gượng ép"
+        const formattedBack = format(parsed, fmt);
+        
+        // So sánh chuỗi (lược bỏ các số 0 ở đầu để linh hoạt 1/1 vs 01/01)
+        const normalize = (s: string) => s.replace(/\/0/g, '/').replace(/-0/g, '-').replace(/^0/, '');
+        
+        if (normalize(formattedBack) === normalize(strValue)) {
+          console.log(`📅 parseDate: "${strValue}" MATCHED format "${fmt}" → ${parsed.toISOString()}`);
+          return parsed;
+        }
       }
     } catch {
       continue;
@@ -106,9 +125,9 @@ export function parseSlotNumber(value: any): TimeSlot | null {
 
   const strValue = String(value).trim().toLowerCase();
 
-  // Nếu là số thuần túy từ 1-6
-  const numValue = parseInt(strValue);
-  if (!isNaN(numValue) && numValue >= 1 && numValue <= 6) {
+  // Nếu là số thuần túy từ 1-6 (🚨 Chỉ chấp nhận nếu TOÀN BỘ chuỗi là 1 chữ số từ 1-6)
+  if (/^[1-6]$/.test(strValue)) {
+    const numValue = parseInt(strValue);
     return STANDARD_SLOTS[numValue - 1];
   }
 
@@ -210,7 +229,7 @@ export function parseTimeRange(value: any): TimeSlot | null {
 /**
  * Hàm chính để parse bất kỳ giá trị datetime nào
  */
-export function parseDateTime(value: any): ParsedDateTime {
+export function parseDateTime(value: any, preferredFormat?: DateFormat): ParsedDateTime {
   if (!value || value === '') {
     return {
       rawValue: '',
@@ -241,7 +260,7 @@ export function parseDateTime(value: any): ParsedDateTime {
   }
 
   // 3. Thử parse date
-  const date = parseDate(value);
+  const date = parseDate(value, preferredFormat);
   if (date) {
     return {
       date,
@@ -282,7 +301,8 @@ export function formatDateTime(parsed: ParsedDateTime): string {
 export function normalizeDataDateTime(
   data: Record<string, any>[],
   dateColumns: string[] = ['Date', 'date', 'Ngày'],
-  timeColumns: string[] = ['Slot', 'Time', 'Giờ', 'Slot Code']
+  timeColumns: string[] = ['Slot', 'Time', 'Giờ', 'Slot Code'],
+  preferredFormat?: DateFormat
 ): Record<string, any>[] {
   return data.map(row => {
     const normalized: Record<string, any> = { ...row };
@@ -290,7 +310,7 @@ export function normalizeDataDateTime(
     // Normalize date columns
     dateColumns.forEach(col => {
       if (row[col]) {
-        const parsed = parseDateTime(row[col]);
+        const parsed = parseDateTime(row[col], preferredFormat);
         if (parsed.type === 'date') {
           normalized[col] = parsed.dateString;
           normalized[`${col}_formatted`] = format(parsed.date!, 'dd/MM/yyyy');

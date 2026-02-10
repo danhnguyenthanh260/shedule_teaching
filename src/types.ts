@@ -3,6 +3,8 @@ import { Timestamp } from 'firebase/firestore';
 
 export type ColumnType = 'date' | 'time' | 'person' | 'task' | 'location' | 'email' | 'unknown';
 
+export type DateFormat = 'dd/MM/yyyy' | 'MM/dd/yyyy' | 'yyyy-MM-dd' | 'dd-MM-yyyy';
+
 export interface InferredSchema {
   mapping: Record<ColumnType, number>; // Mapping Type -> Index của cột
   confidence: number; // 0 to 1
@@ -27,6 +29,7 @@ export interface RowNormalized {
   startTime: string; // ISO string
   endTime: string; // ISO string
   person: string;
+  resources?: string[];
   email?: string;
   task?: string;
   location?: string;

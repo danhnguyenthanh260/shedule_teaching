@@ -3,7 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { useFirebase } from '../context/FirebaseContext';
 import { configService, SemesterConfig } from '../services/configService';
 import { database } from '../config/firebase';
-import { isSuperAdmin, isAdmin } from '../config/admin';
+import { SUPER_ADMIN_EMAIL, isSuperAdmin, isAdmin } from '../config/admin';
 import { ref, set, push, onValue, remove } from 'firebase/database';
 import { readSheet } from '../services/appsScriptService';
 import ConfirmModal from '../components/ConfirmModal';
@@ -16,7 +16,6 @@ export const AdminPage: React.FC = () => {
     const [adminWhitelist, setAdminWhitelist] = useState<Record<string, string>>({});
     const [newAdminEmail, setNewAdminEmail] = useState('');
     const [loading, setLoading] = useState(false);
-    const [error, setError] = useState<string | null>(null);
     const [toastMessage, setToastMessage] = useState<string | null>(null);
 
     // Modal state
@@ -57,7 +56,8 @@ export const AdminPage: React.FC = () => {
             const configs = await configService.fetchConfigs();
             setSemesters(configs);
         } catch (err) {
-            setError('❌ Không thể tải cấu hình từ Firebase');
+            setToastMessage('❌ Không thể tải cấu hình từ Firebase');
+            setTimeout(() => setToastMessage(null), 5000);
         } finally {
             setLoading(false);
         }
@@ -74,13 +74,13 @@ export const AdminPage: React.FC = () => {
     const handleCreateSemester = async (e: React.FormEvent) => {
         e.preventDefault();
         if (!newSemester.semester || !newSemester.sheetUrl || !newSemester.columns) {
-            setError('❌ Vui lòng điền đầy đủ thông tin');
+            setToastMessage('❌ Vui lòng điền đầy đủ thông tin');
+            setTimeout(() => setToastMessage(null), 5000);
             return;
         }
 
         try {
             setLoading(true);
-            setError(null);
             const semesterId = editMode || newSemester.semester.replace(/\s+/g, '_');
             const configRef = ref(database, `configs/${semesterId}`);
 
@@ -93,13 +93,15 @@ export const AdminPage: React.FC = () => {
                 dateFormat: newSemester.dateFormat
             });
 
-            setSuccess(editMode ? '✅ Cập nhật học kỳ thành công!' : '✅ Tạo học kỳ thành công!');
+            setToastMessage(editMode ? '✅ Cập nhật học kỳ thành công!' : '✅ Tạo học kỳ thành công!');
+            setTimeout(() => setToastMessage(null), 5000);
             setNewSemester({ semester: '', sheetUrl: '', startRow: '1', columns: '', dateFormat: 'dd/MM/yyyy' });
             setEditMode(null);
             fetchConfigs();
-            setTimeout(() => setSuccess(null), 5000);
+            setTimeout(() => setToastMessage(null), 5000);
         } catch (err: any) {
-            setError(`❌ Lỗi khi ${editMode ? 'cập nhật' : 'tạo'} học kỳ: ${err.message}`);
+            setToastMessage(`❌ Lỗi khi ${editMode ? 'cập nhật' : 'tạo'} học kỳ: ${err.message}`);
+            setTimeout(() => setToastMessage(null), 5000);
         } finally {
             setLoading(false);
         }
@@ -116,11 +118,12 @@ export const AdminPage: React.FC = () => {
                     setLoading(true);
                     const configRef = ref(database, `configs/${semesterId}`);
                     await set(configRef, null);
-                    setSuccess('✅ Đã xóa học kỳ');
+                    setToastMessage('✅ Đã xóa học kỳ');
                     fetchConfigs();
-                    setTimeout(() => setSuccess(null), 5000);
+                    setTimeout(() => setToastMessage(null), 5000);
                 } catch (err: any) {
-                    setError(`❌ Lỗi khi xóa: ${err.message}`);
+                    setToastMessage(`❌ Lỗi khi xóa: ${err.message}`);
+                    setTimeout(() => setToastMessage(null), 5000);
                 } finally {
                     setLoading(false);
                     setConfirmState(prev => ({ ...prev, isOpen: false }));
@@ -143,25 +146,27 @@ export const AdminPage: React.FC = () => {
 
     const handleAutoFetchColumns = async () => {
         if (!newSemester.sheetUrl) {
-            setError('❌ Vui lòng nhập URL Sheet trước');
+            setToastMessage('❌ Vui lòng nhập URL Sheet trước');
+            setTimeout(() => setToastMessage(null), 5000);
             return;
         }
         try {
             setLoading(true);
-            setError(null);
             const startRowNum = parseInt(newSemester.startRow);
             const rows = await readSheet(newSemester.sheetUrl, startRowNum);
             if (!rows || rows.length === 0) {
-                setError('❌ Không thể đọc dữ liệu từ Sheet.');
+                setToastMessage('❌ Không thể đọc dữ liệu từ Sheet.');
+                setTimeout(() => setToastMessage(null), 5000);
                 return;
             }
             const headers = rows[0];
             const columnNames = headers.filter(h => h && String(h).trim()).map(h => String(h).trim()).join(', ');
             setNewSemester({ ...newSemester, columns: columnNames });
-            setSuccess(`✅ Đã tải ${headers.filter(h => h && String(h).trim()).length} cột tự động!`);
-            setTimeout(() => setSuccess(null), 5000);
+            setToastMessage(`✅ Đã tải ${headers.filter(h => h && String(h).trim()).length} cột tự động!`);
+            setTimeout(() => setToastMessage(null), 5000);
         } catch (err: any) {
-            setError(`❌ Lỗi khi tải cột: ${err.message}`);
+            setToastMessage(`❌ Lỗi khi tải cột: ${err.message}`);
+            setTimeout(() => setToastMessage(null), 5000);
         } finally {
             setLoading(false);
         }
@@ -170,15 +175,37 @@ export const AdminPage: React.FC = () => {
     const handleAddAdmin = async (e: React.FormEvent) => {
         e.preventDefault();
         if (!newAdminEmail) return;
+
+        const cleanEmail = newAdminEmail.trim().toLowerCase();
+
+        // 1. Check if matches Super Admin
+        if (cleanEmail === SUPER_ADMIN_EMAIL.toLowerCase()) {
+            setToastMessage('❌ Email này là Super Admin, không cần thêm vào danh sách.');
+            setTimeout(() => setToastMessage(null), 5000);
+            return;
+        }
+
+        // 2. Check if already exists in dynamic whitelist
+        const isDuplicate = Object.values(adminWhitelist).some(
+            (email: any) => String(email).toLowerCase() === cleanEmail
+        );
+
+        if (isDuplicate) {
+            setToastMessage('❌ Email này đã có trong danh sách Admin.');
+            setTimeout(() => setToastMessage(null), 5000);
+            return;
+        }
+
         try {
             const whitelistRef = ref(database, 'admin_whitelist');
             const newAdminRef = push(whitelistRef);
-            await set(newAdminRef, newAdminEmail.trim().toLowerCase());
+            await set(newAdminRef, cleanEmail);
             setNewAdminEmail('');
-            setSuccess('✅ Đã thêm admin mới');
-            setTimeout(() => setSuccess(null), 5000);
+            setToastMessage('✅ Đã thêm admin mới');
+            setTimeout(() => setToastMessage(null), 5000);
         } catch (err: any) {
-            setError('❌ Lỗi khi thêm admin: ' + err.message);
+            setToastMessage('❌ Lỗi khi thêm admin: ' + err.message);
+            setTimeout(() => setToastMessage(null), 5000);
         }
     };
 
@@ -192,10 +219,11 @@ export const AdminPage: React.FC = () => {
                 try {
                     const adminRef = ref(database, `admin_whitelist/${key}`);
                     await remove(adminRef);
-                    setSuccess('✅ Đã xóa admin');
-                    setTimeout(() => setSuccess(null), 5000);
+                    setToastMessage('✅ Đã xóa admin');
+                    setTimeout(() => setToastMessage(null), 5000);
                 } catch (err: any) {
-                    setError('❌ Lỗi khi xóa admin: ' + err.message);
+                    setToastMessage('❌ Lỗi khi xóa admin: ' + err.message);
+                    setTimeout(() => setToastMessage(null), 5000);
                 } finally {
                     setConfirmState(prev => ({ ...prev, isOpen: false }));
                 }
@@ -208,10 +236,6 @@ export const AdminPage: React.FC = () => {
         email: user?.email || '',
         image: user?.photoURL || `https://ui-avatars.com/api/?name=${user?.displayName || 'A'}&background=random`
     }), [user]);
-
-    const setSuccess = (msg: string | null) => {
-        setToastMessage(msg);
-    };
 
     if (!user) return null;
 
@@ -237,13 +261,11 @@ export const AdminPage: React.FC = () => {
                     </div>
                 </div>
 
-                {/* Status Alerts */}
-                {error && (
-                    <div className="flex flex-col gap-2">
-                        <div className="p-4 bg-rose-50 border border-rose-100 rounded-2xl text-rose-800 text-sm font-bold flex items-center gap-3 animate-in fade-in slide-in-from-top-2">
-                            <svg className="w-5 h-5 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
-                            {error}
-                        </div>
+                {/* Global Status Banner (Only for persistent errors) */}
+                {loading && (
+                    <div className="p-4 bg-orange-50 border border-orange-100 rounded-2xl text-orange-800 text-sm font-bold flex items-center gap-3 animate-pulse">
+                        <svg className="w-5 h-5 flex-shrink-0 animate-spin" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" /></svg>
+                        Đang truy xuất dữ liệu hệ thống...
                     </div>
                 )}
 
@@ -458,8 +480,8 @@ export const AdminPage: React.FC = () => {
 
             {/* Global Toast */}
             {toastMessage && (
-                <div className="fixed bottom-6 right-6 bg-slate-900 border border-slate-800 text-white px-5 py-3 rounded-2xl shadow-2xl animate-in fade-in slide-in-from-bottom-6 duration-500 flex items-center gap-3 z-[1000]">
-                    <div className="w-2 h-2 bg-emerald-400 rounded-full animate-pulse shadow-[0_0_8px_rgba(52,211,153,0.5)]" />
+                <div className={`fixed bottom-6 right-6 ${toastMessage.startsWith('❌') ? 'bg-rose-950 border-rose-800' : 'bg-slate-900 border-slate-800'} border text-white px-5 py-3 rounded-2xl shadow-2xl animate-in fade-in slide-in-from-bottom-6 duration-500 flex items-center gap-3 z-[1000]`}>
+                    <div className={`w-2 h-2 ${toastMessage.startsWith('❌') ? 'bg-rose-500 shadow-[0_0_8px_rgba(244,63,94,0.5)]' : 'bg-emerald-400 shadow-[0_0_8px_rgba(52,211,153,0.5)]'} rounded-full animate-pulse`} />
                     <span className="text-xs font-bold tracking-tight">{toastMessage}</span>
                 </div>
             )}

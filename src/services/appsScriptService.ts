@@ -1,160 +1,244 @@
+
 /**
- * Service để gọi Google Apps Script API
- * Backend: Google Apps Script Web App
+ * Service to call Google Apps Script API via Vercel Proxy
+ * This architecture bypasses CORS issues by using a server-side proxy.
  */
 
 import { getCalendarName } from '../config/auth';
 import { logInfo, logSuccess, logError } from '../utils/logger';
 import { auth } from '../config/firebase';
+import { rateLimiter } from '../utils/rateLimiter';
 import { addCSRFTokenToHeaders } from '../utils/csrfToken';
 
 export interface CalendarEvent {
-  title: string;
-  start: string; // ISO 8601
-  end: string; // ISO 8601
-  location?: string;
-  description?: string;
-  guests?: string;
-  signature?: string; // Unique hash/ID for deduplication
+    title: string;
+    start: string; // ISO 8601
+    end: string; // ISO 8601
+    location?: string;
+    description?: string;
+    guests?: string;
+    signature?: string; 
+    resources?: string[]; // ✅ ADDED: For conflict detection
 }
 
 export interface SyncPayload {
-  idToken: string; // Firebase ID token for authentication
-  calendarName: string;
-  events: CalendarEvent[];
-  userEmail?: string; // Optional: for additional verification
+    idToken: string;
+    calendarName: string;
+    events: CalendarEvent[];
+    userEmail?: string;
+    secret?: string; // 🔐 Required for direct GAS calls (local proxy)
+}
+
+export interface ClearPayload {
+    idToken?: string;
+    action: 'clearCalendar';
+    calendarName: string;
+    secret?: string;
 }
 
 export interface SyncResponse {
-  status: 'success' | 'error';
-  message: string;
-  data?: {
-    total: number;
-    success: number;
-    failed: number;
-    skipped: number;
-    errors?: Array<{
-      index: number;
-      title: string;
-      message: string;
-    }>;
-  };
-  timestamp: string;
-  executionTime: string;
+    status: 'success' | 'error';
+    message: string;
+    data?: {
+        total: number;
+        success: number;
+        failed: number;
+        skipped: number;
+        errors?: Array<{
+            index: number;
+            title: string;
+            message: string;
+        }>;
+    };
+    timestamp: string;
+    executionTime: string;
 }
 
-const APPS_SCRIPT_URL = import.meta.env.VITE_BACKEND_URL;
+// ✅ API Base URL handles different environments Correctly
+const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || '';
 
 /**
- * Sync events to Google Calendar via Apps Script
- * @param events - Array of events to sync
- * @param calendarName - Target calendar name (optional, uses env default)
- * @returns Sync result
+ * Read sheet data via Vercel Proxy
  */
-export const syncEventsToCalendar = async (
-  events: CalendarEvent[],
-  calendarName?: string
-): Promise<SyncResponse> => {
-  try {
-    if (!APPS_SCRIPT_URL) {
-      throw new Error('VITE_BACKEND_URL is not configured');
-    }
-
-    if (!Array.isArray(events) || events.length === 0) {
-      throw new Error('Events array cannot be empty');
-    }
-
-    // Get current user and ID token for authentication
-    const currentUser = auth.currentUser;
-    if (!currentUser) {
-      throw new Error('User not authenticated. Please login first.');
-    }
-
-    // Get Firebase ID token for backend verification
-    const idToken = await currentUser.getIdToken();
-    if (!idToken) {
-      throw new Error('Failed to get authentication token');
-    }
-
-    // Use provided calendar name or get from config
-    const targetCalendar = calendarName || getCalendarName();
-
-    const payload: SyncPayload = {
-      idToken, // Send ID token for backend verification
-      calendarName: targetCalendar,
-      events,
-      userEmail: currentUser.email || undefined,
-    };
-
-    logInfo('Syncing events to Apps Script:', {
-      eventCount: events.length,
-      calendarName: targetCalendar,
-      userEmail: currentUser.email
-    });
-
-    // ✅ CORS FIX: Use text/plain and no custom headers to avoid Preflight (OPTIONS)
-    // Google Apps Script handles POST requests better with text/plain or default content type
-    // when called from browser to avoid strict CORS preflight checks.
-    
-    // Determine URL: Use Proxy in DEV needed for localhost to bypass CORS
-    const isDev = import.meta.env.DEV;
-    const url = isDev ? '/api/appscript' : APPS_SCRIPT_URL;
-
-    logInfo(`Sending request to: ${url} (Dev mode: ${isDev})`);
-
-    const response = await fetch(url, {
-      method: 'POST',
-      // ⚠️ CRITICAL: Do NOT set Content-Type to application/json, it triggers Preflight
-      // ⚠️ CRITICAL: Do NOT add custom headers like X-CSRF-Token
-      // Browser will auto-detect or default to text/plain which is a "Simple Request"
-      body: JSON.stringify(payload),
-    });
-
-    if (!response.ok) {
-      throw new Error(`HTTP error! status: ${response.status}`);
-    }
-
-    // Read text first to enable logging raw response even if JSON parsing fails
-    const text = await response.text();
-    
-    let data: SyncResponse;
+export const readSheet = async (
+    url: string,
+    startRow: number
+): Promise<string[][]> => {
     try {
-      data = JSON.parse(text);
-    } catch (jsonError) {
-      logError('Failed to parse JSON response. Raw text:', text);
-      throw new Error(`Apps Script returned invalid JSON. Possible auth or config issue. Raw: ${text.substring(0, 200)}...`);
+        if (!url || !url.includes('spreadsheets')) {
+            throw new Error('❌ URL Google Sheet không hợp lệ');
+        }
+
+        const queryParams = new URLSearchParams({
+            action: 'readSheet',
+            url: url, // ✅ Uniform parameter name
+            startRow: startRow.toString()
+        });
+
+        const fetchUrl = `${API_BASE_URL}/api/readSheet?${queryParams.toString()}`;
+        logInfo(`Reading sheet via proxy: ${fetchUrl}`);
+
+        const response = await fetch(fetchUrl);
+
+        if (!response.ok) {
+            throw new Error(`❌ Lỗi Proxy API ${response.status}: ${response.statusText}`);
+        }
+
+        const data = await response.json();
+
+        if (data.status === 'error') {
+            throw new Error(`❌ ${data.message || 'Lỗi không xác định từ Apps Script'}`);
+        }
+
+        if (!data.data || !Array.isArray(data.data)) {
+            throw new Error('❌ Dữ liệu trả về không hợp lệ');
+        }
+
+        logSuccess(`✅ Đã tải ${data.data.length} dòng dữ liệu`);
+        return data.data || [];
+    } catch (error) {
+        const errorMessage = error instanceof Error ? error.message : '❌ Không thể đọc dữ liệu';
+        logError('Read sheet error:', errorMessage);
+        throw new Error(errorMessage);
     }
-
-    logSuccess('Sync response:', data);
-
-    if (data.status === 'error') {
-      throw new Error(data.message || 'Unknown error from Apps Script');
-    }
-
-    return data;
-  } catch (error) {
-    const errorMessage = error instanceof Error ? error.message : 'Failed to sync events';
-    logError('Sync error:', errorMessage);
-    throw new Error(errorMessage);
-  }
 };
 
 /**
- * Convert normalized rows to calendar events
- * @param rows - Normalized data rows
- * @returns Calendar events
+ * Sync events via Vercel Proxy
  */
+export const syncEventsToCalendar = async (
+    events: CalendarEvent[],
+    calendarName?: string
+): Promise<SyncResponse> => {
+    try {
+        if (!Array.isArray(events) || events.length === 0) {
+            throw new Error('Events array cannot be empty');
+        }
+
+        const currentUser = auth.currentUser;
+        if (!currentUser) {
+            throw new Error('User not authenticated. Please login first.');
+        }
+
+        const idToken = await currentUser.getIdToken();
+        if (!idToken) {
+            throw new Error('Failed to get authentication token');
+        }
+
+        const targetCalendar = calendarName || getCalendarName();
+
+        const payload: SyncPayload = {
+            idToken,
+            calendarName: targetCalendar,
+            events,
+            userEmail: currentUser.email || undefined,
+            secret: import.meta.env.VITE_GAS_SECRET, // 🔐 Automatically include secret from env
+        };
+
+        const syncUrl = `${API_BASE_URL}/api/sync`;
+        logInfo(`Syncing events via proxy: ${syncUrl}`);
+        const response = await fetch(syncUrl, {
+            method: 'POST',
+            headers: addCSRFTokenToHeaders({
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${idToken}`
+            }),
+            body: JSON.stringify(payload),
+        });
+
+        if (!response.ok) {
+            logError(`Sync returned status ${response.status}: ${response.statusText}`);
+            const data = await response.json().catch(() => ({}));
+            throw new Error(data.message || data.error || `Proxy error! status: ${response.status}`);
+        }
+
+        const data = await response.json();
+
+        // 🚨 HANDLE CONFLICTS (409)
+        if (response.status === 409) {
+            const conflictMsg = data.conflicts 
+              ? `Xung đột lịch trình: ${data.conflicts.map((c: any) => c.message).join(' | ')}`
+              : 'Phát hiện xung đột lịch trình với dữ liệu đã có trong hệ thống.';
+            throw new Error(conflictMsg);
+        }
+
+        if (!response.ok) {
+            throw new Error(data.message || data.error || `Proxy error! status: ${response.status}`);
+        }
+
+        if (data.status === 'error') {
+            throw new Error(data.message || 'Unknown error from backend');
+        }
+
+        logSuccess('Sync successful');
+        return data;
+    } catch (error) {
+        const errorMessage = error instanceof Error ? error.message : 'Failed to sync events';
+        logError('Sync error:', errorMessage);
+        throw new Error(errorMessage);
+    }
+};
+
+/**
+ * Clear all events created by the app
+ */
+export const clearCalendar = async (
+    calendarName?: string
+): Promise<SyncResponse> => {
+    try {
+        const currentUser = auth.currentUser;
+        const idToken = currentUser ? await currentUser.getIdToken() : undefined;
+        
+        const targetCalendar = calendarName || getCalendarName();
+
+        const payload: ClearPayload = {
+            idToken,
+            action: 'clearCalendar',
+            calendarName: targetCalendar,
+            secret: import.meta.env.VITE_GAS_SECRET,
+        };
+
+        const syncUrl = `${API_BASE_URL}/api/sync`;
+        logInfo(`Clearing calendar via proxy: ${syncUrl}`);
+        
+        const response = await fetch(syncUrl, {
+            method: 'POST',
+            headers: addCSRFTokenToHeaders({
+                'Content-Type': 'application/json',
+                ...(idToken ? { 'Authorization': `Bearer ${idToken}` } : {})
+            }),
+            body: JSON.stringify(payload),
+        });
+
+        if (!response.ok) {
+            throw new Error(`Proxy error! status: ${response.status}`);
+        }
+
+        const data = await response.json();
+        if (data.status === 'error') {
+            throw new Error(data.message || 'Unknown error from backend during clear');
+        }
+
+        logSuccess('Calendar cleared successfully');
+        return data;
+    } catch (error) {
+        const errorMessage = error instanceof Error ? error.message : 'Failed to clear calendar';
+        logError('Clear error:', errorMessage);
+        throw new Error(errorMessage);
+    }
+};
+
 export const convertRowsToEvents = (rows: Array<{
-  task: string;
-  date: string;
-  startTime: string;
-  endTime: string;
-  location?: string;
+    task: string;
+    date: string;
+    startTime: string;
+    endTime: string;
+    location?: string;
 }>): CalendarEvent[] => {
-  return rows.map((row) => ({
-    title: row.task,
-    start: row.startTime,
-    end: row.endTime,
-    location: row.location || '',
-  }));
+    return rows.map((row) => ({
+        title: row.task,
+        start: row.startTime,
+        end: row.endTime,
+        location: row.location || '',
+    }));
 };

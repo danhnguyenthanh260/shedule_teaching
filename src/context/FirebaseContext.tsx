@@ -13,6 +13,7 @@ import {
 } from 'firebase/auth';
 import { saveAuthTokens, clearAuth, setUserUID } from '../services/authService';
 import { logInfo, logSuccess, logError } from '../utils/logger';
+import { secureGetItem, secureSetItem, secureRemoveItem } from '../utils/crypto';
 
 /**
  * Generate random OAuth state for CSRF protection
@@ -62,7 +63,13 @@ export const FirebaseProvider: React.FC<{ children: React.ReactNode }> = ({ chil
           if (credential?.accessToken) {
             console.log('✅ Access token obtained');
             setAccessToken(credential.accessToken);
+
+            // ✅ Store token with expiry time
+            const expiryTime = Date.now() + (3600 * 1000); // 1 hour from now
             await saveAuthTokens(credential.accessToken, '', 3600);
+            localStorage.setItem('google_access_token', credential.accessToken);
+            localStorage.setItem('google_token_expiry', expiryTime.toString());
+
             logSuccess('Google login successful (redirect)');
           }
         } else {
@@ -86,12 +93,15 @@ export const FirebaseProvider: React.FC<{ children: React.ReactNode }> = ({ chil
 
       // If user is logged in and we don't have access token, try to restore from localStorage
       if (currentUser && !accessToken) {
-        const stored = localStorage.getItem('google_access_token');
-        if (stored) {
-          console.log('✅ Restored access token from localStorage');
-          setAccessToken(stored);
-          logInfo('Restored access token from localStorage');
-        }
+        const restoreToken = async () => {
+          const stored = await secureGetItem('google_access_token', currentUser.uid);
+          if (stored) {
+            console.log('✅ Restored access token from localStorage');
+            setAccessToken(stored);
+            logInfo('Restored access token from localStorage');
+          }
+        };
+        restoreToken();
       }
     });
 
@@ -153,7 +163,7 @@ export const FirebaseProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       const provider = new GoogleAuthProvider();
       provider.addScope('https://www.googleapis.com/auth/spreadsheets.readonly');
       provider.addScope('https://www.googleapis.com/auth/calendar.events');
-      
+
       // ✅ FORCE Google to show the account picker and consent screen to avoid 403 session confusion
       provider.setCustomParameters({
         prompt: 'select_account'
@@ -166,10 +176,13 @@ export const FirebaseProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       if (credential?.accessToken) {
         console.log('✅ Access token obtained from popup');
         setAccessToken(credential.accessToken);
+
+        // ✅ Store token with expiry time (Google tokens expire in 1 hour)
+        const expiryTime = Date.now() + (3600 * 1000); // 1 hour from now
         await saveAuthTokens(credential.accessToken, '', 3600);
 
-        // Also store in legacy key for components that might use it
-        localStorage.setItem('google_access_token', credential.accessToken);
+        // ✅ Also store SECURELY (encrypted) for components that might use it
+        await secureSetItem('google_access_token', credential.accessToken, result.user.uid);
 
         logSuccess('Google login successful');
       }
@@ -223,13 +236,15 @@ export const FirebaseProvider: React.FC<{ children: React.ReactNode }> = ({ chil
   };
 
   const getAccessToken = async (): Promise<string | null> => {
-    // Return stored access token or try to restore from localStorage
+    // Return stored access token or try to restore from secure storage
     if (accessToken) return accessToken;
 
-    const stored = localStorage.getItem('google_access_token');
-    if (stored) {
-      setAccessToken(stored);
-      return stored;
+    if (user) {
+      const stored = await secureGetItem('google_access_token', user.uid);
+      if (stored) {
+        setAccessToken(stored);
+        return stored;
+      }
     }
 
     return null;

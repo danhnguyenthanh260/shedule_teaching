@@ -1,0 +1,56 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <base target="_top">
+  <style>
+    body { font-family: 'Segoe UI', sans-serif; background: #f0f2f5; display: flex; justify-content: center; padding: 20px; }
+    .card { background: white; padding: 30px; border-radius: 12px; box-shadow: 0 8px 24px rgba(0,0,0,0.1); width: 100%; max-width: 500px; }
+    h2 { color: #1a73e8; text-align: center; border-bottom: 2px solid #eee; padding-bottom: 15px; }
+    label { font-weight: 600; display: block; margin-top: 15px; color: #444; }
+    input, select { width: 100%; padding: 12px; margin-top: 6px; border: 1px solid #ddd; border-radius: 8px; box-sizing: border-box; }
+    button { width: 100%; padding: 14px; background: #1a73e8; color: white; border: none; border-radius: 8px; cursor: pointer; font-weight: bold; margin-top: 25px; }
+    #status { margin-top: 15px; text-align: center; font-weight: bold; }
+  </style>
+</head>
+<body>
+  <div class="card">
+    <h2>⚙️ Admin: Thiết lập mặc định</h2>
+    
+    <label>Học kỳ:</label>
+    <input type="text" id="newSem" placeholder="Ví dụ: Spring 2026">
+
+    <label>Link Google Sheet (Mặc định cho kỳ này):</label>
+    <input type="text" id="sheetUrl" placeholder="https://docs.google.com/spreadsheets/d/...">
+    
+    <label>Dòng bắt đầu lấy dữ liệu (Mặc định):</label>
+    <input type="number" id="startRow" value="1">
+    
+    <label>Cấu hình cột mẫu:</label>
+    <input type="text" id="cols" value="Mã môn, Tên môn, Thứ, Tiết, Phòng, Giảng viên">
+    
+    <button onclick="save()">LƯU CẤU HÌNH GỐC</button>
+    <div id="status"></div>
+  </div>
+
+  <script>
+    function save() {
+      const sem = document.getElementById('newSem').value.trim();
+      if(!sem) return alert("Cần tên học kỳ!");
+      
+      document.getElementById('status').innerText = "⌛ Đang lưu...";
+      
+      const payload = {
+        semester: sem,
+        sheetUrl: document.getElementById('sheetUrl').value,
+        startRow: document.getElementById('startRow').value,
+        columns: document.getElementById('cols').value
+      };
+
+      google.script.run.withSuccessHandler(res => {
+        document.getElementById('status').innerText = res;
+        document.getElementById('status').style.color = "green";
+      }).saveAdminSettings(payload);
+    }
+  </script>
+</body>
+</html>

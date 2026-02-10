@@ -45,6 +45,10 @@ export interface RowNormalized {
   timeRaw?: string;
   personRaw?: string;
   locationRaw?: string;
+  // ✅ Block range for search isolation
+  blockStart?: number;
+  blockEnd?: number;
+  reviewAreaStart?: number; // Boundary index (A-I vs J+)
 }
 
 export interface SyncResult {

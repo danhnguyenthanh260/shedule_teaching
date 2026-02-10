@@ -1,4 +1,5 @@
 
+import { format } from 'date-fns';
 import { RowNormalized, InferredSchema, SyncResult, ColumnMapping, DateFormat } from '../types';
 import { parseDateTime } from '../utils/dateTimeParser';
 
@@ -304,200 +305,231 @@ export class GoogleSyncService {
     const allEvents: RowNormalized[] = [];
     const dataRows = rawRows.slice(headerRowIndex + 1);
 
-    console.log(`[GoogleService] normalizeRowsWithGrouping: processing ${dataRows.length} rows`);
+    const findTripleAnchors = (headers: string[]) => {
+      const labels: Record<string, number[]> = {};
+      headers.forEach((h, i) => {
+        const lbl = (h || "").trim().toLowerCase();
+        if (!lbl || lbl.startsWith('column_')) return;
+        if (!labels[lbl]) labels[lbl] = [];
+        labels[lbl].push(i);
+      });
+      
+      // Strategy 1: "Greedy" Code Search (Take the LAST 3 occurrences)
+      // This skips "Code" that might be in the project info area (columns A-I)
+      const codeIndices = (labels["code"] || []);
+      if (codeIndices.length >= 3) {
+        return codeIndices.slice(-3).sort((a, b) => a - b);
+      }
 
-    let lastDate = "";
-    let lastTime = "";
-    let lastLocation = "";
+      // Strategy 2: "Greedy" Reviewer Search
+      const rev1Indices = (labels["reviewer 1"] || labels["gv 1"] || []);
+      if (rev1Indices.length >= 3) {
+        return rev1Indices.slice(-3).sort((a, b) => a - b);
+      }
+
+      // Strategy 3: Any triple label that repeats exactly 3 times in the J+ range
+      const tripleLabels = Object.keys(labels).filter(l => labels[l].filter(idx => idx >= 9).length === 3);
+      if (tripleLabels.length > 0) {
+        const bestLabel = tripleLabels.find(l => l.includes('date') || l.includes('slot') || l.includes('room') || l.includes('reviewer')) || tripleLabels[0];
+        return labels[bestLabel].filter(idx => idx >= 9).sort((a, b) => a - b);
+      }
+      
+      return [];
+    };
+
+    let blockStartIndices = findTripleAnchors(detailHeaders);
+
+    // 🚀 UNIFIED REVIEW MODE DETECTION:
+    // It's Review Mode if: explicit flag OR tab name contains review.
+    const suspectReview = !!isDataMau || (tab || "").toLowerCase().includes("review");
+    
+    // 🚀 Robustness: Search first 10 rows for anchors if needed
+    if (suspectReview && blockStartIndices.length !== 3) {
+      console.log("[Grouping] Searching first 10 rows for best triple anchors...");
+      for (let i = 0; i < Math.min(10, rawRows.length); i++) {
+        const potential = rawRows[i].map(h => String(h || ""));
+        const found = findTripleAnchors(potential);
+        if (found.length === 3) {
+          console.log(`[Grouping] SUCCESS: Triple anchors found on row index ${i}:`, found);
+          blockStartIndices = found;
+          break;
+        }
+      }
+    }
+
+    // 🚨 FINAL FALLBACK: If we are in Review Mode but anchors still failed, 
+    // we MUST FORCE 12 items by splitting from Column J.
+    if (suspectReview && blockStartIndices.length !== 3) {
+      const J_INDEX = 9;
+      const total = detailHeaders.length;
+      if (total >= J_INDEX + 3) {
+        const blockSize = Math.floor((total - J_INDEX) / 3);
+        blockStartIndices = [J_INDEX, J_INDEX + blockSize, J_INDEX + (2 * blockSize)];
+        console.warn("[Grouping] Anchors not found. Falling back to heuristic split:", blockStartIndices);
+      } else {
+        // Absolute fallback for smaller sheets
+        blockStartIndices = [0, Math.floor(total/3), Math.floor(2*total/3)];
+        console.warn("[Grouping] Sheet too small. Using absolute split:", blockStartIndices);
+      }
+    }
+
+    // In Review Mode, Triple Mode is MANDATORY
+    const isTripleMode = suspectReview;
+    console.log(`[Grouping] Expansion Mode: ${isTripleMode}, Block Starts:`, blockStartIndices);
 
     dataRows.forEach((row, rowIndex) => {
-      // Skip rows that look like headers
-      const joinedRow = row.join(" ").toLowerCase();
-      if (joinedRow.includes("ngày") || joinedRow.includes("giờ") || joinedRow.includes("phòng")) return;
+      if (!row || row.length === 0 || row.join("").trim() === "") return;
 
-      const currentDate = (mapping.date !== undefined ? (row[mapping.date] || "") : "").toString().trim();
-      const currentTime = (mapping.time !== undefined ? (row[mapping.time] || "") : "").toString().trim();
-      const currentLocation = (mapping.location !== undefined ? (row[mapping.location] || "") : "").toString().trim();
-
-      if (currentDate) lastDate = currentDate;
-      if (currentTime) lastTime = currentTime;
-      if (currentLocation) lastLocation = currentLocation;
-
-      // 🚨 Bắt buộc có đủ ngày và giờ mới xử lý
-      if (!lastDate || !lastTime) return;
-
-      console.log(`[Grouping-Row] Check row ${rowIndex}: date="${lastDate}", time="${lastTime}"`);
-      const { start, end } = parseVNTime(lastDate, lastTime, preferredFormat);
       const baseTask = (mapping.task !== undefined ? (row[mapping.task] || "Review") : "Review").toString().trim();
+      const basePerson = (mapping.person !== undefined ? (row[mapping.person] || "") : "").toString().trim();
 
-      // Tự động nhận diện tất cả các khối (Review 1, 2, 3...)
-      let reviewGroups = new Map<string, number[]>();
+      if (isTripleMode) {
+        // 🔄 Expand 1 row -> 3 events
+        blockStartIndices.forEach((blockStart, blockIdx) => {
+          const firstAnchor = blockStartIndices[0];
+          // Calculate block end dynamically based on next block start
+          const blockEnd = blockIdx < 2 ? blockStartIndices[blockIdx + 1] - 1 : detailHeaders.length - 1;
 
-      if (groupHeaders) {
-        groupHeaders.forEach((gName, colIdx) => {
-          const name = (gName || "").trim();
-          if (name) {
-            if (!reviewGroups.has(name)) reviewGroups.set(name, []);
-            reviewGroups.get(name)!.push(colIdx);
-          }
-        });
-      }
+          const getMappedValueInBlock = (field: keyof ColumnMapping) => {
+            const originalIdx = mapping[field];
+            if (originalIdx === undefined) return "";
+            
+            const firstAnchor = blockStartIndices[0];
+            const targetHeader = (detailHeaders[originalIdx] || "").trim().toLowerCase();
 
-      // Fallback 1: Tìm dựa trên cột 'Reviewer' lặp lại ở Row 3 (nới lỏng từ khóa)
-      if (reviewGroups.size < 2) {
-        const blockIndices: number[] = [];
-        detailHeaders.forEach((h, i) => {
-          const lbl = (h || "").toLowerCase();
-          // Tìm mọi cột có chứa reviewer, giảng viên, cb chấm, giám khảo... kèm số 1 hoặc đứng đầu khối
-          if ((lbl.includes('reviewer') || lbl.includes('giảng viên') || lbl.includes('cb chấm') || lbl.includes('giám khảo')) &&
-            (lbl.includes('1') || !lbl.match(/\d/))) {
-            if (blockIndices.length === 0 || (i - blockIndices[blockIndices.length - 1] > 2)) {
-              blockIndices.push(i);
+            // 🎯 Strategy 1: Header Label Matching (Best for irregular blocks)
+            // Look for a column in the CURRENT block that has the same header name as the one mapped in block 1.
+            if (targetHeader && !targetHeader.startsWith('column_')) {
+              const matchingIdx = detailHeaders.findIndex((h, i) => 
+                i >= blockStart && i <= blockEnd && (h || "").trim().toLowerCase() === targetHeader
+              );
+              if (matchingIdx !== -1) return (row[matchingIdx] || "").toString().trim();
             }
-          }
-        });
 
-        if (blockIndices.length >= 2) {
-          reviewGroups.clear(); // Reset để dùng fallback
-          blockIndices.forEach((start, idx) => {
-            const nextStart = blockIndices[idx + 1] || detailHeaders.length;
-            const name = `Review ${idx + 1}`;
-            const cols = [];
-            for (let i = start; i < nextStart; i++) cols.push(i);
-            reviewGroups.set(name, cols);
-          });
-        }
-      }
+            // 🎯 Strategy 2: Relative Offset (Fallback for unlabelled columns)
+            if (originalIdx >= firstAnchor) {
+              const offset = originalIdx - firstAnchor;
+              const relativeIdx = blockStart + offset;
+              if (relativeIdx < row.length) {
+                return (row[relativeIdx] || "").toString().trim();
+              }
+            } else {
+              // Global area (A-I)
+              return (row[originalIdx] || "").toString().trim();
+            }
 
-      // Fallback 2: Nếu vẫn < 2 khối, ép chia đều sheet thành 3 phần nếu tab là Review hoặc isDataMau gạt tay
-      if (reviewGroups.size < 2) {
-        const isReviewSheet = tab.toLowerCase().includes('review') || isDataMau;
-        if (isReviewSheet) {
-          reviewGroups.clear();
-          const totalCols = detailHeaders.length;
-          const startCol = mapping.date !== undefined ? Math.min(mapping.date, mapping.time || 999) : 0;
-          const usefulCols = totalCols - startCol;
-          const blockSize = Math.max(3, Math.floor(usefulCols / 3));
-
-          for (let i = 0; i < 3; i++) {
-            const start = startCol + (i * blockSize);
-            const end = i === 2 ? totalCols - 1 : startCol + ((i + 1) * blockSize) - 1;
-            const cols = [];
-            for (let c = start; c <= Math.min(end, totalCols - 1); c++) cols.push(c);
-            reviewGroups.set(`Review ${i + 1}`, cols);
-          }
-        }
-      }
-
-      const isReviewMode = reviewGroups.size >= 1; // Chấp nhận cả 1 block nhưng thường sẽ là 3 do fallback trên
-
-      if (isReviewMode) {
-        const sortedGroupNames = Array.from(reviewGroups.keys()).sort((a, b) => {
-          const aIdx = Math.min(...reviewGroups.get(a)!);
-          const bIdx = Math.min(...reviewGroups.get(b)!);
-          return aIdx - bIdx;
-        });
-
-        sortedGroupNames.forEach((gName) => {
-          const colIndices = reviewGroups.get(gName)!;
-          const groupStart = Math.min(...colIndices);
-          const groupEnd = Math.max(...colIndices);
-
-          const getMappedValue = (field: keyof ColumnMapping) => {
-            const mappedIdx = mapping[field];
-            if (mappedIdx === undefined) return "";
-
-            const label = (detailHeaders[mappedIdx] || "").trim();
-            const allMatchIndices = detailHeaders.reduce((acc, h, i) => {
-              if (h.trim() === label) acc.push(i);
-              return acc;
-            }, [] as number[]);
-
-            const localIdx = allMatchIndices.find(idx => idx >= groupStart && idx <= groupEnd);
-            const finalIdx = localIdx !== undefined ? localIdx : mappedIdx;
-
-            return (row[finalIdx] || "").toString().trim();
+            return "";
           };
 
-          const reviewers = colIndices.filter(idx => {
-            const h = (detailHeaders[idx] || "").toLowerCase();
-            return h.includes('reviewer 1') || h.includes('reviewer 2') || h.includes('giảng viên');
-          }).map(idx => (row[idx] || "").toString().trim()).filter(Boolean);
+          let rDate = getMappedValueInBlock('date');
+          let rTime = getMappedValueInBlock('time');
+          let rLocation = getMappedValueInBlock('location');
+          let rPerson = getMappedValueInBlock('person');
+          
+          // 👥 FALLBACK: If per-block extraction failed, use auto-infer logic
+          // (Only for missing data, not to overwrite explicit mapping)
+          const fieldKeywords: Record<string, string[]> = {
+            date: ['ngày', 'date'],
+            time: ['slot', 'giờ', 'time'],
+            location: ['phòng', 'room', 'location'],
+            person: ['reviewer', 'giảng viên', 'cán bộ'],
+            task: ['nhiệm vụ', 'đề tài', 'task', 'code']
+          };
 
-          const rDate = getMappedValue('date') || lastDate;
-          const rTime = getMappedValue('time') || lastTime;
-          const rLocation = getMappedValue('location') || lastLocation;
+          const autoInfer = (field: keyof ColumnMapping) => {
+            const keywords = fieldKeywords[field] || [];
+            // Keyword search within this block
+            const autoIdx = detailHeaders.findIndex((h, i) => 
+               i >= blockStart && i <= blockEnd && keywords.some(k => (h || "").toLowerCase().includes(k))
+            );
+            return autoIdx !== -1 ? (row[autoIdx] || "").toString().trim() : "";
+          };
 
-          // 🚨 Kiểm tra ngày trước khi parse
-          if (!rDate) {
-            console.warn(`[Grouping] Bỏ qua vì thiếu ngày: Review=${gName}, Row=${rowIndex}`);
-            return;
+          if (!rDate) rDate = autoInfer('date');
+          if (!rTime) rTime = autoInfer('time');
+          if (!rLocation) rLocation = autoInfer('location');
+          if (!rPerson) rPerson = autoInfer('person') || basePerson;
+
+          // If no mapping & no data, skip.
+          const hasAnyData = rDate || rTime || rPerson || (row[blockStart] !== undefined);
+          if (!hasAnyData) return;
+
+          try {
+            // Default values if dates/times are missing (to ensure it shows in Step 3 table)
+            const parsedD = parseDateTime(rDate, preferredFormat);
+            const finalDate = parsedD.date ? format(parsedD.date, 'dd/MM/yyyy') : (rDate || "Chưa chọn");
+            const finalTime = rTime || "---";
+            
+            const { start, end } = (parsedD.date && rTime) 
+              ? parseVNTime(rDate, rTime, preferredFormat)
+              : { start: "", end: "" };
+            
+            const eventId = `${generateRowId(sheetId, tab, rowIndex + headerRowIndex + 1)}-b${blockIdx}`;
+            console.log(`[Grouping] Row ${rowIndex} Block ${blockIdx} -> ID: ${eventId}, Date: ${finalDate}, Person: ${rPerson}`);
+
+            allEvents.push({
+              id: eventId,
+              groupName: `Review ${blockIdx + 1}`,
+              person: rPerson || baseTask,
+              date: finalDate,
+              startTime: start,
+              endTime: end,
+              task: baseTask,
+              location: rLocation || "Chưa xác định",
+              resources: [
+                rPerson ? `teacher:${rPerson}` : null,
+                rLocation ? `room:${rLocation}` : null
+              ].filter(Boolean) as string[],
+              dateRaw: finalDate,
+              timeRaw: finalTime,
+              personRaw: rPerson,
+              locationRaw: rLocation,
+              blockStart,
+              blockEnd,
+              reviewAreaStart: blockStartIndices[0],
+              status: 'pending',
+              rawRow: row
+            });
+          } catch (e) {
+            console.error(`[Grouping] Error Row ${rowIndex} Block ${blockIdx}:`, e);
           }
-          if (!rTime) {
-            return; // Không có giờ thì thôi
-          }
+        });
+      } else {
+        // Fallback to 1 row -> 1 event (Normal Mode)
+        // Auto-infer for normal mode too if it helps debugging
+        const getNormalVal = (field: keyof ColumnMapping) => {
+          if (mapping[field] !== undefined) return (row[mapping[field]!] || "").toString().trim();
+          // Minimal auto-infer for preview
+          const fieldKeywords: Record<string, string[]> = {
+            date: ['ngày', 'date'],
+            time: ['slot', 'giờ', 'time'],
+            person: ['giảng viên', 'họ tên', 'name']
+          };
+          const keywords = fieldKeywords[field] || [];
+          const idx = detailHeaders.findIndex(h => keywords.some(k => (h || "").toLowerCase().includes(k)));
+          return idx !== -1 ? (row[idx] || "").toString().trim() : "";
+        };
 
-          const { start, end } = parseVNTime(rDate, rTime, preferredFormat);
-          const reviewerNames = reviewers.join(" & ");
+        const rDate = getNormalVal('date');
+        const rTime = getNormalVal('time');
+        const rPerson = getNormalVal('person') || basePerson;
 
-          let personValue = "";
-          if (baseTask && reviewerNames) {
-            personValue = `${baseTask} - ${reviewerNames}`;
-          } else {
-            personValue = reviewerNames || baseTask || gName;
-          }
+        if (!rDate && !rTime && !rPerson) return;
 
-          if (!reviewerNames && !baseTask) return;
-
+        try {
+          const { start, end } = (rDate && rTime) ? parseVNTime(rDate, rTime, preferredFormat) : { start: "", end: "" };
           allEvents.push({
-            id: `${sheetId}-${tab}-${rowIndex}-${gName}`,
-            groupName: gName,
-            person: personValue,
-            date: rDate || "Chưa rõ",
+            id: `${sheetId}-${tab}-${rowIndex}`,
+            person: rPerson || baseTask,
+            date: rDate || "Chưa chọn",
             startTime: start,
             endTime: end,
             task: baseTask,
-            location: rLocation || "Chưa xác định",
-            resources: [
-              reviewerNames ? `teacher:${reviewerNames}` : null,
-              rLocation ? `room:${rLocation}` : null
-            ].filter(Boolean) as string[],
-            dateRaw: rDate,
-            timeRaw: rTime,
-            personRaw: reviewerNames,
-            locationRaw: rLocation,
+            location: (mapping.location !== undefined ? (row[mapping.location] || "Chưa xác định") : "Chưa xác định").toString().trim(),
             status: 'pending',
             rawRow: row
           });
-        });
-      } else {
-        // Chế độ bình thường: 1 dòng -> 1 sự kiện
-        const personValue = (mapping.person !== undefined ? (row[mapping.person] || "") : "").toString().trim();
-        if (!personValue && !baseTask) return;
-
-        if (!lastDate || !lastTime) return;
-        console.log(`[Grouping-Normal] date="${lastDate}", time="${lastTime}"`);
-        const { start, end } = parseVNTime(lastDate, lastTime, preferredFormat);
-
-        allEvents.push({
-          id: `${sheetId}-${tab}-${rowIndex}`,
-          person: personValue || baseTask,
-          date: lastDate || "Chưa rõ",
-          startTime: start,
-          endTime: end,
-          task: baseTask,
-          location: lastLocation || "Chưa xác định",
-          resources: [
-            personValue ? `teacher:${personValue}` : null,
-            lastLocation ? `room:${lastLocation}` : null
-          ].filter(Boolean) as string[],
-          dateRaw: lastDate,
-          timeRaw: lastTime,
-          personRaw: personValue || baseTask,
-          locationRaw: lastLocation,
-          status: 'pending',
-          rawRow: row
-        });
+        } catch (e) {}
       }
     });
 

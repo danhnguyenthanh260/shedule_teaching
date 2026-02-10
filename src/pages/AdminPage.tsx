@@ -39,7 +39,8 @@ export const AdminPage: React.FC = () => {
         sheetUrl: '',
         startRow: '1',
         columns: '',
-        dateFormat: 'dd/MM/yyyy'
+        dateFormat: 'dd/MM/yyyy' as import('../types').DateFormat,
+        sheetType: 'council' as 'review' | 'council'
     });
 
     // Edit mode state
@@ -90,12 +91,13 @@ export const AdminPage: React.FC = () => {
                 sheetUrl: newSemester.sheetUrl,
                 startRow: newSemester.startRow,
                 columns: newSemester.columns,
-                dateFormat: newSemester.dateFormat
+                dateFormat: newSemester.dateFormat,
+                sheetType: newSemester.sheetType
             });
 
             setToastMessage(editMode ? '✅ Cập nhật học kỳ thành công!' : '✅ Tạo học kỳ thành công!');
             setTimeout(() => setToastMessage(null), 5000);
-            setNewSemester({ semester: '', sheetUrl: '', startRow: '1', columns: '', dateFormat: 'dd/MM/yyyy' });
+            setNewSemester({ semester: '', sheetUrl: '', startRow: '1', columns: '', dateFormat: 'dd/MM/yyyy', sheetType: 'council' });
             setEditMode(null);
             fetchConfigs();
             setTimeout(() => setToastMessage(null), 5000);
@@ -138,7 +140,8 @@ export const AdminPage: React.FC = () => {
             sheetUrl: semester.sheetUrl,
             startRow: semester.startRow,
             columns: semester.columns,
-            dateFormat: semester.dateFormat || 'dd/MM/yyyy'
+            dateFormat: semester.dateFormat || 'dd/MM/yyyy',
+            sheetType: semester.sheetType || 'council'
         });
         setEditMode(semester.id);
         window.scrollTo({ top: 0, behavior: 'smooth' });
@@ -320,12 +323,24 @@ export const AdminPage: React.FC = () => {
                                     <select
                                         className="w-full px-4 py-3 bg-slate-50 border border-slate-100 rounded-2xl focus:ring-2 focus:ring-[#F27024] outline-none text-sm font-bold transition-all focus:bg-white"
                                         value={newSemester.dateFormat}
-                                        onChange={(e) => setNewSemester({ ...newSemester, dateFormat: e.target.value })}
+                                        onChange={(e) => setNewSemester({ ...newSemester, dateFormat: e.target.value as any })}
                                     >
                                         <option value="dd/MM/yyyy">VN (27/01/2026)</option>
                                         <option value="MM/dd/yyyy">US (01/27/2026)</option>
                                         <option value="yyyy-MM-dd">ISO (2026-01-27)</option>
                                         <option value="dd-MM-yyyy">VN2 (27-01-2026)</option>
+                                    </select>
+                                </div>
+
+                                <div>
+                                    <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-1.5 ml-1">Loại hình chấm thi</label>
+                                    <select
+                                        className="w-full px-4 py-3 bg-slate-50 border border-slate-100 rounded-2xl focus:ring-2 focus:ring-[#F27024] outline-none text-sm font-bold transition-all focus:bg-white"
+                                        value={newSemester.sheetType}
+                                        onChange={(e) => setNewSemester({ ...newSemester, sheetType: e.target.value as any })}
+                                    >
+                                        <option value="council">Chế độ chấm hội đồng</option>
+                                        <option value="review">Chế độ chấm review</option>
                                     </select>
                                 </div>
 
@@ -365,7 +380,7 @@ export const AdminPage: React.FC = () => {
                                             type="button"
                                             onClick={() => {
                                                 setEditMode(null);
-                                                setNewSemester({ semester: '', sheetUrl: '', startRow: '1', columns: '', dateFormat: 'dd/MM/yyyy' });
+                                                setNewSemester({ semester: '', sheetUrl: '', startRow: '1', columns: '', dateFormat: 'dd/MM/yyyy', sheetType: 'council' });
                                             }}
                                             className="px-6 py-4 bg-slate-100 text-slate-600 rounded-2xl font-bold hover:bg-slate-200 transition-all uppercase tracking-widest text-xs"
                                         >

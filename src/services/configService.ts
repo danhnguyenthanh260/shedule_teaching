@@ -6,6 +6,7 @@ export interface SemesterConfig {
     startRow: string;
     columns: string;
     dateFormat?: import('../types').DateFormat;
+    sheetType?: 'review' | 'council';
 }
 
 export const configService = {

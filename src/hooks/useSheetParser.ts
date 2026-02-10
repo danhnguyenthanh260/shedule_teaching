@@ -57,7 +57,7 @@ export const useSheetParser = ({
     const primaryHeaders = idx > 0 ? rowsData[idx - 1] : [];
     const secondaryHeaders = rowsData[idx] || [];
 
-    const isReview = (meta as any)?.isDataMau || tabName.toLowerCase().includes('review');
+    const isReview = (meta as any)?.isDataMau || tabName.toLowerCase().includes('review') || (meta as any)?.sheetType?.type === 'review';
     const merged = (idx > 0 && !isReview) ? mergeHeaderRows(primaryHeaders, secondaryHeaders) : secondaryHeaders;
     const filled = fillForwardHeaders(merged);
 
@@ -67,12 +67,12 @@ export const useSheetParser = ({
     setFullRows(rowsData.slice(idx + 1));
 
     if (meta) {
-      setSheetMeta({ ...meta, headerRowIndex: idx });
+      setSheetMeta({ ...meta, isDataMau: isReview, headerRowIndex: idx });
     }
     setError(null);
   }, [tabName, setHeaderRowIndex, setTitleRow, setFullHeaders, setFullDetailHeaders, setFullRows, setSheetMeta]);
 
-  const applyMapping = useCallback((mapping: ColumnMapping, isDataMau: boolean, overriddenRows?: string[][]) => {
+  const applyMapping = useCallback((mapping: ColumnMapping, isDataMauParam: boolean, overriddenRows?: string[][]) => {
     const rowsToUse = overriddenRows || allRows;
     if (!rowsToUse || rowsToUse.length === 0) return;
 
@@ -80,8 +80,15 @@ export const useSheetParser = ({
     setError(null);
     setRows([]);
     try {
+      // 🛡️ Proactive Mode Detection (to avoid React state desync bugs)
+      const looksLikeReview = (tabName || "").toLowerCase().includes('review') || 
+                              fullDetailHeaders.filter(h => (h || "").toLowerCase().includes('code')).length >= 3;
+      
+      const isReviewMode = !!isDataMauParam || looksLikeReview; 
+
       let normalized: RowNormalized[] = [];
-      if (isDataMau) {
+      if (isReviewMode) {
+        console.log('[Parser] applyMapping: Review Mode (Proactive), normalizing with grouping...');
         normalized = googleService.normalizeRowsWithGrouping({
           sheetId: sheetMeta?.sheetId || '',
           tab: tabName,
@@ -94,6 +101,7 @@ export const useSheetParser = ({
           preferredFormat: dateFormat
         });
       } else {
+        console.log('[Parser] applyMapping: Council Mode, normal normalization...');
         normalized = googleService.normalizeRows({
           sheetId: sheetMeta?.sheetId || '',
           tab: tabName,
@@ -105,15 +113,19 @@ export const useSheetParser = ({
         });
       }
       setRows(normalized);
+      setSheetMeta((prev: any) => ({ ...prev, mapping, isDataMau: isReviewMode }));
       if (normalized.length === 0) {
         logWarning("Không tìm thấy dữ liệu sau khi mapping");
       }
+      setLoading(false);
       return normalized;
     } catch (err: any) {
       setError(err.message);
       return [];
     } finally {
-      setLoading(false);
+      // setLoading(false) is now handled in the try block for success path
+      // and implicitly by returning from catch block for error path.
+      // No need for a separate finally block for setLoading(false).
     }
   }, [allRows, fullHeaders, fullDetailHeaders, headerRowIndex, sheetMeta, tabName, dateFormat]);
 
@@ -133,8 +145,13 @@ export const useSheetParser = ({
       let label = (h || "").trim();
       if (!label || label.startsWith('Column_')) return;
 
-      const count = labelCounts.get(label) || 0;
-      if (isReview && count !== 1 && count !== 3) return;
+      if (isReview) {
+        // Restricted list for Review Mode as requested by user
+        const allowed = ["code", "reviewer 1", "reviewer 2", "date", "slot", "room"];
+        if (!allowed.includes(label.toLowerCase())) {
+          return;
+        }
+      }
 
       if (!seen.has(label) && !looksLikeDataRow([label])) {
         seen.add(label);
@@ -174,11 +191,18 @@ export const useSheetParser = ({
   }, [fullHeaders]);
 
   const effectiveSearchColumns = useMemo(() => {
+    // 🛡️ In Review Mode, strictly only search columns mapped in Step 2
+    // to avoid matching Supervisor/Project info columns.
+    if (sheetMeta?.isDataMau) {
+      const mappedIndices = Object.values(sheetMeta.mapping || {}).filter((idx): idx is number => typeof idx === 'number' && idx !== -1);
+      return mappedIndices.length > 0 ? mappedIndices : inferredSearchIndices;
+    }
+
     if (searchColumnIndices && searchColumnIndices.length > 0) {
       return searchColumnIndices;
     }
     return inferredSearchIndices;
-  }, [searchColumnIndices, inferredSearchIndices]);
+  }, [searchColumnIndices, inferredSearchIndices, sheetMeta?.isDataMau, sheetMeta?.mapping]);
 
   return {
     loading,

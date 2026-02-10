@@ -20,12 +20,10 @@ export interface ParsedDateTime {
  * Định nghĩa các slot chuẩn
  */
 const STANDARD_SLOTS: TimeSlot[] = [
-  { slot: 1, startTime: '07:30', endTime: '09:00', display: '07:30 - 09:00' },
-  { slot: 2, startTime: '09:10', endTime: '10:40', display: '09:10 - 10:40' },
-  { slot: 3, startTime: '10:50', endTime: '12:20', display: '10:50 - 12:20' },
-  { slot: 4, startTime: '12:50', endTime: '14:20', display: '12:50 - 14:20' },
-  { slot: 5, startTime: '14:30', endTime: '16:00', display: '14:30 - 16:00' },
-  { slot: 6, startTime: '16:10', endTime: '17:40', display: '16:10 - 17:40' }
+  { slot: 1, startTime: '07:00', endTime: '09:15', display: '07:00 - 09:15' },
+  { slot: 2, startTime: '09:30', endTime: '11:45', display: '09:30 - 11:45' },
+  { slot: 3, startTime: '12:30', endTime: '14:45', display: '12:30 - 14:45' },
+  { slot: 4, startTime: '15:00', endTime: '17:15', display: '15:00 - 17:15' }
 ];
 
 /**

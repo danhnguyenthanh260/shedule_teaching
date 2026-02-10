@@ -30,7 +30,6 @@ interface ExcelImportProps {
   setDateFormat: (format: DateFormat) => void;
   selectedSemesterId: string;
   setSelectedSemesterId: (id: string) => void;
-  isAdmin?: boolean;
 }
 
 export const ExcelImport: React.FC<ExcelImportProps> = ({
@@ -49,12 +48,88 @@ export const ExcelImport: React.FC<ExcelImportProps> = ({
   dateFormat,
   setDateFormat,
   selectedSemesterId,
-  setSelectedSemesterId,
-  isAdmin = false
+  setSelectedSemesterId
 }) => {
   const [isProcessing, setIsProcessing] = useState(false);
   const [semesters, setSemesters] = useState<Record<string, SemesterConfig>>({});
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  const processRawData = (rows: string[][], source: string) => {
+    if (!rows || rows.length === 0) {
+      throw new Error('❌ Dữ liệu trống');
+    }
+
+    // ✅ Detect sheet type based on tab name or sheet URL
+    const sheetTypeInfo = detectSheetType(tabName || sheetUrl);
+
+    // Extract Sheet ID from URL
+    const sheetIdMatch = sheetUrl.match(/\/d\/([a-zA-Z0-9-_]+)/);
+    const actualSheetId = sheetIdMatch ? sheetIdMatch[1] : source;
+
+    // "Data Mẫu" Sheet ID - check for garbage in this specific sheet
+    const DATA_MAU_SHEET_ID = '1nshAfx6vf11FUDOTOTiLu0D-zulNfM5uKoCI0A106Sk';
+
+    if (actualSheetId === DATA_MAU_SHEET_ID && rows.length > 0) {
+      const firstRow = rows[0];
+      const firstColumns = firstRow.slice(0, 9).map(h => String(h || '').toLowerCase().trim());
+      const projectInfoKeywords = ['stt', 'mã nhóm', 'mã đề tài', 'tên đề tài', 'gvhd'];
+      const hasProjectInfoGarbage = firstColumns.filter(h =>
+        projectInfoKeywords.some(k => h.includes(k))
+      ).length >= 2;
+      // Note: hasProjectInfoGarbage logic exists but we don't slice anymore as per user request
+    }
+
+    // ✅ Check if config explicitly defines sheet type
+    const configSheetType = semesters[selectedSemesterId]?.sheetType;
+    const finalSheetType = configSheetType ? (configSheetType === 'review' ? detectSheetType('review') : detectSheetType('council')) : sheetTypeInfo;
+
+    // 🎯 AUTO-DETECT HEADER ROW (Especially for Review Mode)
+    let detectedHeaderRowIndex = 0;
+    if (finalSheetType.type === 'review' && rows.length > 0) {
+      console.log('🔍 [ExcelImport] Scanning for Review Mode headers (Universal Detection)...');
+      for (let i = 0; i < Math.min(10, rows.length); i++) {
+        const row = rows[i].map(c => String(c || '').toLowerCase().trim());
+        const codeCount = row.filter(c => c === 'code').length;
+        const rev1Count = row.filter(c => c.includes('reviewer 1') || c.includes('gv 1')).length;
+        
+        // If we find 3 blocks on this row, treat it as the header row
+        if (codeCount >= 3 || rev1Count >= 3) {
+          console.log(`✅ [ExcelImport] Found Review Mode headers on row index ${i}`);
+          detectedHeaderRowIndex = i;
+          break;
+        }
+      }
+    }
+
+    onDataLoaded({
+      rawRows: rows, 
+      sheetId: actualSheetId,
+      tabName: tabName || 'Sheet1',
+      headerRowIndex: detectedHeaderRowIndex,
+      isDataMau: finalSheetType.type === 'review',
+      sheetType: finalSheetType
+    });
+  };
+
+  const handleShowData = async () => {
+    if (!sheetUrl) return;
+
+    setIsProcessing(true);
+    setLoading(true);
+    setError(null);
+
+    try {
+      const rows = await readSheet(sheetUrl, startRow);
+      processRawData(rows, 'GoogleSheet');
+      setError(null);
+    } catch (err: any) {
+      console.error('Fetch data error:', err);
+      setError(err.message || '❌ Không thể lấy dữ liệu từ Sheets');
+    } finally {
+      setIsProcessing(false);
+      setLoading(false);
+    }
+  };
 
   // Fetch configs on mount
   useEffect(() => {
@@ -125,83 +200,6 @@ export const ExcelImport: React.FC<ExcelImportProps> = ({
     }
   };
 
-  const processRawData = (rows: string[][], source: string) => {
-    if (!rows || rows.length === 0) {
-      throw new Error('❌ Dữ liệu trống');
-    }
-
-    const isReviewMode = tabName.toLowerCase().includes('review');
-
-    // ✅ Detect sheet type based on tab name or sheet URL
-    const sheetType = detectSheetType(tabName || sheetUrl);
-
-    // ✅ SMART FILTERING: For Review Mode, check if first 9 columns contain "Project Info"
-    // If yes, slice all rows to remove columns A-I (index 0-8)
-    let processedRows = rows;
-
-    // Extract Sheet ID from URL
-    const sheetIdMatch = sheetUrl.match(/\/d\/([a-zA-Z0-9-_]+)/);
-    const currentSheetId = sheetIdMatch ? sheetIdMatch[1] : '';
-
-    // "Data Mẫu" Sheet ID - only apply filtering to this specific sheet
-    const DATA_MAU_SHEET_ID = '1nshAfx6vf11FUDOTOTiLu0D-zulNfM5uKoCI0A106Sk';
-
-    if (currentSheetId === DATA_MAU_SHEET_ID && rows.length > 0) {
-      const firstRow = rows[0];
-      const firstColumns = firstRow.slice(0, 9).map(h => String(h || '').toLowerCase().trim());
-      const projectInfoKeywords = ['stt', 'mã nhóm', 'mã đề tài', 'tên đề tài', 'gvhd'];
-      const hasProjectInfoGarbage = firstColumns.filter(h =>
-        projectInfoKeywords.some(k => h.includes(k))
-      ).length >= 2;
-
-      if (hasProjectInfoGarbage) {
-        // Slice all rows to remove first 9 columns (A-I)
-        processedRows = rows.map(row => row.slice(9));
-        console.log('✂️ Review Mode: Removed columns A-I (Project Info). Remaining columns:', processedRows[0]?.length);
-      }
-    }
-
-    onDataLoaded({
-      rawRows: processedRows,
-      sheetId: source,
-      tabName: tabName || 'Sheet1',
-      headerRowIndex: 0, // ✅ FIX: readSheet already starts from startRow, so first row is header
-      isDataMau: isReviewMode,
-      sheetType: sheetType
-    });
-  };
-
-  const handleShowData = async () => {
-    // ✅ TASK 3: Strict validation before proceeding
-    if (!sheetUrl) {
-      setError('❌ Vui lòng chọn học kỳ hoặc nhập URL Sheet');
-      return;
-    }
-
-    setIsProcessing(true);
-    setLoading(true);
-    setError(null);
-
-    try {
-      const rows = await readSheet(sheetUrl, startRow);
-      processRawData(rows, 'GoogleSheet');
-      // ✅ TASK 2: Only show success if actually successful
-      setError(null);
-
-      // 🔍 DEBUG: Log raw data validation
-      console.log('🔍 Loaded Rows (First 5):', rows.slice(0, 5));
-      console.log('🔍 Columns detected:', rows[0] ? rows[0].map((c, i) => `${i}:${c}`).join('|') : 'Empty');
-
-    } catch (err: any) {
-      // ✅ TASK 2: Always show error in red, never success
-      console.error('Fetch data error:', err);
-      const errorMsg = err.message || '❌ Không thể lấy dữ liệu từ Sheets';
-      setError(errorMsg);
-    } finally {
-      setIsProcessing(false);
-      setLoading(false);
-    }
-  };
 
   const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -280,36 +278,9 @@ export const ExcelImport: React.FC<ExcelImportProps> = ({
             )}
           </button>
 
-          {isAdmin && (
-            <button
-              onClick={() => fileInputRef.current?.click()}
-              disabled={isProcessing}
-              className="w-12 h-12 bg-slate-100 text-slate-500 rounded-xl hover:bg-slate-200 active:scale-95 transition-all flex items-center justify-center border border-slate-200 shadow-sm"
-              title="Tải file .xlsx từ máy"
-            >
-              <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12" />
-              </svg>
-              <input
-                type="file"
-                ref={fileInputRef}
-                onChange={handleFileUpload}
-                className="hidden"
-                accept=".xlsx, .xls"
-              />
-            </button>
-          )}
         </div>
       </div>
 
-      {/* Admin Info (Hidden but functional) - You could also just remove these inputs if they are not needed for teachers to edit at all */}
-      {/* 
-      <div className="hidden">
-        <input value={sheetUrl} onChange={e => setSheetUrl(e.target.value)} />
-        <input value={startRow} onChange={e => setStartRow(parseInt(e.target.value))} />
-        <input value={columnsConfig} onChange={e => setColumnsConfig(e.target.value)} />
-      </div> 
-      */}
 
       {isProcessing && (
         <div className="flex items-center gap-2 px-3 py-2 bg-orange-50 rounded-lg animate-pulse border border-orange-100">

@@ -13,9 +13,12 @@ import { useSheetParser } from '../../../hooks/useSheetParser';
 import { useSyncLogs } from '../../../hooks/useSyncLogs';
 import { useCalendarSync } from '../../../hooks/useCalendarSync';
 import { khongDau } from '../../../utils/stringUtils';
-import { inferSchema } from '../../../services/googleService';
+import { googleService, inferSchema } from '../../../services/googleService';
 import { SearchColumnSelector } from '../../../components/SearchColumnSelector';
 import { isAdmin } from '../../../config/admin';
+import { database } from '../../../config/firebase';
+import { ref, set, get } from 'firebase/database';
+import { configService, SemesterConfig } from '../../../services/configService';
 
 export const LecturerDashboard: React.FC = () => {
   const { user: firebaseUser, accessToken } = useFirebase();
@@ -42,6 +45,7 @@ export const LecturerDashboard: React.FC = () => {
     dateFormat, setDateFormat,
     searchColumnIndices, setSearchColumnIndices,
     selectedSemesterId, setSelectedSemesterId,
+    sheetType, setSheetType,
   } = persistence;
 
   // Hooks
@@ -85,6 +89,21 @@ export const LecturerDashboard: React.FC = () => {
   // Toast State
   const [toastMessage, setToastMessage] = useState<string | null>(null);
   const [isPreviewMode, setIsPreviewMode] = useState(false);
+  const [semesters, setSemesters] = useState<Record<string, SemesterConfig>>({});
+  
+  // Fetch semesters for quick-save reference
+  useEffect(() => {
+    const fetch = async () => {
+      try {
+        const configs = await configService.fetchConfigs();
+        setSemesters(configs);
+      } catch (e) {
+        console.error('Lỗi khi tải danh sách học kỳ:', e);
+      }
+    };
+    fetch();
+  }, []);
+
   // Confirmation State
   const [isConfirmingClear, setIsConfirmingClear] = useState(false);
   const showToast = useCallback((msg: string) => {
@@ -107,7 +126,8 @@ export const LecturerDashboard: React.FC = () => {
   const mappingId = useMemo(() => {
     if (!sheetMeta?.sheetId) return undefined;
     const cleanTab = (tabName || 'Sheet1').replace(/[^a-zA-Z0-9]/g, '');
-    return `${sheetMeta.sheetId}-${cleanTab}`;
+    const mode = sheetMeta.sheetType?.type || 'council';
+    return `${sheetMeta.sheetId}-${cleanTab}-${mode}`;
   }, [sheetMeta?.sheetId, tabName]);
 
   // Firebase Mapping Sync
@@ -148,6 +168,26 @@ export const LecturerDashboard: React.FC = () => {
   // ✅ Filter display rows for both Preview and Mapped modes
   const previewRows = useMemo(() => {
     if (!isPreviewMode || allRows.length === 0) return [];
+
+    const isReviewMode = semesters[selectedSemesterId]?.sheetType === 'review' || !!sheetMeta?.isDataMau || (tabName || "").toLowerCase().includes('review');
+    console.log('[Dashboard] previewRows - isReviewMode:', isReviewMode, 'tabName:', tabName);
+
+    // ✅ If Review Mode, use the grouping expansion even for preview
+    if (isReviewMode) {
+      const expandedPreview = googleService.normalizeRowsWithGrouping({
+        sheetId: sheetMeta?.sheetId || 'preview',
+        tab: tabName,
+        detailHeaders: fullDetailHeaders,
+        rawRows: allRows,
+        mapping: {}, // No mapping yet
+        headerRowIndex,
+        isDataMau: true, // Force expansion
+        preferredFormat: dateFormat
+      });
+      console.log('[Dashboard] expandedPreview count:', expandedPreview.length);
+      return expandedPreview;
+    }
+
     const dataOnly = allRows.slice(headerRowIndex + 1);
     return dataOnly.map((r, idx) => {
       const actualIdx = idx + headerRowIndex + 1;
@@ -161,7 +201,7 @@ export const LecturerDashboard: React.FC = () => {
         rawRow: r,
       } as RowNormalized;
     });
-  }, [isPreviewMode, allRows, headerRowIndex]);
+  }, [isPreviewMode, allRows, headerRowIndex, sheetMeta, tabName, fullDetailHeaders, dateFormat]);
 
   const baseRows = isPreviewMode ? previewRows : rows;
 
@@ -169,33 +209,52 @@ export const LecturerDashboard: React.FC = () => {
     const rawFilter = (personFilter || '').trim();
     if (!rawFilter) return baseRows;
 
-    const filters = rawFilter.split(/\s+/).map(f => khongDau(f)).filter(Boolean);
+    const filters = khongDau(rawFilter.toLowerCase()).split(/\s+/).filter(Boolean);
 
     return baseRows.filter(row => {
-      // 🎯 Determine Search Values:
-      // If user has manually selected columns, use them.
-      // Otherwise, if in preview mode, use all columns.
-      // If in mapped mode, use inferred keywords.
       let searchValues: any[] = [];
       
-      if (searchColumnIndices && searchColumnIndices.length > 0) {
-        searchValues = searchColumnIndices.map(idx => row.rawRow[idx] || "");
-      } else if (isPreviewMode) {
+      const indicesToUse = (searchColumnIndices && searchColumnIndices.length > 0) 
+        ? searchColumnIndices 
+        : (isPreviewMode ? [] : effectiveSearchColumns);
+
+      if (isPreviewMode && indicesToUse.length === 0) {
         searchValues = row.rawRow || [];
       } else {
-        searchValues = effectiveSearchColumns.map(idx => row.rawRow[idx] || "");
+        searchValues = indicesToUse.map(idx => {
+           // 🔒 Shifted Isolation Logic: 
+           // If it's a review event and the search column is in the Review Area (J+):
+           if (row.blockStart !== undefined && row.reviewAreaStart !== undefined && idx >= row.reviewAreaStart) {
+              // 1. Calculate offset relative to the FIRST block start
+              const relativeOffset = idx - row.reviewAreaStart;
+              // 2. Project this offset onto the CURRENT event's block
+              const targetIdx = row.blockStart + relativeOffset;
+              
+              // 3. Extract if within valid range
+              if (targetIdx <= (row.blockEnd || 999)) {
+                return (row.rawRow?.[targetIdx] || "").toString();
+              }
+              return "";
+           }
+           
+           // Otherwise (Global or Standard mode), search exactly what was selected
+           return (row.rawRow?.[idx] || "").toString();
+        });
       }
       
       const searchSpace = [
         ...searchValues,
         row.person,
-        row.groupName
+        row.groupName,
+        row.location,
+        row.date,
+        row.task
       ].map(v => khongDau(String(v || ""))).join(' ');
 
       // Use .every() to ensure all word tokens are present in the search space
       return filters.every(f => searchSpace.includes(f));
     });
-  }, [baseRows, personFilter, effectiveSearchColumns, isPreviewMode]);
+  }, [baseRows, personFilter, effectiveSearchColumns, isPreviewMode, searchColumnIndices]);
 
   // ✅ 1. RESTORE mapping & header row index whenever mappingId or Firebase data is ready
   const lastAppliedMappingId = useRef<string | null>(null);
@@ -210,9 +269,15 @@ export const LecturerDashboard: React.FC = () => {
           setAppliedColumnMap(savedMapping);
           if (savedHeaderRowIndex !== null && savedHeaderRowIndex !== undefined) {
             setHeaderRowIndex(savedHeaderRowIndex);
-            applyHeaderRow(savedHeaderRowIndex, allRows, { sheetId: sheetMeta.sheetId, tab: tabName });
+            applyHeaderRow(savedHeaderRowIndex, allRows, { 
+              sheetId: sheetMeta.sheetId, 
+              tab: tabName,
+              isDataMau: semesters[selectedSemesterId]?.sheetType === 'review' || (tabName || "").toLowerCase().includes('review')
+            });
           }
-          const normalized = applyMapping(savedMapping, sheetMeta?.isDataMau || false);
+          const currentIsReview = semesters[selectedSemesterId]?.sheetType === 'review' || (tabName || "").toLowerCase().includes('review') || !!sheetMeta?.isDataMau;
+          console.log('📥 applyMapping with currentIsReview:', currentIsReview);
+          const normalized = applyMapping(savedMapping, currentIsReview);
           if (normalized && normalized.length > 0) {
             setIsPreviewMode(false);
           }
@@ -328,9 +393,11 @@ export const LecturerDashboard: React.FC = () => {
                   sheetId: data.sheetId,
                   tab: data.tabName,
                   isDataMau: data.isDataMau,
-                  headerRowIndex: data.headerRowIndex
+                  headerRowIndex: data.headerRowIndex,
+                  sheetType: data.sheetType
                 };
                 setSheetMeta(meta);
+                setSheetType(data.sheetType || null);
                 const appliedHeaders = applyHeaderRow(data.headerRowIndex, data.rawRows, { sheetId: data.sheetId, tab: data.tabName });
                 
                 // 🪄 AUTO-MAPPING: Tự động đoán cột khi có dữ liệu mới
@@ -367,7 +434,6 @@ export const LecturerDashboard: React.FC = () => {
               setDateFormat={setDateFormat}
               selectedSemesterId={selectedSemesterId}
               setSelectedSemesterId={setSelectedSemesterId}
-              isAdmin={isAdmin(firebaseUser?.email)}
             />
           </div>
         </section>
@@ -387,12 +453,35 @@ export const LecturerDashboard: React.FC = () => {
                 onHeaderRowChange={(idx) => applyHeaderRow(idx, allRows)}
                 columnMap={columnMap}
                 setColumnMap={setColumnMap}
-                onApply={() => {
+                onApply={async () => {
                   setAppliedColumnMap(columnMap);
                   setIsPreviewMode(false);
-                  if (mappingId) {
-                    saveFirebaseMapping(mappingId, columnMap, headerRowIndex);
-                    showToast('✓ Đã lưu cấu hình lên đám mây');
+                  
+                  try {
+                    // 1. Save Column Mapping (User-specific)
+                    if (mappingId) {
+                      await saveFirebaseMapping(mappingId, columnMap, headerRowIndex);
+                    }
+
+                    // 2. Save Global Semester Config (If Admin)
+                    if (isAdmin(firebaseUser?.email) && selectedSemesterId) {
+                      const currentConfig = semesters[selectedSemesterId];
+                      if (currentConfig) {
+                        const configRef = ref(database, `configs/${selectedSemesterId}`);
+                        await set(configRef, {
+                          ...currentConfig,
+                          startRow: startRow.toString(),
+                          columns: columnsConfig
+                        });
+                        showToast('✓ Đã áp dụng & cập nhật cấu hình học kỳ');
+                      } else {
+                         showToast('✓ Đã áp dụng ánh xạ cột');
+                      }
+                    } else {
+                      showToast('✓ Đã áp dụng ánh xạ cột');
+                    }
+                  } catch (err: any) {
+                    showToast('❌ Lỗi khi lưu cấu hình');
                   }
                 }}
                 isLoading={loading}

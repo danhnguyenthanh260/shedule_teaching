@@ -2,7 +2,7 @@
  * Sheet type detection and column filtering utilities
  */
 
-export type SheetType = 'test1' | 'review' | 'general';
+export type SheetType = 'review' | 'council' | 'test1';
 
 export interface SheetTypeInfo {
     type: SheetType;
@@ -20,7 +20,7 @@ export const detectSheetType = (fileName: string): SheetTypeInfo => {
     if (lowerName.includes('test1') || lowerName.includes('test 1')) {
         return {
             type: 'test1',
-            displayName: 'Test 1',
+            displayName: 'Test Mode',
             color: 'bg-blue-100 text-blue-700 border-blue-300',
             icon: '📝'
         };
@@ -29,15 +29,15 @@ export const detectSheetType = (fileName: string): SheetTypeInfo => {
     if (lowerName.includes('sheet1') || lowerName.includes('review')) {
         return {
             type: 'review',
-            displayName: 'Review Mode',
+            displayName: 'Chế độ chấm review',
             color: 'bg-purple-100 text-purple-700 border-purple-300',
             icon: '📊'
         };
     }
 
     return {
-        type: 'general',
-        displayName: 'General',
+        type: 'council',
+        displayName: 'Chế độ chấm hội đồng',
         color: 'bg-slate-100 text-slate-700 border-slate-300',
         icon: '📄'
     };
@@ -114,7 +114,7 @@ export const filterColumnsByType = (headers: string[], sheetType: SheetType): nu
         return reviewIndices;
     }
 
-    // General: Show all columns
+    // Council: Show all columns
     return headers.map((_, index) => index);
 };
 

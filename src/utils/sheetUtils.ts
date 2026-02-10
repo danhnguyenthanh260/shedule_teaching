@@ -7,14 +7,14 @@ export const looksLikeDataRow = (row: string[]) => {
   const joined = row.join(' ').toLowerCase();
   const datePattern = /\b\d{1,2}[\/\-]\d{1,2}[\/\-]\d{2,4}\b/;
   const timePattern = /\b\d{1,2}:\d{2}\b|\b\d{1,2}h\d{2}\b/;
-  const numericCells = row.filter(v => v && /^\d+$/.test(v.trim())).length;
-  const filledCells = row.filter(v => v && v.trim()).length;
+  const numericCells = row.filter(v => v && /^\d+$/.test(String(v).trim())).length;
+  const filledCells = row.filter(v => v && String(v).trim()).length;
   const dataSignals = (datePattern.test(joined) ? 1 : 0) + (timePattern.test(joined) ? 1 : 0) + (numericCells > 2 ? 1 : 0);
   return filledCells > 0 && dataSignals >= 1;
 };
 
 export const looksLikeHeaderRow = (row: string[]) => {
-  const filledCells = row.filter(v => v && v.trim()).length;
+  const filledCells = row.filter(v => v && String(v).trim()).length;
   if (filledCells === 0) return false;
   const headerKeywords = ['ngành', 'mã', 'tên', 'đề tài', 'ngày', 'giờ', 'phòng', 'review', 'code', 'count', 'reviewer'];
   const joined = row.join(' ').toLowerCase();
@@ -25,12 +25,12 @@ export const looksLikeHeaderRow = (row: string[]) => {
 export const mergeHeaderRows = (primary: string[], secondary: string[]) => {
   const maxLen = Math.max(primary.length, secondary.length);
   return Array.from({ length: maxLen }, (_, i) => {
-    const a = (primary[i] || '').trim();
-    const b = (secondary[i] || '').trim();
-    
+    const a = String(primary[i] || '').trim();
+    const b = String(secondary[i] || '').trim();
+
     // Nếu b trông giống dữ liệu (ngày, giờ...), đừng gộp nó vào header
     if (b && looksLikeDataRow([b])) return a;
-    
+
     if (a && b && a !== b) return `${a} ${b}`;
     return a || b;
   });
@@ -38,7 +38,7 @@ export const mergeHeaderRows = (primary: string[], secondary: string[]) => {
 
 export const trimLeadingEmptyRows = (rows: string[][]) => {
   let start = 0;
-  while (start < rows.length && !rows[start].some(cell => cell && cell.trim())) {
+  while (start < rows.length && !rows[start].some(cell => cell && String(cell).trim())) {
     start += 1;
   }
   return rows.slice(start);

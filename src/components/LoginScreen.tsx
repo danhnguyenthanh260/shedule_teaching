@@ -54,7 +54,7 @@ export const LoginScreen: React.FC = () => {
             />
           </div>
           
-          <h1 className="text-4xl font-black text-slate-900 mb-3 tracking-tighter">
+          <h1 className="text-4xl font-bold text-slate-900 mb-3 tracking-tighter">
             FPTU <span className="text-[#F27024]">Sync</span>
           </h1>
           <p className="text-slate-600 font-bold text-sm mb-10 leading-relaxed px-2 opacity-80">
@@ -66,7 +66,7 @@ export const LoginScreen: React.FC = () => {
             
             <div className="relative flex items-center gap-3 py-2">
               <div className="flex-1 h-px bg-slate-200" />
-              <span className="text-[9px] font-black text-slate-400 uppercase tracking-[0.3em]">SECURE GATEWAY</span>
+              <span className="text-[9px] font-bold text-slate-400 uppercase tracking-[0.3em]">SECURE GATEWAY</span>
               <div className="flex-1 h-px bg-slate-200" />
             </div>
             
@@ -76,7 +76,7 @@ export const LoginScreen: React.FC = () => {
           </div>
         </div>
         
-        <p className="mt-8 text-center text-white/70 text-[10px] font-black uppercase tracking-[0.5em] drop-shadow-md">
+        <p className="mt-8 text-center text-white/70 text-[10px] font-bold uppercase tracking-[0.5em] drop-shadow-md">
           © {new Date().getFullYear()} FPT University • Teaching Schedule
         </p>
       </div>

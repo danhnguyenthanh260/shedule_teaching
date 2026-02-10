@@ -8,24 +8,21 @@ export default defineConfig(({ mode }) => {
     server: {
       port: 3000,
       host: '0.0.0.0',
+      // ✅ Local Dev Proxy: Handles /api calls during 'npm run dev'
+      // This is required because Vite doesn't natively handle Vercel's /api folder.
       proxy: {
-        '/api/appscript': {
-          target: 'https://script.google.com',
+        '/api': {
+          target: env.GAS_EXEC_URL || env.VITE_BACKEND_URL || 'https://script.google.com',
           changeOrigin: true,
+          followRedirects: true,
           rewrite: (path) => {
-            const backendUrl = env.VITE_BACKEND_URL;
-            if (!backendUrl) return path;
-            try {
-              const urlObj = new URL(backendUrl);
-              return path.replace(/^\/api\/appscript/, urlObj.pathname + urlObj.search);
-            } catch (e) {
-              console.error('Invalid VITE_BACKEND_URL:', backendUrl);
-              return path;
-            }
+            const newPath = path.replace(/^\/api\/[^/?]+/, '');
+            console.log(`🔄 Proxy: ${path} -> ${newPath}`);
+            return newPath;
           },
           secure: true,
-        }
-      }
+        },
+      },
     },
     plugins: [react()],
     define: {

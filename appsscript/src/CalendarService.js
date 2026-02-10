@@ -113,13 +113,14 @@ const CalendarService = {
 
       const createdEvent = calendar.createEvent(title, startDate, endDate, options);
 
-      // ✅ 2. Set Signature Tag for future deduplication
-      if (signature) {
-        try {
+      // ✅ 2. Set App Source Tag & Signature for identification
+      try {
+        createdEvent.setTag('app_source', 'fpt_scheduler');
+        if (signature) {
           createdEvent.setTag('signature', signature);
-        } catch (tagError) {
-          AppLogger.warn('Failed to set tag for event', tagError);
         }
+      } catch (tagError) {
+        AppLogger.warn('Failed to set tags for event', tagError);
       }
 
       AppLogger.info('Event created successfully', {
@@ -139,6 +140,41 @@ const CalendarService = {
         title: event.title,
         error: e.message
       };
+    }
+  },
+
+  /**
+   * Delete all events created by this app (identified by tag)
+   * @param {string} calendarName 
+   * @returns {Object} Result summary
+   */
+  clearEvents: function(calendarName) {
+    try {
+      const calendar = this.getOrCreateCalendar(calendarName);
+      
+      // Look back 6 months and forward 6 months
+      const now = new Date();
+      const startTime = new Date(now.getTime() - (180 * 24 * 60 * 60 * 1000));
+      const endTime = new Date(now.getTime() + (180 * 24 * 60 * 60 * 1000));
+      
+      const events = calendar.getEvents(startTime, endTime);
+      let deletedCount = 0;
+      
+      events.forEach(event => {
+        if (event.getTag('app_source') === 'fpt_scheduler') {
+          event.deleteEvent();
+          deletedCount++;
+        }
+      });
+      
+      AppLogger.info(`Cleared ${deletedCount} events from ${calendarName}`);
+      return {
+        status: 'success',
+        deletedCount: deletedCount
+      };
+    } catch (e) {
+      AppLogger.error('Error clearing events', e);
+      throw e;
     }
   },
 

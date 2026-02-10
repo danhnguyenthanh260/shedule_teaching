@@ -43,3 +43,6 @@ ehthumbs.db
 *.njsproj
 *.sln
 *.sw?
+
+# Claude AI
+.claude/

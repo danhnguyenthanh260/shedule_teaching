@@ -2,15 +2,15 @@
 import { useState, useMemo, useCallback, useEffect } from 'react';
 import { googleService } from '../services/googleService';
 import { syncEventsToCalendar } from '../services/appsScriptService';
-import { syncToGoogleCalendarAPI } from '../services/calendarApiService';
 import { firestoreSyncHistoryService } from '../services/firestoreSyncHistoryService';
 import { logInfo, logSuccess, logWarning, logError } from '../utils/logger';
 import { RowNormalized, SyncResult, ColumnMapping } from '../types';
-import { 
-  mergeHeaderRows, 
+import {
+  mergeHeaderRows,
   fillForwardHeaders,
   looksLikeDataRow
 } from '../utils/sheetUtils';
+import { DateFormat } from '../types';
 
 interface UseSheetLogicProps {
   sheetUrl: string;
@@ -19,6 +19,7 @@ interface UseSheetLogicProps {
   firebaseUser: any;
   columnMap: ColumnMapping;
   setColumnMap: (map: ColumnMapping) => void;
+  dateFormat: DateFormat;
   allRows: string[][];
   setAllRows: (rows: string[][]) => void;
   sheetMeta: any;
@@ -61,7 +62,8 @@ export const useSheetLogic = ({
   setFullRows,
   selectedIds,
   setSelectedIds,
-  personFilter
+  personFilter,
+  dateFormat
 }: UseSheetLogicProps) => {
   const [loading, setLoading] = useState(false);
   const [loadingMode, setLoadingMode] = useState<'test1' | 'review' | null>(null);
@@ -91,7 +93,10 @@ export const useSheetLogic = ({
   };
 
   const examinerColumnIndices = useMemo(() => {
-    const keywords = ['ho va ten', 'thanh vien hoi dong', 'reviewer', 'chu tich', 'thu ky', 'uy vien'];
+    const keywords = [
+      'ho va ten', 'thanh vien hoi dong', 'reviewer', 'reviewer 1', 'reviewer 2',
+      'chu tich', 'thu ky', 'uy vien', 'can bo', 'giang vien'
+    ];
     return fullHeaders.reduce((acc, header, index) => {
       const h = khongDau(header);
       if (keywords.some(k => h.includes(k))) {
@@ -104,7 +109,7 @@ export const useSheetLogic = ({
   const updateSelections = useCallback((data: RowNormalized[], filterValue?: string) => {
     const fValue = filterValue !== undefined ? filterValue : personFilter;
     const rawFilter = (fValue || '').trim();
-    
+
     if (!rawFilter) {
       setSelectedIds(new Set(data.map(r => r.id)));
       return;
@@ -119,10 +124,10 @@ export const useSheetLogic = ({
         row.person,
         row.groupName
       ].map(v => khongDau(v)).join(' ');
-      
+
       return filters.some(f => searchSpace.includes(f));
     });
-    
+
     setSelectedIds(new Set(matches.map(m => m.id)));
   }, [personFilter, setSelectedIds, examinerColumnIndices]);
 
@@ -134,14 +139,15 @@ export const useSheetLogic = ({
     const primaryHeaders = idx > 0 ? rowsData[idx - 1] : [];
     const secondaryHeaders = rowsData[idx] || [];
 
-    // Logic: Nếu chọn Row 1 (idx=0), thì chỉ dùng Row 1 làm header, không merge.
-    // Nếu chọn Row 2 (idx=1), merge Row 1 và Row 2.
-    const merged = idx > 0 ? mergeHeaderRows(primaryHeaders, secondaryHeaders) : secondaryHeaders;
+    // Logic: Nếu là sheet Review (DataMau), KHÔNG merge để giữ đúng ranh giới khối.
+    const isReview = (meta as any)?.isDataMau || tabName.toLowerCase().includes('review');
+    const merged = (idx > 0 && !isReview) ? mergeHeaderRows(primaryHeaders, secondaryHeaders) : secondaryHeaders;
     const filled = fillForwardHeaders(merged);
 
     setTitleRow(titleR);
-    setFullHeaders(filled);
-    setFullDetailHeaders(secondaryHeaders);
+    setFullHeaders(idx > 0 && isReview ? fillForwardHeaders(primaryHeaders) : filled); // Row 2 headers for groups
+    setFullDetailHeaders(secondaryHeaders); // Row 3 headers for details
+    console.log('🔍 applyHeaderRow - fullDetailHeaders set to:', secondaryHeaders.slice(0, 15));
     setFullRows(rowsData.slice(idx + 1));
 
     if (meta) {
@@ -169,7 +175,9 @@ export const useSheetLogic = ({
           detailHeaders: fullDetailHeaders,
           rawRows: rowsToUse,
           mapping,
-          headerRowIndex
+          headerRowIndex,
+          isDataMau: true,
+          preferredFormat: dateFormat
         });
       } else {
         normalized = googleService.normalizeRows({
@@ -178,7 +186,8 @@ export const useSheetLogic = ({
           headers: fullHeaders,
           rawRows: rowsToUse,
           mapping,
-          headerRowIndex
+          headerRowIndex,
+          preferredFormat: dateFormat
         });
       }
       setRows(normalized);
@@ -207,17 +216,50 @@ export const useSheetLogic = ({
 
     try {
       const rowsToSync = rows.filter(r => selectedIds.has(r.id));
-      const events = rowsToSync.map(r => ({
-        title: r.person, // Lấy trực tiếp thông tin người dùng chọn làm tiêu đề
-        start: r.startTime.includes('+') ? r.startTime : `${r.startTime}+07:00`,
-        end: r.endTime.includes('+') ? r.endTime : `${r.endTime}+07:00`,
-        location: r.location || '',
-        description: `Đồng bộ từ FPT Scheduler\nNội dung: ${r.person}\nPhòng: ${r.location}`
+
+      // ✅ Import signature generator
+      const { generateEventSignature } = await import('../utils/eventSignature');
+
+      const events = await Promise.all(rowsToSync.map(async (r) => {
+        // Formulate a Better Title
+        // If task is present: "[Task] Person" or "Task - Person"
+        // If only person: "Person"
+        // If only task: "Task"
+
+        // Clean up values
+        const task = (r.task || '').trim();
+        const person = (r.person || r.personRaw || '').trim();
+        const fullTitle = (task && person && task !== person)
+          ? `[${task}] ${person}`
+          : (person || task || 'Sự kiện');
+
+        const event = {
+          title: fullTitle,
+          start: r.startTime.includes('+') ? r.startTime : `${r.startTime}+07:00`,
+          end: r.endTime.includes('+') ? r.endTime : `${r.endTime}+07:00`,
+          location: r.location || '',
+          description: `Đồng bộ từ FPT Scheduler\n------------------\nNhiệm vụ: ${task}\nGiảng viên: ${person}\nPhòng: ${r.location}\n`
+        };
+
+        // ✅ Generate unique signature for duplicate detection
+        const signature = await generateEventSignature(event);
+
+        // ✅ Define resources for conflict detection
+        const resources = [
+          `teacher:${(r.person || r.personRaw || '').trim()}`,
+          `room:${(r.location || r.locationRaw || '').trim()}`
+        ].filter(res => !res.endsWith(':')); // Remove empty resources
+
+        return {
+          ...event,
+          signature,
+          resources
+        };
       }));
 
-      // ✅ NEW: Direct Google API sync (Always goes to user's primary calendar)
-      const res: any = await syncToGoogleCalendarAPI(events, firebaseAccessToken!);
-      
+      // ✅ Vercel Proxy sync (Frontend -> Vercel -> Apps Script)
+      const res: any = await syncEventsToCalendar(events);
+
       // Flexible result parsing (handle different possible GAS response structures)
       const successCount = res.data?.success ?? res.success ?? 0;
       const failedCount = res.data?.failed ?? res.failed ?? 0;
@@ -232,7 +274,23 @@ export const useSheetLogic = ({
       };
 
       setResult(syncRes);
-      showToast(`Đồng bộ xong! Thành công: ${syncRes.created}, Lỗi: ${syncRes.failed}`);
+
+      // ✅ Provide helpful message about calendar refresh
+      const refreshMessage = syncRes.created > 0
+        ? `✅ Đã tạo ${syncRes.created} sự kiện! Nếu chưa thấy trên lịch, hãy F5 (refresh) trang Google Calendar.`
+        : `⚠️ Không có sự kiện nào được tạo. Lỗi: ${syncRes.failed}`;
+
+      showToast(refreshMessage);
+
+      // ✅ Auto-open Google Calendar in new tab after successful sync
+      if (syncRes.created > 0) {
+        setTimeout(() => {
+          window.open('https://calendar.google.com/calendar/u/0/r', '_blank');
+        }, 500); // Small delay to ensure events are created
+      }
+
+      // Log calendar link for debugging
+      console.log('📅 Kiểm tra lịch tại: https://calendar.google.com/calendar/u/0/r');
 
       if (firebaseUser && sheetMeta) {
         firestoreSyncHistoryService.saveSyncResult(
@@ -247,7 +305,13 @@ export const useSheetLogic = ({
       }
     } catch (err: any) {
       console.error("Sync error:", err);
-      setError("Lỗi đồng bộ: " + err.message);
+
+      // ✅ Provide clear guidance for token errors
+      if (err.message?.includes('Token') || err.message?.includes('Unauthorized')) {
+        setError("⚠️ Phiên đăng nhập đã hết hạn. Vui lòng đăng xuất và đăng nhập lại để tiếp tục.");
+      } else {
+        setError("Lỗi đồng bộ: " + err.message);
+      }
     } finally {
       setSyncing(false);
     }
@@ -258,29 +322,36 @@ export const useSheetLogic = ({
     const options: { label: string; value: number }[] = [];
     const seen = new Set<string>();
 
-    fullHeaders.forEach((h, i) => {
-      let label = (h || "").trim();
+    // Đếm số lần xuất hiện của mỗi label (cho chế độ Review)
+    const labelCounts = new Map<string, number>();
+    const isReview = sheetMeta?.isDataMau;
+
+    fullDetailHeaders.forEach((h, i) => {
+      let label = String(h || "").trim();
+      if (!label || label.startsWith('Column_')) return;
+      labelCounts.set(label, (labelCounts.get(label) || 0) + 1);
+    });
+
+    fullDetailHeaders.forEach((h, i) => {
+      let label = String(h || "").trim();
       if (!label || label.startsWith('Column_')) return;
 
-      // Logic "Tiêu đề lặp lại -> Hiện 1 lần":
-      // Nếu là tiêu đề gộp kiểu "Hội đồng", ta ưu tiên lấy nhãn gốc từ hàng Primary
-      const p = (primary[i] || "").trim();
-      const isGroup = p && (
-        (i > 0 && (primary[i-1] || "").trim() === p) || 
-        (i < primary.length - 1 && (primary[i+1] || "").trim() === p)
-      );
+      const count = labelCounts.get(label) || 0;
 
-      const finalLabel = isGroup ? p : label;
+      // Nếu là sheet Review: 
+      // - Chấp nhận cột xuất hiện 1 lần (Shared)
+      // - Chấp nhận cột xuất hiện đúng 3 lần (Repeated)
+      if (isReview && count !== 1 && count !== 3) return;
 
-      // CHẶN: Không cho phép dữ liệu lọt vào dropdown (vd: "1/25/2026")
-      if (!seen.has(finalLabel) && !looksLikeDataRow([finalLabel])) {
-        seen.add(finalLabel);
-        options.push({ label: finalLabel, value: i });
+      // Logic "Tiêu đề lặp lại -> Hiện 1 lần"
+      if (!seen.has(label) && !looksLikeDataRow([label])) {
+        seen.add(label);
+        options.push({ label: label, value: i });
       }
     });
 
     return options.length > 0 ? options : [{ label: '-- Chọn cột --', value: -1 }];
-  }, [fullHeaders, allRows, headerRowIndex]);
+  }, [fullHeaders, allRows, headerRowIndex, sheetMeta?.isDataMau]);
 
   const headerRowOptions = useMemo(() => {
     const startIndex = 0; // Bắt đầu từ Row 1
@@ -300,9 +371,9 @@ export const useSheetLogic = ({
   const filteredRows = useMemo(() => {
     const rawFilter = (personFilter || '').trim();
     if (!rawFilter) return rows;
-    
+
     const filters = rawFilter.split(',').map(f => khongDau(f)).filter(Boolean);
-    
+
     return rows.filter(row => {
       // CHỈ lọc trên các cột chấm thi
       const searchValues = examinerColumnIndices.map(idx => row.rawRow[idx] || "");
@@ -311,7 +382,7 @@ export const useSheetLogic = ({
         row.person,
         row.groupName
       ].map(v => khongDau(v)).join(' ');
-      
+
       return filters.some(f => searchSpace.includes(f));
     });
   }, [rows, personFilter, examinerColumnIndices]);

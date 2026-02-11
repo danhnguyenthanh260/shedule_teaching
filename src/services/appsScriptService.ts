@@ -81,7 +81,9 @@ export const readSheet = async (
         const response = await fetch(fetchUrl);
 
         if (!response.ok) {
-            throw new Error(`❌ Lỗi Proxy API ${response.status}: ${response.statusText}`);
+            const errData = await response.json().catch(() => ({}));
+            const detail = errData.detail ? ` (${errData.detail})` : (errData.error ? ` (${errData.error})` : '');
+            throw new Error(`❌ Lỗi Proxy API ${response.status}: ${response.statusText}${detail}`);
         }
 
         const data = await response.json();

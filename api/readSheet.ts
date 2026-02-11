@@ -39,6 +39,9 @@ export default async function handler(
       if (url) queryParams.append("url", url as string);
       if (startRow) queryParams.append("startRow", startRow as string);
       
+      const GAS_SECRET = process.env.GAS_SECRET;
+      if (GAS_SECRET) queryParams.append("secret", GAS_SECRET);
+      
       targetUrl += (targetUrl.includes("?") ? "&" : "?") + queryParams.toString();
     } else {
       // For POST

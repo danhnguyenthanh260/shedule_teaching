@@ -154,11 +154,15 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         }))
       })
     });
-
+    
     if (!gasResponse.ok) {
-      const errorText = await gasResponse.text();
-      console.error(`❌ GAS Error: ${gasResponse.status} - ${errorText}`);
-      throw new Error(`Google Apps Script returned ${gasResponse.status}: ${errorText}`);
+        const errorText = await gasResponse.text();
+        console.error(`❌ GAS Error: ${gasResponse.status} - ${errorText}`);
+        return res.status(gasResponse.status).json({ 
+          error: "Google Apps Script sync error", 
+          detail: errorText,
+          status: gasResponse.status 
+        });
     }
 
     const gasResult: any = await gasResponse.json();

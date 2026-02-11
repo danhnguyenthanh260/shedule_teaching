@@ -159,9 +159,18 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     
     if (!gasResponse.ok) {
         console.error(`❌ GAS Error: ${gasResponse.status} - ${responseText.substring(0, 200)}`);
+        
+        let cleanDetail = responseText;
+        const errMatch = responseText.match(/class="errorMessage">([^<]+)</i);
+        if (errMatch) {
+          cleanDetail = `Google Error: ${errMatch[1]}`;
+        } else {
+          cleanDetail = responseText.replace(/<[^>]+>/g, ' ').substring(0, 250).trim();
+        }
+
         return res.status(gasResponse.status).json({ 
           error: "Google Apps Script sync error", 
-          detail: responseText.substring(0, 500),
+          detail: cleanDetail,
           status: gasResponse.status 
         });
     }
@@ -189,9 +198,18 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       });
     } catch (parseErr) {
       console.error(`❌ JSON Parse Error (Sync). Body: ${responseText.substring(0, 200)}`);
+      
+      let cleanDetail = responseText;
+      const errMatch = responseText.match(/class="errorMessage">([^<]+)</i);
+      if (errMatch) {
+         cleanDetail = `Google Error: ${errMatch[1]}`;
+      } else {
+         cleanDetail = responseText.replace(/<[^>]+>/g, ' ').substring(0, 250).trim();
+      }
+
       return res.status(500).json({
         error: "Google returned non-JSON during Sync",
-        detail: responseText.substring(0, 500),
+        detail: cleanDetail,
       });
     }
 

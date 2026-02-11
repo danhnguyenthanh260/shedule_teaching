@@ -57,9 +57,20 @@ export default async function handler(
     
     if (!response.ok) {
       console.error(`❌ GAS Error: ${response.status} - ${responseText.substring(0, 200)}`);
+      
+      // Clean up HTML error messages from Google
+      let cleanDetail = responseText;
+      const errMatch = responseText.match(/class="errorMessage">([^<]+)</i);
+      if (errMatch) {
+        cleanDetail = `Google Error: ${errMatch[1]}`;
+      } else {
+        // Strip tags and take first 200 chars
+        cleanDetail = responseText.replace(/<[^>]+>/g, ' ').substring(0, 250).trim();
+      }
+
       return res.status(response.status).json({ 
         error: "Google Apps Script error", 
-        detail: responseText.substring(0, 500), // Return snippet for diagnostic
+        detail: cleanDetail,
         status: response.status 
       });
     }
@@ -69,9 +80,18 @@ export default async function handler(
       return res.status(200).json(data);
     } catch (parseErr) {
       console.error(`❌ JSON Parse Error. Body starts with: ${responseText.substring(0, 200)}`);
+      
+      let cleanDetail = responseText;
+      const errMatch = responseText.match(/class="errorMessage">([^<]+)</i);
+      if (errMatch) {
+         cleanDetail = `Google Error: ${errMatch[1]}`;
+      } else {
+         cleanDetail = responseText.replace(/<[^>]+>/g, ' ').substring(0, 250).trim();
+      }
+
       return res.status(500).json({
         error: "Google returned non-JSON response (likely HTML error/login page)",
-        detail: responseText.substring(0, 500),
+        detail: cleanDetail
       });
     }
   } catch (err: any) {

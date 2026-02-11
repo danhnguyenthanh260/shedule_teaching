@@ -8,7 +8,7 @@
 const CONSTANTS = {
   DEFAULT_CALENDAR_NAME: 'Schedule Teaching',
   TIMEZONE: 'Asia/Ho_Chi_Minh',
-  GAS_SECRET: 'YOUR_SECURE_SECRET_HERE', 
+  GAS_SECRET: 'FPTxavalo2026', 
   FIREBASE_URL: 'https://scheduleteaching-default-rtdb.asia-southeast1.firebasedatabase.app/',
   SUPER_ADMIN_EMAIL: 'ngohoangtruongdat2@gmail.com',
   FIREBASE_WEB_API_KEY: 'AIzaSyDRwHY6mgdHKjkanLJk8BFpOQSeV5sqvaY',

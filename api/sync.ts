@@ -155,37 +155,45 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       })
     });
     
+    const responseText = await gasResponse.text();
+    
     if (!gasResponse.ok) {
-        const errorText = await gasResponse.text();
-        console.error(`❌ GAS Error: ${gasResponse.status} - ${errorText}`);
+        console.error(`❌ GAS Error: ${gasResponse.status} - ${responseText.substring(0, 200)}`);
         return res.status(gasResponse.status).json({ 
           error: "Google Apps Script sync error", 
-          detail: errorText,
+          detail: responseText.substring(0, 500),
           status: gasResponse.status 
         });
     }
 
-    const gasResult: any = await gasResponse.json();
-    console.log(`✅ GAS Response:`, gasResult);
-
-    // Step C: Update Status to Confirmed
-    if (gasResult.status === "success") {
-       const finalBatch = db.batch();
-       slotLogRefs.forEach((ref, idx) => {
-         finalBatch.update(ref, { 
-           status: "confirmed",
-           // If GAS returned individual IDs, we'd map them here
+    try {
+      const gasResult: any = JSON.parse(responseText);
+      console.log(`✅ GAS Response:`, gasResult);
+      
+      // Step C: Update Status to Confirmed
+      if (gasResult.status === "success") {
+         const finalBatch = db.batch();
+         slotLogRefs.forEach((ref, idx) => {
+           finalBatch.update(ref, { 
+             status: "confirmed",
+           });
          });
-       });
-       await finalBatch.commit();
-    }
+         await finalBatch.commit();
+      }
 
-    return res.status(200).json({
-      status: "success",
-      message: gasResult.message,
-      data: gasResult.data,
-      conflicts: []
-    });
+      return res.status(200).json({
+        status: "success",
+        message: gasResult.message,
+        data: gasResult.data,
+        conflicts: []
+      });
+    } catch (parseErr) {
+      console.error(`❌ JSON Parse Error (Sync). Body: ${responseText.substring(0, 200)}`);
+      return res.status(500).json({
+        error: "Google returned non-JSON during Sync",
+        detail: responseText.substring(0, 500),
+      });
+    }
 
   } catch (err: any) {
     console.error("Sync Secure Error:", err);

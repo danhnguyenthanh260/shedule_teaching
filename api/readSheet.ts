@@ -46,14 +46,25 @@ export default async function handler(
       fetchOptions.headers["Content-Type"] = "application/json";
     }
 
+    console.log(`🔗 Proxy calling GAS: ${targetUrl}`);
     const response = await fetch(targetUrl, fetchOptions);
-    const data = await response.json();
+    
+    if (!response.ok) {
+      const errorText = await response.text();
+      console.error(`❌ GAS Error: ${response.status} - ${errorText}`);
+      return res.status(response.status).json({ 
+        error: "Google Apps Script error", 
+        detail: errorText,
+        status: response.status 
+      });
+    }
 
+    const data = await response.json();
     return res.status(200).json(data);
   } catch (err: any) {
     console.error("Proxy error:", err);
     return res.status(500).json({
-      error: "Failed to fetch from Apps Script proxy",
+      error: "Internal server error in Proxy",
       detail: err.message,
     });
   }

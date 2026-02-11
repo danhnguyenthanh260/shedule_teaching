@@ -52,18 +52,28 @@ export default async function handler(
     console.log(`🔗 Proxy calling GAS: ${targetUrl}`);
     const response = await fetch(targetUrl, fetchOptions);
     
+    // Get raw text first to avoid double-consumption issues and to diagnose non-JSON
+    const responseText = await response.text();
+    
     if (!response.ok) {
-      const errorText = await response.text();
-      console.error(`❌ GAS Error: ${response.status} - ${errorText}`);
+      console.error(`❌ GAS Error: ${response.status} - ${responseText.substring(0, 200)}`);
       return res.status(response.status).json({ 
         error: "Google Apps Script error", 
-        detail: errorText,
+        detail: responseText.substring(0, 500), // Return snippet for diagnostic
         status: response.status 
       });
     }
 
-    const data = await response.json();
-    return res.status(200).json(data);
+    try {
+      const data = JSON.parse(responseText);
+      return res.status(200).json(data);
+    } catch (parseErr) {
+      console.error(`❌ JSON Parse Error. Body starts with: ${responseText.substring(0, 200)}`);
+      return res.status(500).json({
+        error: "Google returned non-JSON response (likely HTML error/login page)",
+        detail: responseText.substring(0, 500),
+      });
+    }
   } catch (err: any) {
     console.error("Proxy error:", err);
     return res.status(500).json({

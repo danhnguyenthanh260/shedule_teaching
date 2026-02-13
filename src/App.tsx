@@ -7,12 +7,17 @@ import { LecturerApp } from './LecturerApp';
 import { isAdmin } from './config/admin';
 
 const App: React.FC = () => {
-  const { user: firebaseUser, loading: authLoading } = useFirebase();
+  const { user: firebaseUser, loading: authLoading, isAdmin: isUserAdmin, isWhitelistLoading } = useFirebase();
 
-  if (authLoading) {
+  if (authLoading || (firebaseUser && isWhitelistLoading)) {
     return (
       <div className="min-h-screen bg-slate-50 flex items-center justify-center">
-        <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-fpt-orange"></div>
+        <div className="flex flex-col items-center gap-4">
+          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-fpt-orange"></div>
+          <p className="text-xs font-bold text-slate-400 uppercase tracking-widest animate-pulse">
+            Đang xác thực quyền truy cập...
+          </p>
+        </div>
       </div>
     );
   }
@@ -26,7 +31,7 @@ const App: React.FC = () => {
       <Routes>
         <Route 
           path="/admin" 
-          element={isAdmin(firebaseUser.email) ? <AdminPage /> : <Navigate to="/" />} 
+          element={isUserAdmin ? <AdminPage /> : <Navigate to="/" />} 
         />
         <Route path="/" element={<LecturerApp />} />
         {/* Redirect any other route to home */}

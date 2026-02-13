@@ -1,0 +1,267 @@
+diff --git a/apps-script-backend.js b/apps-script-backend.js
+index db2d2d5..f45f12f 100644
+--- a/apps-script-backend.js
++++ b/apps-script-backend.js
+@@ -119,12 +119,25 @@ function doPost(e) {
+     const payload = JSON.parse(e.postData.contents);
+     const action = payload.action || 'sync';
+     
+-    // Auth Check
++    // Auth Check Logic
++    const isAdminAction = (action === 'clearCalendar');
++    
+     if (payload.secret !== CONSTANTS.GAS_SECRET) {
+       const auth = verifyFirebaseToken_(payload.idToken);
+-      if (!auth.valid || !isAuthorized_(auth.email)) {
+-          throw new Error('Unauthorized Access (V10.1)');
++      
++      // 1. Must be at least a valid logged-in user
++      if (!auth.valid) {
++          throw new Error('Unauthorized: Vui lòng đăng nhập lại (V10.2)');
++      }
++      
++      // 2. If it is an admin action, must be in whitelist
++      if (isAdminAction && !isAuthorized_(auth.email)) {
++          throw new Error('Unauthorized: Bạn không có quyền quản trị (V10.2)');
+       }
++
++      console.log(`User ${auth.email} authorized for action: ${action}`);
++    } else {
++      console.log(`Action ${action} authorized via Secret Key`);
+     }
+ 
+     if (action === 'readSheet') return handleReadSheet_(payload);
+@@ -168,11 +181,23 @@ function isAuthorized_(email) {
+   try {
+     const url = `${CONSTANTS.FIREBASE_URL}admin_whitelist.json`;
+     const res = UrlFetchApp.fetch(url, { muteHttpExceptions: true });
++    if (res.getResponseCode() !== 200) {
++      console.error(`Firebase error: ${res.getResponseCode()} - ${res.getContentText()}`);
++      return false;
++    }
+     const data = JSON.parse(res.getContentText());
+-    if (!data) return false;
++    if (!data) {
++      console.log('Whitelist is empty');
++      return false;
++    }
+     const list = Object.values(data).map(v => String(v).trim().toLowerCase());
+-    return list.includes(cleanEmail);
+-  } catch (e) { return false; }
++    const isMaster = list.includes(cleanEmail);
++    console.log(`Auth check for ${cleanEmail}: ${isMaster}`);
++    return isMaster;
++  } catch (e) { 
++    console.error('Whitelist fetch error: ' + e.toString());
++    return false; 
++  }
+ }
+ 
+ function jsonResponse_(obj) { 
+diff --git a/appsscript/src/Constants.js b/appsscript/src/Constants.js
+index 61c7cd2..8d144e8 100644
+--- a/appsscript/src/Constants.js
++++ b/appsscript/src/Constants.js
+@@ -5,7 +5,6 @@ const CONSTANTS = {
+   FIREBASE_URL: 'https://scheduleteaching-default-rtdb.asia-southeast1.firebasedatabase.app/',
+   FIREBASE_WEB_API_KEY: 'AIzaSyDRwHY6mgdHKjkanLJk8BFpOQSeV5sqvaY',
+   ADMIN_EMAILS: [
+-    'duongkien.090905@gmail.com',
+     'ngohoangtruongdat2@gmail.com'
+   ],
+   SUCCESS: 'success',
+diff --git a/appsscript/src/Main.js b/appsscript/src/Main.js
+index 1c10b1b..72c9e26 100644
+--- a/appsscript/src/Main.js
++++ b/appsscript/src/Main.js
+@@ -12,7 +12,6 @@ const CONSTANTS = {
+   TIMEZONE: 'Asia/Ho_Chi_Minh',
+   FIREBASE_URL: 'https://scheduleteaching-default-rtdb.asia-southeast1.firebasedatabase.app/',
+   ADMIN_EMAILS: [
+-    'duongkien.090905@gmail.com',
+     'ngohoangtruongdat@gmail.com',
+     'ngohoangtruongdat2@gmail.com'
+   ],
+diff --git a/database.rules.json b/database.rules.json
+index 72c735e..712b846 100644
+--- a/database.rules.json
++++ b/database.rules.json
+@@ -1,8 +1,12 @@
+ {
+   "rules": {
++    "admin_whitelist": {
++      ".read": "true",
++      ".write": "auth != null && (root.child('admin_whitelist').child(auth.uid).exists() || auth.token.email == 'ngohoangtruongdat2@gmail.com')"
++    },
+     "configs": {
+       ".read": "auth != null",
+-      ".write": "auth != null && auth.token.admin === true"
++      ".write": "auth != null && (data.exists() ? (root.child('admin_whitelist').child(auth.uid).exists() || auth.token.email == 'ngohoangtruongdat2@gmail.com') : (root.child('admin_whitelist').child(auth.uid).exists() || auth.token.email == 'ngohoangtruongdat2@gmail.com'))"
+     }
+   }
+ }
+diff --git a/src/App.tsx b/src/App.tsx
+index 5b6a2c8..5f2b224 100644
+--- a/src/App.tsx
++++ b/src/App.tsx
+@@ -7,12 +7,17 @@ import { LecturerApp } from './LecturerApp';
+ import { isAdmin } from './config/admin';
+ 
+ const App: React.FC = () => {
+-  const { user: firebaseUser, loading: authLoading } = useFirebase();
++  const { user: firebaseUser, loading: authLoading, isAdmin: isUserAdmin, isWhitelistLoading } = useFirebase();
+ 
+-  if (authLoading) {
++  if (authLoading || (firebaseUser && isWhitelistLoading)) {
+     return (
+       <div className="min-h-screen bg-slate-50 flex items-center justify-center">
+-        <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-fpt-orange"></div>
++        <div className="flex flex-col items-center gap-4">
++          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-fpt-orange"></div>
++          <p className="text-xs font-bold text-slate-400 uppercase tracking-widest animate-pulse">
++            Đang xác thực quyền truy cập...
++          </p>
++        </div>
+       </div>
+     );
+   }
+@@ -26,7 +31,7 @@ const App: React.FC = () => {
+       <Routes>
+         <Route 
+           path="/admin" 
+-          element={isAdmin(firebaseUser.email) ? <AdminPage /> : <Navigate to="/" />} 
++          element={isUserAdmin ? <AdminPage /> : <Navigate to="/" />} 
+         />
+         <Route path="/" element={<LecturerApp />} />
+         {/* Redirect any other route to home */}
+diff --git a/src/config/admin.ts b/src/config/admin.ts
+index 62f4427..a5721e5 100644
+--- a/src/config/admin.ts
++++ b/src/config/admin.ts
+@@ -10,18 +10,7 @@ export const SUPER_ADMIN_EMAIL = 'ngohoangtruongdat2@gmail.com';
+  * Static fallback admins (initial set)
+  */
+ let dynamicAdminEmails: string[] = [];
+-
+-// Subscribe to admin whitelist in RTDB
+-const adminWhitelistRef = ref(database, 'admin_whitelist');
+-onValue(adminWhitelistRef, (snapshot) => {
+-    const data = snapshot.val();
+-    if (data && typeof data === 'object') {
+-        dynamicAdminEmails = Object.values(data).map((v: any) => String(v).trim().toLowerCase());
+-        console.log('🛡️ Admin Whitelist Updated:', dynamicAdminEmails);
+-    } else {
+-        dynamicAdminEmails = [];
+-    }
+-});
++// This is now managed by FirebaseContext to ensure React re-renders
+ 
+ /**
+  * Checks if a given email address belongs to an administrator
+diff --git a/src/context/FirebaseContext.tsx b/src/context/FirebaseContext.tsx
+index 428a697..ea7e063 100644
+--- a/src/context/FirebaseContext.tsx
++++ b/src/context/FirebaseContext.tsx
+@@ -1,5 +1,7 @@
+ import React, { createContext, useContext, useEffect, useState } from 'react';
+-import { auth, db } from '../config/firebase';
++import { auth, db, database } from '../config/firebase';
++import { ref, onValue } from 'firebase/database';
++import { SUPER_ADMIN_EMAIL } from '../config/admin';
+ import {
+   createUserWithEmailAndPassword,
+   signInWithEmailAndPassword,
+@@ -36,6 +38,8 @@ interface FirebaseContextType {
+   signupWithEmail: (email: string, password: string) => Promise<void>;
+   logout: () => Promise<void>;
+   getAccessToken: () => Promise<string | null>;
++  isWhitelistLoading: boolean;
++  isAdmin: boolean;
+ }
+ 
+ const FirebaseContext = createContext<FirebaseContextType | undefined>(undefined);
+@@ -45,6 +49,9 @@ export const FirebaseProvider: React.FC<{ children: React.ReactNode }> = ({ chil
+   const [loading, setLoading] = useState(true);
+   const [error, setError] = useState<string | null>(null);
+   const [accessToken, setAccessToken] = useState<string | null>(null);
++  const [isAdmin, setIsAdmin] = useState(false);
++  const [isWhitelistLoading, setIsWhitelistLoading] = useState(true);
++  const [adminList, setAdminList] = useState<string[]>([]);
+ 
+   // Check for redirect result on mount
+   useEffect(() => {
+@@ -107,6 +114,39 @@ export const FirebaseProvider: React.FC<{ children: React.ReactNode }> = ({ chil
+ 
+     return unsubscribe;
+   }, [accessToken]);
++
++  // Handle Admin Whitelist
++  useEffect(() => {
++    const adminWhitelistRef = ref(database, 'admin_whitelist');
++    const unsubscribe = onValue(adminWhitelistRef, (snapshot) => {
++      const data = snapshot.val();
++      let list: string[] = [];
++      if (data && typeof data === 'object') {
++        list = Object.values(data).map((v: any) => String(v).trim().toLowerCase());
++      }
++      setAdminList(list);
++      setIsWhitelistLoading(false);
++      logInfo('🛡️ Admin Whitelist Synced in Context');
++    });
++
++    return () => unsubscribe();
++  }, []);
++
++  // Update isAdmin whenever user or adminList changes
++  useEffect(() => {
++    if (!user) {
++      setIsAdmin(false);
++      return;
++    }
++    const email = user.email?.trim().toLowerCase();
++    if (!email) {
++      setIsAdmin(false);
++      return;
++    }
++
++    const isAuthorized = email === SUPER_ADMIN_EMAIL.toLowerCase() || adminList.includes(email);
++    setIsAdmin(isAuthorized);
++  }, [user, adminList]);
+   /* 
+   // PREVIOUS REDIRECT LOGIC (Commented out per User Request):
+   const loginWithGoogle = async () => {
+@@ -262,6 +302,8 @@ export const FirebaseProvider: React.FC<{ children: React.ReactNode }> = ({ chil
+         signupWithEmail,
+         logout,
+         getAccessToken,
++        isWhitelistLoading,
++        isAdmin,
+       }}
+     >
+       {children}
+diff --git a/src/services/appsScriptService.ts b/src/services/appsScriptService.ts
+index 6894571..d553436 100644
+--- a/src/services/appsScriptService.ts
++++ b/src/services/appsScriptService.ts
+@@ -76,7 +76,9 @@ export const readSheet = async (
+             action: 'readSheet',
+             url: url,
+             startRow: startRow.toString(),
+-            idToken: idToken
++            idToken: idToken,
++            // 🔐 Tự động thêm secret ở môi trường Local để hỗ trợ Vite Proxy
++            ...(import.meta.env.DEV ? { secret: import.meta.env.VITE_GAS_SECRET } : {})
+         };
+ 
+         const fetchUrl = `${API_BASE_URL}/api/readSheet`;
+@@ -149,7 +151,9 @@ export const syncEventsToCalendar = async (
+             idToken,
+             calendarName: targetCalendar,
+             events,
+-            userEmail: currentUser.email || undefined
++            userEmail: currentUser.email || undefined,
++            // 🔐 Tự động thêm secret ở môi trường Local để hỗ trợ Vite Proxy
++            ...(import.meta.env.DEV ? { secret: import.meta.env.VITE_GAS_SECRET } : {})
+         };
+ 
+         const syncUrl = `${API_BASE_URL}/api/sync`;

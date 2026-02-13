@@ -86,7 +86,7 @@ export function inferSchema(headers: string[], sampleRows: string[][]): Inferred
       if (!mapping.task) mapping.task = i;
     }
     // Ưu tiên Phòng
-    else if (head.includes("phòng") || head.includes("location") || head.includes("room")) mapping.location = i;
+    else if (head.includes("phòng") || head.includes("location") || head.includes("room") || head.includes("địa điểm")) mapping.location = i;
   });
 
   // Kiểm tra dữ liệu mẫu để cải thiện độ chính xác
@@ -227,9 +227,15 @@ export class GoogleSyncService {
       // 🚨 Bỏ qua dòng trống
       if (!row || row.length === 0 || row.join("").trim() === "") return null;
 
-      const dateRaw = (mapping.date !== undefined && mapping.date < row.length ? (row[mapping.date] || "") : "").toString().trim();
-      const timeRaw = (mapping.time !== undefined && mapping.time < row.length ? (row[mapping.time] || "") : "").toString().trim();
-      const locationRaw = (mapping.location !== undefined && mapping.location < row.length ? (row[mapping.location] || "") : "").toString().trim();
+      // 🕵️ FALLBACK: Nếu không có mapping, thử lấy các cột đầu tiên để người dùng thấy gì đó
+      const dIdx = mapping.date !== undefined ? mapping.date : 0;
+      const tIdx = mapping.time !== undefined ? mapping.time : 1;
+      const pIdx = mapping.person !== undefined ? mapping.person : 2;
+      const lIdx = mapping.location !== undefined ? mapping.location : 3;
+
+      const dateRaw = (dIdx < row.length ? (row[dIdx] || "") : "").toString().trim();
+      const timeRaw = (tIdx < row.length ? (row[tIdx] || "") : "").toString().trim();
+      const locationRaw = (lIdx < row.length ? (row[lIdx] || "") : "").toString().trim();
 
       if (dateRaw) lastDate = dateRaw;
       if (locationRaw) lastLocation = locationRaw;
@@ -244,18 +250,21 @@ export class GoogleSyncService {
       }
 
       // 🚨 Cần có NGÀY (tự có hoặc lấy từ dòng trên)
-      if (!lastDate) {
-        console.warn(`[Normalized] Dòng ${idx} SKIP: Thiếu NGÀY (Col ${mapping.date}). Raw:`, row.slice(0, 8));
+      if (!lastDate && (mapping.date !== undefined || mapping.time !== undefined)) {
+        console.warn(`[Normalized] Dòng ${idx} SKIP: Thiếu NGÀY.`, row.slice(0, 5));
         failCount++;
         return null;
       }
 
       try {
-        const { start, end } = parseVNTime(lastDate, timeRaw, preferredFormat);
-        let person = (mapping.person !== undefined && mapping.person < row.length ? (row[mapping.person] || "") : "").toString().trim();
+        const { start, end } = (lastDate && timeRaw) 
+          ? parseVNTime(lastDate, timeRaw, preferredFormat)
+          : { start: "", end: "" };
+
+        let person = (pIdx < row.length ? (row[pIdx] || "") : "").toString().trim();
 
         if (!person || !isLikelyPersonName(person)) {
-          const taskVal = (mapping.task !== undefined && mapping.task < row.length ? row[mapping.task] : "");
+          const taskVal = (mapping.task !== undefined && mapping.task < row.length ? row[mapping.task] : (row[pIdx] || ""));
           person = (taskVal || person || "Cán bộ/GV").toString().trim();
         }
 
@@ -378,7 +387,9 @@ export class GoogleSyncService {
     console.log(`[Grouping] Expansion Mode: ${isTripleMode}, Block Starts:`, blockStartIndices);
 
     dataRows.forEach((row, rowIndex) => {
-      if (!row || row.length === 0 || row.join("").trim() === "") return;
+      // 🚨 1. CHẶN DÒNG TRỐNG (Mềm mỏng hơn để không mất dòng cuối)
+      const joined = row.join('').trim();
+      if (!joined || joined.length < 3) return; 
 
       const baseTask = (mapping.task !== undefined ? (row[mapping.task] || "Review") : "Review").toString().trim();
       const basePerson = (mapping.person !== undefined ? (row[mapping.person] || "") : "").toString().trim();
@@ -436,23 +447,34 @@ export class GoogleSyncService {
             task: ['nhiệm vụ', 'đề tài', 'task', 'code']
           };
 
-          const autoInfer = (field: keyof ColumnMapping) => {
+          const autoInferList = (field: keyof ColumnMapping) => {
             const keywords = fieldKeywords[field] || [];
-            // Keyword search within this block
-            const autoIdx = detailHeaders.findIndex((h, i) => 
-               i >= blockStart && i <= blockEnd && keywords.some(k => (h || "").toLowerCase().includes(k))
-            );
-            return autoIdx !== -1 ? (row[autoIdx] || "").toString().trim() : "";
+            const matches: string[] = [];
+            detailHeaders.forEach((h, i) => {
+               if (i >= blockStart && i <= blockEnd && keywords.some(k => (h || "").toLowerCase().includes(k))) {
+                 const val = (row[i] || "").toString().trim();
+                 if (val) matches.push(val);
+               }
+            });
+            return matches;
           };
 
-          if (!rDate) rDate = autoInfer('date');
-          if (!rTime) rTime = autoInfer('time');
-          if (!rLocation) rLocation = autoInfer('location');
-          if (!rPerson) rPerson = autoInfer('person') || basePerson;
+          if (!rDate) rDate = autoInferList('date')[0] || "";
+          if (!rTime) rTime = autoInferList('time')[0] || "";
+          if (!rLocation) rLocation = autoInferList('location')[0] || "";
+          if (!rPerson) {
+             const persons = autoInferList('person');
+             rPerson = persons.length > 0 ? persons.join(" & ") : (basePerson || "");
+          }
 
-          // If no mapping & no data, skip.
-          const hasAnyData = rDate || rTime || rPerson || (row[blockStart] !== undefined);
-          if (!hasAnyData) return;
+          // 🚀 2. ROBUSTNESS FIX: Chỉ skip nếu block này THỰC SỰ trống rỗng (không ngày, giờ, phòng, người)
+          // Điều này giúp giữ lại các "slot" trống nhưng có lịch (11 -> 12 events)
+          const hasAnyDataInBlock = rPerson || rDate || rTime || rLocation || (row[blockStart] && row[blockStart].trim().length > 0);
+          
+          if (!hasAnyDataInBlock) {
+             console.log(`[Grouping] Skipping Block ${blockIdx} row ${rowIndex}: Absolute empty block.`);
+             return;
+          }
 
           try {
             // Default values if dates/times are missing (to ensure it shows in Step 3 table)

@@ -23,31 +23,36 @@ export const useAppPersistence = () => {
   const [dateFormat, setDateFormat] = useState<DateFormat>('dd/MM/yyyy');
   const [searchColumnIndices, setSearchColumnIndices] = useState<number[]>([]);
   const [selectedSemesterId, setSelectedSemesterId] = useState<string>('');
+  const [isRestored, setIsRestored] = useState(false);
 
   // Restore state on mount
   useEffect(() => {
     const restore = async () => {
-      const restored = await persistStateService.restoreState();
+      try {
+        const restored = await persistStateService.restoreState();
 
-      if (restored.sheetUrl) setSheetUrl(restored.sheetUrl);
-      if (restored.tabName) setTabName(restored.tabName);
-      if (restored.sheetMeta) setSheetMeta(restored.sheetMeta);
-      if (restored.headerRowIndex !== undefined) setHeaderRowIndex(restored.headerRowIndex);
-      if (restored.columnMap) setColumnMap(restored.columnMap);
-      if (restored.personFilter) setPersonFilter(restored.personFilter);
-      if (restored.startRow !== undefined) setStartRow(restored.startRow);
-      if (restored.columnsConfig) setColumnsConfig(restored.columnsConfig);
-      if (restored.allRows?.length) setAllRows(restored.allRows);
-      if (restored.fullHeaders?.length) setFullHeaders(restored.fullHeaders);
-      if (restored.fullDetailHeaders?.length) setFullDetailHeaders(restored.fullDetailHeaders);
-      if (restored.titleRow?.length) setTitleRow(restored.titleRow);
-      if (restored.fullRows?.length) setFullRows(restored.fullRows);
-      if (restored.selectedIds?.length) setSelectedIds(new Set(restored.selectedIds));
-      if (restored.dateFormat) setDateFormat(restored.dateFormat as DateFormat);
-      if (restored.searchColumnIndices) setSearchColumnIndices(restored.searchColumnIndices);
-      if (restored.selectedSemesterId) setSelectedSemesterId(restored.selectedSemesterId);
+        if (restored.sheetUrl) setSheetUrl(restored.sheetUrl);
+        if (restored.tabName) setTabName(restored.tabName);
+        if (restored.sheetMeta) setSheetMeta(restored.sheetMeta);
+        if (restored.headerRowIndex !== undefined) setHeaderRowIndex(restored.headerRowIndex);
+        if (restored.columnMap) setColumnMap(restored.columnMap);
+        if (restored.personFilter) setPersonFilter(restored.personFilter);
+        if (restored.startRow !== undefined) setStartRow(restored.startRow);
+        if (restored.columnsConfig) setColumnsConfig(restored.columnsConfig);
+        if (restored.allRows?.length) setAllRows(restored.allRows);
+        if (restored.fullHeaders?.length) setFullHeaders(restored.fullHeaders);
+        if (restored.fullDetailHeaders?.length) setFullDetailHeaders(restored.fullDetailHeaders);
+        if (restored.titleRow?.length) setTitleRow(restored.titleRow);
+        if (restored.fullRows?.length) setFullRows(restored.fullRows);
+        if (restored.selectedIds?.length) setSelectedIds(new Set(restored.selectedIds));
+        if (restored.dateFormat) setDateFormat(restored.dateFormat as DateFormat);
+        if (restored.searchColumnIndices) setSearchColumnIndices(restored.searchColumnIndices);
+        if (restored.selectedSemesterId) setSelectedSemesterId(restored.selectedSemesterId);
 
-      console.log('✓ App state restored from secure storage');
+        console.log('✓ App state restored from secure storage');
+      } finally {
+        setIsRestored(true);
+      }
     };
     restore();
   }, []);
@@ -95,6 +100,7 @@ export const useAppPersistence = () => {
     dateFormat, setDateFormat,
     searchColumnIndices, setSearchColumnIndices,
     selectedSemesterId, setSelectedSemesterId,
+    isRestored,
     clearPersistence
   };
 };

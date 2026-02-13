@@ -26,6 +26,9 @@ interface UseSheetParserProps {
   dateFormat: DateFormat;
   searchColumnIndices: number[];
   setSearchColumnIndices: (indices: number[]) => void;
+  isReviewMode?: boolean;
+  isUserAdmin?: boolean; // 🏛️ Admin should see all columns
+  currentMapping?: ColumnMapping; // 🔒 Ensure mapped columns are never filtered out
 }
 
 export const useSheetParser = ({
@@ -43,7 +46,10 @@ export const useSheetParser = ({
   fullDetailHeaders,
   dateFormat,
   searchColumnIndices,
-  setSearchColumnIndices
+  setSearchColumnIndices,
+  isReviewMode = false,
+  isUserAdmin = false,
+  currentMapping = {}
 }: UseSheetParserProps) => {
   const [loading, setLoading] = useState(false);
   const [rows, setRows] = useState<RowNormalized[]>([]);
@@ -52,6 +58,7 @@ export const useSheetParser = ({
   const applyHeaderRow = useCallback((idx: number, rowsData: string[][], meta?: { sheetId: string; tab: string }) => {
     if (!rowsData || rowsData.length === 0) return;
     setHeaderRowIndex(idx);
+    setRows([]); // Clear rows immediately to avoid mismatch during header changes
 
     const titleR = rowsData[0] || [];
     const primaryHeaders = idx > 0 ? rowsData[idx - 1] : [];
@@ -80,9 +87,13 @@ export const useSheetParser = ({
     setError(null);
     setRows([]);
     try {
-      // 🛡️ Proactive Mode Detection (to avoid React state desync bugs)
-      const looksLikeReview = (tabName || "").toLowerCase().includes('review') || 
-                              fullDetailHeaders.filter(h => (h || "").toLowerCase().includes('code')).length >= 3;
+      // 🛡️ Proactive Mode Detection (Thắt chặt để tránh nhận nhầm Hội đồng -> Review)
+      const hasReviewerHeaders = fullDetailHeaders.filter(h => {
+        const low = (h || "").toLowerCase();
+        return low.includes('reviewer 1') || low.includes('gv 1') || (low.includes('reviewer') && low.includes('1'));
+      }).length >= 1;
+
+      const looksLikeReview = (tabName || "").toLowerCase().includes('review') || hasReviewerHeaders;
       
       const isReviewMode = !!isDataMauParam || looksLikeReview; 
 
@@ -113,54 +124,100 @@ export const useSheetParser = ({
         });
       }
       setRows(normalized);
-      setSheetMeta((prev: any) => ({ ...prev, mapping, isDataMau: isReviewMode }));
+      
+      console.log(`[Parser] applyMapping DONE: Generated ${normalized.length} events (Mode: ${isReviewMode ? 'Review' : 'Council'})`);
+
       if (normalized.length === 0) {
         logWarning("Không tìm thấy dữ liệu sau khi mapping");
       }
       setLoading(false);
       return normalized;
     } catch (err: any) {
+      setLoading(false);
       setError(err.message);
       return [];
     } finally {
-      // setLoading(false) is now handled in the try block for success path
-      // and implicitly by returning from catch block for error path.
-      // No need for a separate finally block for setLoading(false).
+      setLoading(false);
     }
   }, [allRows, fullHeaders, fullDetailHeaders, headerRowIndex, sheetMeta, tabName, dateFormat]);
 
   const headerOptions = useMemo(() => {
     const options: { label: string; value: number }[] = [];
     const seen = new Set<string>();
-    const labelCounts = new Map<string, number>();
-    const isReview = sheetMeta?.isDataMau;
+    const labelCountsInReview = new Map<string, number>();
+    const firstOccurrencesInReview = new Map<string, number>();
+    const isReview = isReviewMode;
 
-    fullDetailHeaders.forEach((h) => {
+    // 🎯 Only count occurrences in the Review Area (index >= 9) to identify true triplets
+    fullDetailHeaders.forEach((h, i) => {
       let label = (h || "").trim();
       if (!label || label.startsWith('Column_')) return;
-      labelCounts.set(label, (labelCounts.get(label) || 0) + 1);
+      
+      if (i >= 9) {
+        labelCountsInReview.set(label, (labelCountsInReview.get(label) || 0) + 1);
+        if (!firstOccurrencesInReview.has(label)) {
+          firstOccurrencesInReview.set(label, i);
+        }
+      }
     });
 
     fullDetailHeaders.forEach((h, i) => {
       let label = (h || "").trim();
       if (!label || label.startsWith('Column_')) return;
 
-      if (isReview) {
-        // Restricted list for Review Mode as requested by user
-        const allowed = ["code", "reviewer 1", "reviewer 2", "date", "slot", "room"];
-        if (!allowed.includes(label.toLowerCase())) {
+      const isStaticArea = i < 9;
+      const countInReview = labelCountsInReview.get(label) || 0;
+      const isMapped = Object.values(currentMapping).includes(i);
+      const isFirstTriplet = i === firstOccurrencesInReview.get(label) && countInReview === 3;
+
+      if (isReview && isUserAdmin) {
+        // 🏛️ ADMIN in Review Mode:
+        // 1. Static Area: Always show
+        if (isStaticArea) {
+           // Proceed to label decoration
+        }
+        // 2. Review Area: Only show triplets (representative) or mapped columns
+        else if (isFirstTriplet || isMapped) {
+           // Proceed to label decoration, but Triplets get CLEAN labels
+        } else {
+           // Skip everything else in Review Area for Admin
+           return;
+        }
+      } 
+      // 🎓 LECTURER (or Non-Admin) in Review Mode: Apply keyword filter
+      else if (isReview && !isUserAdmin && !isMapped) {
+        const allowedKeywords = [
+          "code", "reviewer", "date", "slot", "room", "time", "gvhd",
+          "ngay", "ngày", "gio", "giờ", "thời gian", "phong", "phòng", "địa điểm", 
+          "nhiệm vụ", "đề tài", "giang vien", "giảng viên", "phân công", "lớp", "mã", "tên"
+        ];
+        const lowerLabel = label.toLowerCase();
+        const isAllowed = allowedKeywords.some(kw => lowerLabel.includes(kw));
+        
+        if (!isAllowed) {
           return;
         }
       }
 
-      if (!seen.has(label) && !looksLikeDataRow([label])) {
-        seen.add(label);
-        options.push({ label: label, value: i });
+      // 🕵️ Handle Duplicate Labels & Clean Triplet Labels
+      let finalLabel = label;
+      
+      // Triplets in Admin mode should be CLEAN (no "(Cột X)") to represent the group
+      const shouldBeClean = isReview && isUserAdmin && isFirstTriplet;
+
+      if (!shouldBeClean && seen.has(label)) {
+        finalLabel = `${label} (${i + 1})`;
+      }
+
+      if (!looksLikeDataRow([label])) {
+        seen.add(label); // Cache the raw label for duplicate detection
+        options.push({ label: finalLabel, value: i });
       }
     });
 
+    console.log(`📊 [Parser] Generated ${options.length} options. Review Triplet Logic Applied.`);
     return options.length > 0 ? options : [{ label: '-- Chọn cột --', value: -1 }];
-  }, [fullDetailHeaders, sheetMeta?.isDataMau]);
+  }, [fullDetailHeaders, isReviewMode, isUserAdmin, currentMapping]);
 
   const headerRowOptions = useMemo(() => {
     const limit = Math.min(6, allRows.length);

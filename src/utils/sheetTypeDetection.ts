@@ -26,7 +26,7 @@ export const detectSheetType = (fileName: string): SheetTypeInfo => {
         };
     }
 
-    if (lowerName.includes('sheet1') || lowerName.includes('review')) {
+    if (lowerName.includes('review')) {
         return {
             type: 'review',
             displayName: 'Chế độ chấm review',

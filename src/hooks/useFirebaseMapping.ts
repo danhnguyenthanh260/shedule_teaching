@@ -20,17 +20,19 @@ export const useFirebaseMapping = (fileId?: string): UseMappingResult => {
   const { user } = useFirebase();
   const [mapping, setMapping] = useState<ColumnMapping | null>(null);
   const [savedHeaderRowIndex, setSavedHeaderRowIndex] = useState<number | null>(null);
-  const [loading, setLoading] = useState(false);
+  const [loading, setLoading] = useState(!!fileId);
   const [error, setError] = useState<string | null>(null);
 
   // Lấy mapping khi component mount hoặc fileId thay đổi
   useEffect(() => {
     if (user && fileId) {
+      setLoading(true); // 🚨 Ensure loading is true before fetching
       getMapping(fileId);
     } else {
       // Reset states when dependencies missing or changing
       setMapping(null);
       setSavedHeaderRowIndex(null);
+      setLoading(false);
     }
   }, [user, fileId]);
 

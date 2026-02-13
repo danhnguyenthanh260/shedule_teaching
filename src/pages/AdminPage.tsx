@@ -8,6 +8,8 @@ import { ref, set, push, onValue, remove } from 'firebase/database';
 import { readSheet } from '../services/appsScriptService';
 import ConfirmModal from '../components/ConfirmModal';
 import Layout from '../components/Layout';
+import { MappingTool } from '../components/MappingTool';
+import { ColumnMapping } from '../types';
 
 export const AdminPage: React.FC = () => {
     const { user, logout } = useFirebase();
@@ -33,15 +35,17 @@ export const AdminPage: React.FC = () => {
         variant: 'danger'
     });
 
-    // Form state for new semester
     const [newSemester, setNewSemester] = useState({
         semester: '',
         sheetUrl: '',
         startRow: '1',
         columns: '',
         dateFormat: 'dd/MM/yyyy' as import('../types').DateFormat,
-        sheetType: 'council' as 'review' | 'council'
+        sheetType: 'council' as 'review' | 'council',
+        mapping: {} as ColumnMapping
     });
+
+    const [sheetHeaders, setSheetHeaders] = useState<{ label: string; value: number }[]>([]);
 
     // Edit mode state
     const [editMode, setEditMode] = useState<string | null>(null);
@@ -92,12 +96,22 @@ export const AdminPage: React.FC = () => {
                 startRow: newSemester.startRow,
                 columns: newSemester.columns,
                 dateFormat: newSemester.dateFormat,
-                sheetType: newSemester.sheetType
+                sheetType: newSemester.sheetType,
+                mapping: newSemester.mapping || {}
             });
 
             setToastMessage(editMode ? '✅ Cập nhật học kỳ thành công!' : '✅ Tạo học kỳ thành công!');
             setTimeout(() => setToastMessage(null), 5000);
-            setNewSemester({ semester: '', sheetUrl: '', startRow: '1', columns: '', dateFormat: 'dd/MM/yyyy', sheetType: 'council' });
+            setNewSemester({ 
+                semester: '', 
+                sheetUrl: '', 
+                startRow: '1', 
+                columns: '', 
+                dateFormat: 'dd/MM/yyyy', 
+                sheetType: 'council',
+                mapping: {}
+            });
+            setSheetHeaders([]);
             setEditMode(null);
             fetchConfigs();
             setTimeout(() => setToastMessage(null), 5000);
@@ -134,17 +148,36 @@ export const AdminPage: React.FC = () => {
         });
     };
 
-    const handleEditSemester = (semester: SemesterConfig) => {
+    const handleEditSemester = async (semester: SemesterConfig) => {
         setNewSemester({
             semester: semester.semester,
             sheetUrl: semester.sheetUrl,
             startRow: semester.startRow,
             columns: semester.columns,
             dateFormat: semester.dateFormat || 'dd/MM/yyyy',
-            sheetType: semester.sheetType || 'council'
+            sheetType: semester.sheetType || 'council',
+            mapping: semester.mapping || {}
         });
         setEditMode(semester.id);
+        setSheetHeaders([]);
         window.scrollTo({ top: 0, behavior: 'smooth' });
+
+        // Auto-fetch headers if URL is present to show Mapping Tool immediately
+        if (semester.sheetUrl) {
+            try {
+                const startRowNum = parseInt(semester.startRow || '1');
+                const rows = await readSheet(semester.sheetUrl, startRowNum);
+                if (rows && rows.length > 0) {
+                    const headers = rows[0];
+                    const headerOptions = headers
+                        .map((h, i) => ({ label: String(h || `Cột ${i + 1}`).trim(), value: i }))
+                        .filter(h => h.label);
+                    setSheetHeaders(headerOptions);
+                }
+            } catch (err) {
+                console.error('Failed to auto-fetch headers on edit:', err);
+            }
+        }
     };
 
     const handleAutoFetchColumns = async () => {
@@ -164,8 +197,15 @@ export const AdminPage: React.FC = () => {
             }
             const headers = rows[0];
             const columnNames = headers.filter(h => h && String(h).trim()).map(h => String(h).trim()).join(', ');
+            
+            // Populate headers for Mapping Tool
+            const headerOptions = headers
+                .map((h, i) => ({ label: String(h || `Cột ${i + 1}`).trim(), value: i }))
+                .filter(h => h.label);
+            setSheetHeaders(headerOptions);
+
             setNewSemester({ ...newSemester, columns: columnNames });
-            setToastMessage(`✅ Đã tải ${headers.filter(h => h && String(h).trim()).length} cột tự động!`);
+            setToastMessage(`✅ Đã tải ${headers.filter(h => h && String(h).trim()).length} cột tự động! Hãy kiểm tra ánh xạ bên dưới.`);
             setTimeout(() => setToastMessage(null), 5000);
         } catch (err: any) {
             setToastMessage(`❌ Lỗi khi tải cột: ${err.message}`);
@@ -366,6 +406,34 @@ export const AdminPage: React.FC = () => {
                                         required
                                     />
                                 </div>
+
+                                {sheetHeaders.length > 0 ? (
+                                    <div className="md:col-span-2 p-5 bg-orange-50/50 rounded-[2rem] border border-orange-100 mb-4 shadow-sm shadow-orange-50 animate-in fade-in slide-in-from-top-4 duration-500">
+                                        <MappingTool 
+                                            headers={sheetHeaders}
+                                            headerRowOptions={[]}
+                                            headerRowIndex={0}
+                                            onHeaderRowChange={() => {}}
+                                            columnMap={newSemester.mapping}
+                                            setColumnMap={(map) => setNewSemester({ ...newSemester, mapping: map })}
+                                            onApply={() => {
+                                                setToastMessage('✅ Ánh xạ đã được ghi nhận local! Đừng quên nhấn Cập nhật học kỳ.');
+                                                setTimeout(() => setToastMessage(null), 3000);
+                                            }}
+                                            isLoading={false}
+                                        />
+                                        <p className="text-[9px] text-[#F27024] font-bold mt-3 uppercase tracking-widest ml-1 flex items-center gap-2">
+                                            <span className="w-1.5 h-1.5 bg-[#F27024] rounded-full animate-pulse" />
+                                            Admin: Thiết lập các cột này để Giảng viên không cần phải làm nữa.
+                                        </p>
+                                    </div>
+                                ) : (
+                                    newSemester.sheetUrl && (
+                                        <div className="md:col-span-2 p-4 bg-slate-50 border border-dashed border-slate-200 rounded-2xl flex flex-col items-center justify-center gap-2 opacity-80">
+                                            <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Nhấn "Tải tự động" để cấu hình cột</p>
+                                        </div>
+                                    )
+                                )}
 
                                 <div className="md:col-span-2 flex gap-3 pt-2">
                                     <button

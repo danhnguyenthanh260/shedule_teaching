@@ -152,22 +152,36 @@ const CalendarService = {
     try {
       const calendar = this.getOrCreateCalendar(calendarName);
       
-      // Look back 6 months and forward 6 months
+      // 🎯 EXPANDED RANGE: Look back 1 year and forward 1 year (Total 2 years)
       const now = new Date();
-      const startTime = new Date(now.getTime() - (180 * 24 * 60 * 60 * 1000));
-      const endTime = new Date(now.getTime() + (180 * 24 * 60 * 60 * 1000));
+      const startTime = new Date(now.getTime() - (365 * 24 * 60 * 60 * 1000));
+      const endTime = new Date(now.getTime() + (365 * 24 * 60 * 60 * 1000));
+      
+      AppLogger.info(`Scanning for events to clear in range: ${startTime.toDateString()} to ${endTime.toDateString()}`);
       
       const events = calendar.getEvents(startTime, endTime);
       let deletedCount = 0;
       
       events.forEach(event => {
-        if (event.getTag('app_source') === 'fpt_scheduler') {
+        const appSource = event.getTag('app_source');
+        const description = event.getDescription() || '';
+        const title = event.getTitle() || '';
+        
+        // 🔍 MULTI-LEVEL DETECTION:
+        // 1. Primary: Official App Tag
+        // 2. Fallback: Search for "[FPT_SCHEDULER" in description
+        // 3. Fallback: Specific pattern in description from sync logic
+        const isAppEvent = (appSource === 'fpt_scheduler') || 
+                           (description.indexOf('[FPT_SCHEDULER') !== -1) ||
+                           (description.indexOf('Resources:') !== -1 && description.length < 500); 
+
+        if (isAppEvent) {
           event.deleteEvent();
           deletedCount++;
         }
       });
       
-      AppLogger.info(`Cleared ${deletedCount} events from ${calendarName}`);
+      AppLogger.info(`Successfully cleared ${deletedCount} events from ${calendarName}`);
       return {
         status: 'success',
         deletedCount: deletedCount

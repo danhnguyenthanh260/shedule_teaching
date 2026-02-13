@@ -69,24 +69,37 @@ export const readSheet = async (
             throw new Error('❌ URL Google Sheet không hợp lệ');
         }
 
-        const queryParams = new URLSearchParams({
+        const payload = {
             action: 'readSheet',
-            url: url, // ✅ Uniform parameter name
-            startRow: startRow.toString()
+            url: url,
+            startRow: startRow.toString(),
+            secret: import.meta.env.VITE_GAS_SECRET
+        };
+
+        const fetchUrl = `${API_BASE_URL}/api/readSheet`;
+        logInfo(`Reading sheet via proxy (POST): ${fetchUrl}`);
+
+        const response = await fetch(fetchUrl, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify(payload)
         });
 
-        const fetchUrl = `${API_BASE_URL}/api/readSheet?${queryParams.toString()}`;
-        logInfo(`Reading sheet via proxy: ${fetchUrl}`);
-
-        const response = await fetch(fetchUrl);
-
         if (!response.ok) {
-            const errData = await response.json().catch(() => ({}));
-            const detail = errData.detail ? ` (${errData.detail})` : (errData.error ? ` (${errData.error})` : '');
-            throw new Error(`❌ Lỗi Proxy API ${response.status}: ${response.statusText}${detail}`);
+            const bodyText = await response.text().catch(() => '');
+            logError(`Proxy returned ${response.status}: ${bodyText.substring(0, 100)}`);
+            throw new Error(`❌ Lỗi Proxy API ${response.status}: ${response.statusText}`);
         }
 
-        const data = await response.json();
+        const data = await response.json().catch(async () => {
+            const text = await response.text();
+            if (text.includes('<!DOCTYPE') || text.includes('<html')) {
+                throw new Error('❌ Google Apps Script trả về trang HTML (có thể là yêu cầu đăng nhập hoặc lỗi 404). Vui lòng đảm bảo bạn đã triển khai (Deploy) script ở chế độ "Anyone" và dùng URL "exec".');
+            }
+            throw new Error(`❌ Không thể parse JSON từ Apps Script. Nội dung: ${text.substring(0, 50)}...`);
+        });
 
         if (data.status === 'error') {
             throw new Error(`❌ ${data.message || 'Lỗi không xác định từ Apps Script'}`);

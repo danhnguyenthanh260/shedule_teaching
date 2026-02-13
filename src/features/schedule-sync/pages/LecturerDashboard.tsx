@@ -7,7 +7,7 @@ import { StatusAlerts } from '../../../components/StatusAlerts';
 import SyncHistoryModal from '../../../components/SyncHistoryModal';
 import { useFirebaseMapping } from '../../../hooks/useFirebaseMapping';
 import { useAppPersistence } from '../../../hooks/useAppPersistence';
-import { ColumnMapping, RowNormalized, SyncResult } from '../../../types';
+import { ColumnMapping, RowNormalized, SyncResult, DateFormat } from '../../../types';
 import { useFirebase } from '../../../context/FirebaseContext';
 import { useSheetParser } from '../../../hooks/useSheetParser';
 import { useSyncLogs } from '../../../hooks/useSyncLogs';
@@ -15,7 +15,7 @@ import { useCalendarSync } from '../../../hooks/useCalendarSync';
 import { khongDau } from '../../../utils/stringUtils';
 import { googleService, inferSchema } from '../../../services/googleService';
 import { SearchColumnSelector } from '../../../components/SearchColumnSelector';
-import { isAdmin } from '../../../config/admin';
+import { isAdmin, isSuperAdmin } from '../../../config/admin';
 import { database } from '../../../config/firebase';
 import { ref, set, get } from 'firebase/database';
 import { configService, SemesterConfig } from '../../../services/configService';
@@ -24,6 +24,11 @@ export const LecturerDashboard: React.FC = () => {
   const { user: firebaseUser, accessToken } = useFirebase();
   const [isHistoryOpen, setIsHistoryOpen] = useState(false);
   const [refreshHistory] = useState(0);
+
+  // Semesters & Local state
+  const [semesters, setSemesters] = useState<Record<string, SemesterConfig>>({});
+  const [isPreviewMode, setIsPreviewMode] = useState(false);
+  const [toastMessage, setToastMessage] = useState<string | null>(null);
 
   // Persistence (localStorage)
   const persistence = useAppPersistence();
@@ -46,7 +51,15 @@ export const LecturerDashboard: React.FC = () => {
     searchColumnIndices, setSearchColumnIndices,
     selectedSemesterId, setSelectedSemesterId,
     sheetType, setSheetType,
+    isRestored,
   } = persistence;
+
+  // Determine effective mode: Admin Config > Local Heuristic
+  const effectiveIsReview = useMemo(() => {
+    const fromConfig = semesters[selectedSemesterId]?.sheetType;
+    if (fromConfig) return fromConfig === 'review';
+    return !!sheetMeta?.isDataMau;
+  }, [semesters, selectedSemesterId, sheetMeta]);
 
   // Hooks
   const {
@@ -71,9 +84,12 @@ export const LecturerDashboard: React.FC = () => {
     setFullRows,
     fullHeaders,
     fullDetailHeaders,
-    dateFormat,
+    dateFormat, // 👈 Restore missing prop
     searchColumnIndices,
-    setSearchColumnIndices
+    setSearchColumnIndices,
+    isReviewMode: effectiveIsReview,
+    isUserAdmin: isAdmin(firebaseUser?.email) || isSuperAdmin(firebaseUser?.email), // 🏛️ More robust admin check
+    currentMapping: columnMap // 🔒 Keep mapped columns visible
   });
 
   const { saveSyncLog } = useSyncLogs();
@@ -87,22 +103,19 @@ export const LecturerDashboard: React.FC = () => {
   } = useCalendarSync({ accessToken });
 
   // Toast State
-  const [toastMessage, setToastMessage] = useState<string | null>(null);
-  const [isPreviewMode, setIsPreviewMode] = useState(false);
-  const [semesters, setSemesters] = useState<Record<string, SemesterConfig>>({});
   
-  // Fetch semesters for quick-save reference
+  // Fetch semesters on mount
   useEffect(() => {
-    const fetch = async () => {
+    const fetchConfigs = async () => {
       try {
         const configs = await configService.fetchConfigs();
         setSemesters(configs);
       } catch (e) {
-        console.error('Lỗi khi tải danh sách học kỳ:', e);
+        console.error('Failed to fetch configs:', e);
       }
     };
-    fetch();
-  }, []);
+    fetchConfigs();
+  }, [selectedSemesterId]);
 
   // Confirmation State
   const [isConfirmingClear, setIsConfirmingClear] = useState(false);
@@ -111,16 +124,14 @@ export const LecturerDashboard: React.FC = () => {
     setTimeout(() => setToastMessage(null), 3000);
   }, []);
 
-  const [appliedColumnMap, setAppliedColumnMap] = useState<ColumnMapping>(columnMap);
+  const [appliedColumnMap, setAppliedColumnMap] = useState<ColumnMapping>({});
 
-  // Sync appliedColumnMap with persistence once on load
-  const hasInitializedMap = useRef(false);
+  // Sync appliedColumnMap with persistence columnMap whenever it changes (especially for Admin)
   useEffect(() => {
-    if (!hasInitializedMap.current && Object.keys(columnMap).length > 0) {
+    if (Object.keys(columnMap).length > 0) {
       setAppliedColumnMap(columnMap);
-      hasInitializedMap.current = true;
     }
-  }, [columnMap, persistence]);
+  }, [columnMap]);
 
   // ✅ Create a unique ID for each sheet-tab combination to prevent settings overlap
   const mappingId = useMemo(() => {
@@ -128,14 +139,50 @@ export const LecturerDashboard: React.FC = () => {
     const cleanTab = (tabName || 'Sheet1').replace(/[^a-zA-Z0-9]/g, '');
     const mode = sheetMeta.sheetType?.type || 'council';
     return `${sheetMeta.sheetId}-${cleanTab}-${mode}`;
-  }, [sheetMeta?.sheetId, tabName]);
+  }, [sheetMeta?.sheetId, tabName, sheetMeta?.sheetType?.type]);
 
   // Firebase Mapping Sync
   const {
     mapping: savedMapping,
     savedHeaderRowIndex,
+    loading: mappingLoading,
     saveMapping: saveFirebaseMapping
   } = useFirebaseMapping(mappingId);
+
+  // ✅ 1. HANDLE DATA LOADED
+  const handleDataLoaded = useCallback((data: any) => {
+    // 🛡️ Pre-emptive cleanup
+    setRows([]);
+    setColumnMap({});
+    setAppliedColumnMap({});
+    lastAppliedMappingId.current = null; // 🚨 Reset chốt chặn
+    setSelectedIds(new Set());
+    setParserError(null);
+    setSyncError(null);
+
+    // 🛡️ Pre-emptive mode detection to prevent flicker
+    const fromConfig = semesters[selectedSemesterId]?.sheetType;
+    const isActuallyReview = fromConfig ? fromConfig === 'review' : data.isDataMau;
+
+    setAllRows(data.rawRows);
+    setSheetMeta({
+      sheetId: data.sheetId,
+      tab: data.tabName,
+      headerRowIndex: data.headerRowIndex,
+      isDataMau: isActuallyReview,
+      sheetType: data.sheetType
+    });
+    setSheetType(data.sheetType || null);
+    applyHeaderRow(data.headerRowIndex, data.rawRows, { sheetId: data.sheetId, tab: data.tabName });
+    
+    // 🚨 Don't force isPreviewMode=true if we are switching semesters, 
+    // let the Sync effect decide based on the presence of mapping.
+    if (!selectedSemesterId) {
+      setIsPreviewMode(true);
+    }
+
+    showToast(`✓ Đã tải ${data.rawRows.length} dòng dữ liệu (${isActuallyReview ? 'Review Mode' : 'Normal'})`);
+  }, [semesters, selectedSemesterId, setSheetMeta, setSheetType, applyHeaderRow, showToast]);
 
   // Filtering Logic
   const updateSelections = useCallback((data: RowNormalized[], filterValue?: string) => {
@@ -163,17 +210,16 @@ export const LecturerDashboard: React.FC = () => {
     });
 
     setSelectedIds(new Set(matches.map(m => m.id)));
-  }, [personFilter, setSelectedIds, effectiveSearchColumns]);
+  }, [personFilter, setSelectedIds, effectiveSearchColumns, searchColumnIndices]);
 
   // ✅ Filter display rows for both Preview and Mapped modes
   const previewRows = useMemo(() => {
     if (!isPreviewMode || allRows.length === 0) return [];
 
-    const isReviewMode = semesters[selectedSemesterId]?.sheetType === 'review' || !!sheetMeta?.isDataMau || (tabName || "").toLowerCase().includes('review');
-    console.log('[Dashboard] previewRows - isReviewMode:', isReviewMode, 'tabName:', tabName);
+    console.log('[Dashboard] previewRows - effectiveIsReview:', effectiveIsReview, 'tabName:', tabName);
 
     // ✅ If Review Mode, use the grouping expansion even for preview
-    if (isReviewMode) {
+    if (effectiveIsReview) {
       const expandedPreview = googleService.normalizeRowsWithGrouping({
         sheetId: sheetMeta?.sheetId || 'preview',
         tab: tabName,
@@ -256,47 +302,81 @@ export const LecturerDashboard: React.FC = () => {
     });
   }, [baseRows, personFilter, effectiveSearchColumns, isPreviewMode, searchColumnIndices]);
 
-  // ✅ 1. RESTORE mapping & header row index whenever mappingId or Firebase data is ready
+  // ✅ 2. CALLBACK HANDLERS (Must be at top level)
+  const handleToggleSelect = useCallback((id: string) => {
+    setSelectedIds(prev => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }, [setSelectedIds]);
+
+  const handleToggleAll = useCallback(() => {
+    setSelectedIds(prev => {
+      if (prev.size === filteredRows.length) return new Set();
+      return new Set(filteredRows.map(r => r.id));
+    });
+  }, [filteredRows, setSelectedIds]);
+
+  // ✅ 1. ULTIMATE SYNC EFFECT: Handles restore, semester switch, and manual column updates
   const lastAppliedMappingId = useRef<string | null>(null);
+  const lastAppliedDateFormat = useRef<DateFormat | null>(null);
 
   useEffect(() => {
-    if (mappingId && allRows.length > 0) {
-      const isNewSheet = lastAppliedMappingId.current !== mappingId;
-      if (isNewSheet) {
-        if (savedMapping && Object.keys(savedMapping).length > 0) {
-          console.log('📥 Restoring saved configuration for:', mappingId);
-          setColumnMap(savedMapping);
-          setAppliedColumnMap(savedMapping);
-          if (savedHeaderRowIndex !== null && savedHeaderRowIndex !== undefined) {
-            setHeaderRowIndex(savedHeaderRowIndex);
-            applyHeaderRow(savedHeaderRowIndex, allRows, { 
-              sheetId: sheetMeta.sheetId, 
-              tab: tabName,
-              isDataMau: semesters[selectedSemesterId]?.sheetType === 'review' || (tabName || "").toLowerCase().includes('review')
-            });
-          }
-          const currentIsReview = semesters[selectedSemesterId]?.sheetType === 'review' || (tabName || "").toLowerCase().includes('review') || !!sheetMeta?.isDataMau;
-          console.log('📥 applyMapping with currentIsReview:', currentIsReview);
-          const normalized = applyMapping(savedMapping, currentIsReview);
-          if (normalized && normalized.length > 0) {
-            setIsPreviewMode(false);
-          }
-        } else {
-          setColumnMap({});
-          setAppliedColumnMap({});
-        }
-        lastAppliedMappingId.current = mappingId;
+    // 🛡️ Guard Clause
+    if (!isRestored || !mappingId || allRows.length === 0 || mappingLoading) {
+      if (mappingLoading) setRows([]); 
+      return;
+    }
+
+    const isNewMappingId = lastAppliedMappingId.current !== mappingId;
+    const isNewDateFormat = lastAppliedDateFormat.current !== dateFormat;
+    
+    // Choose which mapping to use
+    let targetMapping: ColumnMapping = {};
+    let shouldApply = false;
+
+    if (savedMapping && Object.keys(savedMapping).length > 0) {
+      targetMapping = savedMapping;
+      shouldApply = true;
+    } else {
+      const configMapping = semesters[selectedSemesterId]?.mapping;
+      if (configMapping && Object.keys(configMapping).length > 0) {
+        targetMapping = configMapping;
+        shouldApply = true;
       }
     }
-  }, [mappingId, savedMapping, savedHeaderRowIndex, allRows, setColumnMap, setHeaderRowIndex, applyHeaderRow, applyMapping, sheetMeta, tabName]);
 
-  // ✅ 2. RE-APPLY mapping when dateFormat or applied mapping changes
-  useEffect(() => {
-    if (allRows.length > 0 && Object.keys(appliedColumnMap).length > 0) {
-      console.log('📅 Configuration applied - updating preview rows');
-      applyMapping(appliedColumnMap, sheetMeta?.isDataMau || false);
+    // Always apply if it's new, changed, or it's manual trigger (appliedColumnMap)
+    if (shouldApply) {
+       console.log('📥 [Sync] Applying Mapping for', mappingId);
+       setColumnMap(targetMapping);
+       setAppliedColumnMap(targetMapping);
+       applyMapping(targetMapping, effectiveIsReview);
+       setIsPreviewMode(false);
+    } else {
+       console.log('🧹 [Sync] Entering Preview Mode for', mappingId);
+       setColumnMap({});
+       setAppliedColumnMap({});
+       applyMapping({}, effectiveIsReview); // 🚀 Ensure preview rows populated
+       setIsPreviewMode(true);
     }
-  }, [dateFormat, applyMapping, allRows.length, appliedColumnMap, sheetMeta?.isDataMau]);
+
+    lastAppliedMappingId.current = mappingId;
+    lastAppliedDateFormat.current = dateFormat;
+  }, [
+    isRestored,
+    mappingId, 
+    savedMapping, 
+    mappingLoading,
+    allRows.length, 
+    semesters, 
+    selectedSemesterId,
+    effectiveIsReview,
+    dateFormat,
+    applyMapping 
+  ]);
 
   // Dynamic column labels based on applied mapping
   const columnLabels = useMemo(() => {
@@ -378,48 +458,7 @@ export const LecturerDashboard: React.FC = () => {
           <div className="flex-1 overflow-visible p-0.5">
             <ExcelImport
               accessToken={accessToken}
-              onDataLoaded={(data) => {
-                setColumnMap({});
-                setAppliedColumnMap({});
-                setRows([]);
-                setIsPreviewMode(true);
-                setSyncResult(null);
-                setSyncError(null);
-                setParserError(null);
-                console.log('📥 Sheet data received:', data.rawRows.length, 'rows');
-
-                setAllRows(data.rawRows);
-                const meta = {
-                  sheetId: data.sheetId,
-                  tab: data.tabName,
-                  isDataMau: data.isDataMau,
-                  headerRowIndex: data.headerRowIndex,
-                  sheetType: data.sheetType
-                };
-                setSheetMeta(meta);
-                setSheetType(data.sheetType || null);
-                const appliedHeaders = applyHeaderRow(data.headerRowIndex, data.rawRows, { sheetId: data.sheetId, tab: data.tabName });
-                
-                // 🪄 AUTO-MAPPING: Tự động đoán cột khi có dữ liệu mới
-                // Lấy headers từ row index đã chọn
-                const currentHeaders = data.rawRows[data.headerRowIndex] || [];
-                const sampleRows = data.rawRows.slice(data.headerRowIndex + 1, data.headerRowIndex + 5);
-                const inferred = inferSchema(currentHeaders, sampleRows);
-                
-                console.log(`🪄 Inferred Schema (Confidence: ${inferred.confidence}):`, inferred.mapping);
-                
-                if (inferred.mapping && Object.keys(inferred.mapping).length > 0) {
-                  setColumnMap(inferred.mapping);
-                  setAppliedColumnMap(inferred.mapping);
-                  // Tự động áp dụng mapping ngay để hiện preview
-                  const normalized = applyMapping(inferred.mapping, data.isDataMau);
-                  if (normalized && normalized.length > 0) {
-                    setIsPreviewMode(false);
-                  }
-                }
-
-                showToast(`✓ Đã tải ${data.rawRows.length} dòng dữ liệu (${data.isDataMau ? 'Review Mode' : 'Normal'})`);
-              }}
+              onDataLoaded={handleDataLoaded}
               setLoading={() => {}} // Handle locally if needed
               setError={setParserError}
               sheetUrl={sheetUrl}
@@ -434,16 +473,16 @@ export const LecturerDashboard: React.FC = () => {
               setDateFormat={setDateFormat}
               selectedSemesterId={selectedSemesterId}
               setSelectedSemesterId={setSelectedSemesterId}
+              semesters={semesters}
             />
           </div>
         </section>
 
-        {/* Step 2: Mapping */}
-        {allRows.length > 0 ? (
+        {allRows.length > 0 && isAdmin(firebaseUser?.email) ? (
           <section className="lg:w-[58%] bg-white p-4 rounded-3xl border border-slate-100 flex flex-col relative z-[50] border-b-4 border-b-slate-100/50">
             <h2 className="text-[10px] font-bold text-slate-700 mb-2 flex items-center gap-2 uppercase tracking-[0.2em] flex-none">
               <span className="w-4 h-4 bg-slate-700 text-white rounded-md flex items-center justify-center text-[10px] shadow-sm font-bold">2</span>
-              Cấu hình
+              Cấu hình (Quyền Admin)
             </h2>
             <div className="flex-1 overflow-visible p-0.5">
               <MappingTool
@@ -458,27 +497,24 @@ export const LecturerDashboard: React.FC = () => {
                   setIsPreviewMode(false);
                   
                   try {
-                    // 1. Save Column Mapping (User-specific)
+                    // 1. Save Column Mapping (User-specific persistence)
                     if (mappingId) {
                       await saveFirebaseMapping(mappingId, columnMap, headerRowIndex);
                     }
 
-                    // 2. Save Global Semester Config (If Admin)
-                    if (isAdmin(firebaseUser?.email) && selectedSemesterId) {
+                    // 2. Save Global Semester Config (Because user IS Admin)
+                    if (selectedSemesterId) {
                       const currentConfig = semesters[selectedSemesterId];
                       if (currentConfig) {
                         const configRef = ref(database, `configs/${selectedSemesterId}`);
                         await set(configRef, {
                           ...currentConfig,
                           startRow: startRow.toString(),
-                          columns: columnsConfig
+                          columns: columnsConfig,
+                          mapping: columnMap // 🏛️ Save this as global mapping for all users
                         });
-                        showToast('✓ Đã áp dụng & cập nhật cấu hình học kỳ');
-                      } else {
-                         showToast('✓ Đã áp dụng ánh xạ cột');
+                        showToast('✓ Đã lưu cấu hình ánh xạ mặc định cho học kỳ');
                       }
-                    } else {
-                      showToast('✓ Đã áp dụng ánh xạ cột');
                     }
                   } catch (err: any) {
                     showToast('❌ Lỗi khi lưu cấu hình');
@@ -488,16 +524,31 @@ export const LecturerDashboard: React.FC = () => {
               />
             </div>
           </section>
+        ) : allRows.length > 0 ? (
+          /* Lecturers don't see Step 2, they see a clean welcome/info banner */
+          <div className="lg:w-[58%] bg-[#F27024]/5 border border-[#F27024]/10 rounded-3xl flex flex-col items-center justify-center p-8 text-center gap-4">
+            <div className="w-16 h-16 bg-white rounded-2xl shadow-xl shadow-orange-100 flex items-center justify-center text-[#F27024] text-3xl">
+              <svg className="w-8 h-8" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
+              </svg>
+            </div>
+            <div>
+              <h3 className="text-sm font-bold text-slate-800 mb-1 uppercase tracking-wider">Chọn học kỳ & Bắt đầu</h3>
+              <p className="text-[10px] text-slate-500 font-bold uppercase tracking-widest leading-relaxed max-w-[300px]">
+                Mọi thứ đã được Admin thiết lập sẵn. Vui lòng nhập tên của bạn ở Bước 3 để lọc lịch giảng dạy.
+              </p>
+            </div>
+          </div>
         ) : (
           <div className="lg:col-span-7 bg-slate-100/50 border border-dashed border-slate-200 rounded-2xl flex items-center justify-center p-4 grayscale opacity-60">
-            <p className="text-[9px] font-bold text-slate-400 uppercase tracking-widest text-center">Hoàn thành bước 1 để cấu hình</p>
+            <p className="text-[9px] font-bold text-slate-400 uppercase tracking-widest text-center">Hoàn thành bước 1 để bắt đầu</p>
           </div>
         )}
       </div>
 
       {/* Step 3: Preview & Sync (Approx 3/4 of screen) */}
       {(rows.length > 0 || (allRows.length > 0 && isPreviewMode)) && (
-        <section className="flex-1 min-h-0 bg-white p-4 rounded-3xl border border-slate-100 flex flex-col relative z-10 overflow-visible">
+        <section className="flex-1 min-h-0 bg-white p-4 rounded-3xl border border-slate-100 flex flex-col relative z-[60] overflow-visible">
           <div className="flex-none flex items-center justify-between gap-3 mb-3 border-b border-slate-100 pb-3">
             <div className="flex items-center gap-2">
               <div className="w-8 h-8 bg-orange-600 text-white rounded-xl flex items-center justify-center text-xs shadow-lg shadow-orange-100 font-bold">3</div>
@@ -509,8 +560,18 @@ export const LecturerDashboard: React.FC = () => {
               </div>
             </div>
 
-            <div className="flex items-center gap-2">
-              <div className="relative group flex items-center gap-2">
+              <div className="flex items-center gap-3">
+                {mappingLoading && (
+                  <div className="flex items-center gap-2 px-3 py-1.5 bg-orange-50 text-orange-600 rounded-lg text-[10px] font-bold animate-pulse border border-orange-100 italic">
+                    <svg className="w-3 h-3 animate-spin" viewBox="0 0 24 24" fill="none" stroke="currentColor">
+                      <circle className="opacity-25" cx="12" cy="12" r="10" strokeWidth="4"></circle>
+                      <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                    </svg>
+                    Đang tải cấu hình học kỳ...
+                  </div>
+                )}
+                
+                <div className="relative group flex items-center gap-2">
                 <div className="relative">
                   <div className="absolute left-3 top-2 text-slate-400 group-focus-within:text-[#F27024] transition-colors">
                     <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -602,27 +663,28 @@ export const LecturerDashboard: React.FC = () => {
           </div>
 
           <div className="flex-1 min-h-0 overflow-hidden rounded-xl border border-slate-50 bg-slate-50/30">
-            {(rows.length > 0 || (allRows.length > 0 && isPreviewMode)) ? (
-              <div className="relative h-full">
-                {loading && (
-                  <div className="absolute inset-0 bg-white/60 z-30 flex flex-col items-center justify-center backdrop-blur-[2px] transition-all duration-300">
-                    <div className="w-10 h-10 border-4 border-orange-100 border-t-[#F27024] rounded-full animate-spin mb-3"></div>
-                    <p className="text-[10px] font-extrabold text-[#F27024] uppercase tracking-widest animate-pulse">Đang ánh xạ dữ liệu...</p>
+            {(loading || mappingLoading) ? (
+              <div className="h-full flex flex-col items-center justify-center bg-white animate-in fade-in duration-500">
+                <div className="relative mb-6">
+                  <div className="w-16 h-16 border-4 border-orange-100 border-t-[#F27024] rounded-full animate-spin"></div>
+                  <div className="absolute inset-0 flex items-center justify-center">
+                    <div className="w-8 h-8 bg-white rounded-full shadow-sm flex items-center justify-center">
+                      <div className="w-4 h-4 bg-orange-400 rounded-full animate-ping"></div>
+                    </div>
                   </div>
-                )}
+                </div>
+                <div className="text-center">
+                  <h3 className="text-sm font-bold text-slate-800 uppercase tracking-[0.2em] mb-2">Đang tải dữ liệu Sheet</h3>
+                  <p className="text-[10px] text-slate-400 font-bold uppercase tracking-widest animate-pulse">Vui lòng đợi trong giây lát...</p>
+                </div>
+              </div>
+            ) : (rows.length > 0 || (allRows.length > 0 && isPreviewMode)) ? (
+              <div className="relative h-full">
                 <ScheduleTable
                   rows={filteredRows}
                   selectedIds={selectedIds}
-                  onToggleSelect={(id) => {
-                    const newIds = new Set(selectedIds);
-                    if (newIds.has(id)) newIds.delete(id);
-                    else newIds.add(id);
-                    setSelectedIds(newIds);
-                  }}
-                  onToggleAll={() => {
-                    if (selectedIds.size === filteredRows.length) setSelectedIds(new Set());
-                    else setSelectedIds(new Set(filteredRows.map(r => r.id)));
-                  }}
+                  onToggleSelect={handleToggleSelect}
+                  onToggleAll={handleToggleAll}
                   columnLabels={columnLabels}
                   columnsConfig={columnsConfig}
                   headers={fullDetailHeaders}
@@ -638,7 +700,7 @@ export const LecturerDashboard: React.FC = () => {
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.5" d="M9 17v-2m3 2v-4m3 4v-6m2 10H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
                   </svg>
                 </div>
-                <h3 className="text-slate-400 font-bold text-xs uppercase tracking-[0.3em]">Đang đợi dữ liệu...</h3>
+                <h3 className="text-slate-400 font-bold text-xs uppercase tracking-[0.3em]">Đang đợi học kỳ...</h3>
               </div>
             )}
           </div>

@@ -7,6 +7,7 @@ export interface SemesterConfig {
     columns: string;
     dateFormat?: import('../types').DateFormat;
     sheetType?: 'review' | 'council';
+    mapping?: import('../types').ColumnMapping;
 }
 
 export const configService = {

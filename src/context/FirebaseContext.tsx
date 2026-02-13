@@ -127,6 +127,9 @@ export const FirebaseProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       setAdminList(list);
       setIsWhitelistLoading(false);
       logInfo('🛡️ Admin Whitelist Synced in Context');
+    }, (error) => {
+      console.error('❌ Whitelist fetch error:', error);
+      setIsWhitelistLoading(false); // Unblock UI even if fetch fails
     });
 
     return () => unsubscribe();

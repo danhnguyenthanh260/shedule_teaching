@@ -5,19 +5,21 @@ import fetch from "node-fetch";
 // Initialize Firebase Admin (Singleton pattern for Vercel)
 if (!admin.apps.length) {
   try {
-    // In production, we'd use environment variables for the service account
-    // For now, we'll try to initialize from environment if available
     if (process.env.FIREBASE_SERVICE_ACCOUNT) {
       const serviceAccount = JSON.parse(process.env.FIREBASE_SERVICE_ACCOUNT);
       admin.initializeApp({
         credential: admin.credential.cert(serviceAccount)
       });
+      console.log("✅ Firebase Admin initialized via Service Account");
     } else {
-      // Fallback for local dev / simpler setup
-      admin.initializeApp();
+      // Fallback for local dev
+      admin.initializeApp({
+        projectId: process.env.VITE_FIREBASE_PROJECT_ID // Use this even without cert if possible
+      });
+      console.log("⚠️ Firebase Admin initialized WITHOUT Service Account (using Project ID)");
     }
-  } catch (error) {
-    console.error("Firebase admin initialization error:", error);
+  } catch (error: any) {
+    console.error("❌ Firebase admin initialization error:", error);
   }
 }
 
@@ -122,10 +124,23 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
       // Check conflict in Firestore
       // Overlap logic: (StartA < EndB) AND (EndA > StartB)
-      const overlapSnapshot = await db.collection("slots")
-        .where("startTime", "<", endTime)
-        .where("endTime", ">", startTime)
-        .get();
+      let overlapSnapshot;
+      try {
+        overlapSnapshot = await db.collection("slots")
+          .where("startTime", "<", endTime)
+          .where("endTime", ">", startTime)
+          .get();
+      } catch (dbErr: any) {
+        console.error("❌ Firestore Query Error:", dbErr);
+        if (dbErr.message?.includes("index")) {
+          return res.status(500).json({
+            error: "Thiếu Index trong Firestore",
+            detail: "Bạn cần tạo Composite Index. Vui lòng xem link trong Vercel Logs.",
+            link: dbErr.message.match(/https:\/\/console\.firebase\.google\.com[^\s]+/)?.[0] || null
+          });
+        }
+        throw dbErr;
+      }
 
       let foundConflict = false;
       for (const doc of overlapSnapshot.docs) {
@@ -259,8 +274,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   } catch (err: any) {
     console.error("Sync Secure Error:", err);
     return res.status(500).json({
-      error: "Internal server error during sync",
-      detail: err.message
+      error: "Lỗi nội bộ hệ thống trong quá trình đồng bộ (Proxy 500)",
+      message: err.message,
+      stack: process.env.NODE_ENV === "development" ? err.stack : undefined,
+      hint: !process.env.FIREBASE_SERVICE_ACCOUNT ? "Thiếu FIREBASE_SERVICE_ACCOUNT trên Vercel" : "Kiểm tra Vercel Logs để biết chi tiết"
     });
   }
 }

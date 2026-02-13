@@ -30,6 +30,7 @@ interface ExcelImportProps {
   setDateFormat: (format: DateFormat) => void;
   selectedSemesterId: string;
   setSelectedSemesterId: (id: string) => void;
+  semesters: Record<string, SemesterConfig>;
 }
 
 export const ExcelImport: React.FC<ExcelImportProps> = ({
@@ -48,10 +49,10 @@ export const ExcelImport: React.FC<ExcelImportProps> = ({
   dateFormat,
   setDateFormat,
   selectedSemesterId,
-  setSelectedSemesterId
+  setSelectedSemesterId,
+  semesters
 }) => {
   const [isProcessing, setIsProcessing] = useState(false);
-  const [semesters, setSemesters] = useState<Record<string, SemesterConfig>>({});
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const processRawData = (rows: string[][], source: string) => {
@@ -131,37 +132,13 @@ export const ExcelImport: React.FC<ExcelImportProps> = ({
     }
   };
 
-  // Fetch configs on mount
+  // ✅ AUTO-SELECT first semester if none selected
   useEffect(() => {
-    const fetchConfigs = async () => {
-      try {
-        setLoading(true);
-        setError(null);
-        const configs = await configService.fetchConfigs();
-        setSemesters(configs);
-
-
-        // ✅ SESSION PERSISTENCE: Use persisted semester if available, otherwise auto-select first
-        if (selectedSemesterId && configs[selectedSemesterId]) {
-          console.log('🔄 Session Persistence: Restoring semester:', selectedSemesterId);
-          handleSemesterChange(selectedSemesterId, configs);
-        } else if (!selectedSemesterId) {
-          const firstId = Object.keys(configs)[0];
-          if (firstId) {
-            handleSemesterChange(firstId, configs);
-          }
-        }
-      } catch (err: any) {
-        // ✅ TASK 2 & 3: Show error immediately if config fetch fails
-        const errorMsg = err.message || '❌ Không thể tải danh sách học kỳ';
-        setError(errorMsg);
-        console.error('Failed to fetch configs:', err);
-      } finally {
-        setLoading(false);
-      }
-    };
-    fetchConfigs();
-  }, []);
+    if (!selectedSemesterId && Object.keys(semesters).length > 0) {
+      const firstId = Object.keys(semesters)[0];
+      handleSemesterChange(firstId, semesters);
+    }
+  }, [semesters, selectedSemesterId]);
 
   // ✅ AUTO-LOAD when semester changes
   useEffect(() => {

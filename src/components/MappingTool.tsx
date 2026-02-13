@@ -60,7 +60,7 @@ export const MappingTool: React.FC<MappingToolProps> = ({
           </button>
         </div>
 
-        <div className="grid grid-cols-2 lg:grid-cols-5 gap-3">
+        <div className="grid grid-cols-2 lg:grid-cols-5 gap-3 items-end">
           {[
             { key: 'date', label: 'NGÀY', icon: '📅' },
             { key: 'time', label: 'THỜI GIAN', icon: '⏰' },
@@ -68,8 +68,8 @@ export const MappingTool: React.FC<MappingToolProps> = ({
             { key: 'person', label: 'GIẢNG VIÊN', icon: '👤' },      // ✅ Renamed Person
             { key: 'location', label: 'PHÒNG', icon: '📍' },
           ].map((field) => (
-            <div key={field.key} className="space-y-1.5">
-              <label className="flex items-center gap-2 text-[9px] font-bold text-slate-400 ml-1 uppercase tracking-[0.15em]">
+            <div key={field.key} className="space-y-1.5 flex flex-col justify-end">
+              <label className="flex items-center gap-2 text-[9px] font-bold text-slate-400 ml-1 uppercase tracking-[0.15em] min-h-[1.5rem] leading-tight">
                 <span className="text-xs">{field.icon}</span>
                 {field.label}
               </label>

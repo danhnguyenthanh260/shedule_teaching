@@ -114,13 +114,18 @@ export const ScheduleTable: React.FC<ScheduleTableProps> = ({
               className={`hover:bg-orange-50/30 transition-all group ${selectedIds.has(row.id) ? 'bg-orange-50/50' : ''}`}
             >
               <td className="pl-8 py-4">
-                <input
-                  type="checkbox"
-                  className="w-5 h-5 rounded-lg border-slate-300 text-[#F27024] focus:ring-[#F27024] cursor-pointer transition-all hover:scale-110 shadow-sm disabled:bg-slate-100 disabled:border-slate-200 translate-y-1"
-                  checked={selectedIds.has(row.id)}
-                  onChange={() => onToggleSelect(row.id)}
-                  disabled={false}
-                />
+                <label className="flex items-center justify-center w-8 h-8 cursor-pointer pointer-events-auto relative z-10 hover:bg-orange-100/50 rounded-xl transition-all">
+                  <input
+                    type="checkbox"
+                    className="w-5 h-5 rounded-lg border-slate-300 text-[#F27024] focus:ring-[#F27024] cursor-pointer transition-all hover:scale-110 shadow-sm disabled:bg-slate-100 disabled:border-slate-200"
+                    checked={selectedIds.has(row.id)}
+                    onChange={(e) => {
+                      e.stopPropagation();
+                      onToggleSelect(row.id);
+                    }}
+                    disabled={false}
+                  />
+                </label>
               </td>
 
               {!isPreview ? (

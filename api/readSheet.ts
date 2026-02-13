@@ -15,7 +15,7 @@ export default async function handler(
     return res.status(200).end();
   }
 
-  const { action, url, startRow } = req.query;
+  const query = req.query || {};
   const method = req.method;
 
   try {
@@ -30,7 +30,10 @@ export default async function handler(
       headers: {}
     };
 
+    const GAS_SECRET = process.env.GAS_SECRET;
+
     if (method === "GET") {
+      const { action, url, startRow } = query;
       if (!url) {
         return res.status(400).json({ error: "Missing url parameter" });
       }
@@ -39,16 +42,23 @@ export default async function handler(
       if (url) queryParams.append("url", url as string);
       if (startRow) queryParams.append("startRow", startRow as string);
       
-      const GAS_SECRET = process.env.GAS_SECRET;
       if (GAS_SECRET) queryParams.append("secret", GAS_SECRET);
       
       targetUrl += (targetUrl.includes("?") ? "&" : "?") + queryParams.toString();
     } else {
-      // For POST, inject secret from environment if missing
-      const body = typeof req.body === 'string' ? JSON.parse(req.body) : { ...req.body };
-      if (!body.secret && process.env.GAS_SECRET) {
-        body.secret = process.env.GAS_SECRET;
+      // For POST, inject secret from environment
+      let body: any = {};
+      try {
+        body = typeof req.body === 'string' ? JSON.parse(req.body) : { ...req.body };
+      } catch (e) {
+        body = { ...req.body };
       }
+
+      // 🛡️ FORCE INJECT SECRET
+      if (GAS_SECRET) {
+        body.secret = GAS_SECRET;
+      }
+      
       fetchOptions.body = JSON.stringify(body);
       fetchOptions.headers["Content-Type"] = "application/json";
     }

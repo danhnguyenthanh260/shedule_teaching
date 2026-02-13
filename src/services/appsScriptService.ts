@@ -69,10 +69,14 @@ export const readSheet = async (
             throw new Error('❌ URL Google Sheet không hợp lệ');
         }
 
+        const currentUser = auth.currentUser;
+        const idToken = currentUser ? await currentUser.getIdToken() : undefined;
+
         const payload = {
             action: 'readSheet',
             url: url,
-            startRow: startRow.toString()
+            startRow: startRow.toString(),
+            idToken: idToken
         };
 
         const fetchUrl = `${API_BASE_URL}/api/readSheet`;

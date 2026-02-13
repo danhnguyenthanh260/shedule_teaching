@@ -10,18 +10,7 @@ export const SUPER_ADMIN_EMAIL = 'ngohoangtruongdat2@gmail.com';
  * Static fallback admins (initial set)
  */
 let dynamicAdminEmails: string[] = [];
-
-// Subscribe to admin whitelist in RTDB
-const adminWhitelistRef = ref(database, 'admin_whitelist');
-onValue(adminWhitelistRef, (snapshot) => {
-    const data = snapshot.val();
-    if (data && typeof data === 'object') {
-        dynamicAdminEmails = Object.values(data).map((v: any) => String(v).trim().toLowerCase());
-        console.log('🛡️ Admin Whitelist Updated:', dynamicAdminEmails);
-    } else {
-        dynamicAdminEmails = [];
-    }
-});
+// This is now managed by FirebaseContext to ensure React re-renders
 
 /**
  * Checks if a given email address belongs to an administrator

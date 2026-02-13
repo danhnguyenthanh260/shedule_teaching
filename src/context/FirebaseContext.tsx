@@ -1,5 +1,7 @@
 import React, { createContext, useContext, useEffect, useState } from 'react';
-import { auth, db } from '../config/firebase';
+import { auth, db, database } from '../config/firebase';
+import { ref, onValue } from 'firebase/database';
+import { SUPER_ADMIN_EMAIL } from '../config/admin';
 import {
   createUserWithEmailAndPassword,
   signInWithEmailAndPassword,
@@ -36,6 +38,8 @@ interface FirebaseContextType {
   signupWithEmail: (email: string, password: string) => Promise<void>;
   logout: () => Promise<void>;
   getAccessToken: () => Promise<string | null>;
+  isWhitelistLoading: boolean;
+  isAdmin: boolean;
 }
 
 const FirebaseContext = createContext<FirebaseContextType | undefined>(undefined);
@@ -45,6 +49,9 @@ export const FirebaseProvider: React.FC<{ children: React.ReactNode }> = ({ chil
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [accessToken, setAccessToken] = useState<string | null>(null);
+  const [isAdmin, setIsAdmin] = useState(false);
+  const [isWhitelistLoading, setIsWhitelistLoading] = useState(true);
+  const [adminList, setAdminList] = useState<string[]>([]);
 
   // Check for redirect result on mount
   useEffect(() => {
@@ -107,6 +114,39 @@ export const FirebaseProvider: React.FC<{ children: React.ReactNode }> = ({ chil
 
     return unsubscribe;
   }, [accessToken]);
+
+  // Handle Admin Whitelist
+  useEffect(() => {
+    const adminWhitelistRef = ref(database, 'admin_whitelist');
+    const unsubscribe = onValue(adminWhitelistRef, (snapshot) => {
+      const data = snapshot.val();
+      let list: string[] = [];
+      if (data && typeof data === 'object') {
+        list = Object.values(data).map((v: any) => String(v).trim().toLowerCase());
+      }
+      setAdminList(list);
+      setIsWhitelistLoading(false);
+      logInfo('🛡️ Admin Whitelist Synced in Context');
+    });
+
+    return () => unsubscribe();
+  }, []);
+
+  // Update isAdmin whenever user or adminList changes
+  useEffect(() => {
+    if (!user) {
+      setIsAdmin(false);
+      return;
+    }
+    const email = user.email?.trim().toLowerCase();
+    if (!email) {
+      setIsAdmin(false);
+      return;
+    }
+
+    const isAuthorized = email === SUPER_ADMIN_EMAIL.toLowerCase() || adminList.includes(email);
+    setIsAdmin(isAuthorized);
+  }, [user, adminList]);
   /* 
   // PREVIOUS REDIRECT LOGIC (Commented out per User Request):
   const loginWithGoogle = async () => {
@@ -262,6 +302,8 @@ export const FirebaseProvider: React.FC<{ children: React.ReactNode }> = ({ chil
         signupWithEmail,
         logout,
         getAccessToken,
+        isWhitelistLoading,
+        isAdmin,
       }}
     >
       {children}

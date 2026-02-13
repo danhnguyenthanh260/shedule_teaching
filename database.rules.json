@@ -1,8 +1,12 @@
 {
   "rules": {
+    "admin_whitelist": {
+      ".read": "true",
+      ".write": "auth != null && (root.child('admin_whitelist').child(auth.uid).exists() || auth.token.email == 'ngohoangtruongdat2@gmail.com')"
+    },
     "configs": {
       ".read": "auth != null",
-      ".write": "auth != null && auth.token.admin === true"
+      ".write": "auth != null && (root.child('admin_whitelist').child(auth.uid).exists() || auth.token.email == 'ngohoangtruongdat2@gmail.com')"
     }
   }
 }

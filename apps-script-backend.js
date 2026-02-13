@@ -119,12 +119,25 @@ function doPost(e) {
     const payload = JSON.parse(e.postData.contents);
     const action = payload.action || 'sync';
     
-    // Auth Check
+    // Auth Check Logic
+    const isAdminAction = (action === 'clearCalendar');
+    
     if (payload.secret !== CONSTANTS.GAS_SECRET) {
       const auth = verifyFirebaseToken_(payload.idToken);
-      if (!auth.valid || !isAuthorized_(auth.email)) {
-          throw new Error('Unauthorized Access (V10.1)');
+      
+      // 1. Must be at least a valid logged-in user
+      if (!auth.valid) {
+          throw new Error('Unauthorized: Vui lòng đăng nhập lại (V10.2)');
       }
+      
+      // 2. If it is an admin action, must be in whitelist
+      if (isAdminAction && !isAuthorized_(auth.email)) {
+          throw new Error('Unauthorized: Bạn không có quyền quản trị (V10.2)');
+      }
+
+      console.log(`User ${auth.email} authorized for action: ${action}`);
+    } else {
+      console.log(`Action ${action} authorized via Secret Key`);
     }
 
     if (action === 'readSheet') return handleReadSheet_(payload);
@@ -168,11 +181,23 @@ function isAuthorized_(email) {
   try {
     const url = `${CONSTANTS.FIREBASE_URL}admin_whitelist.json`;
     const res = UrlFetchApp.fetch(url, { muteHttpExceptions: true });
+    if (res.getResponseCode() !== 200) {
+      console.error(`Firebase error: ${res.getResponseCode()} - ${res.getContentText()}`);
+      return false;
+    }
     const data = JSON.parse(res.getContentText());
-    if (!data) return false;
+    if (!data) {
+      console.log('Whitelist is empty');
+      return false;
+    }
     const list = Object.values(data).map(v => String(v).trim().toLowerCase());
-    return list.includes(cleanEmail);
-  } catch (e) { return false; }
+    const isMaster = list.includes(cleanEmail);
+    console.log(`Auth check for ${cleanEmail}: ${isMaster}`);
+    return isMaster;
+  } catch (e) { 
+    console.error('Whitelist fetch error: ' + e.toString());
+    return false; 
+  }
 }
 
 function jsonResponse_(obj) { 

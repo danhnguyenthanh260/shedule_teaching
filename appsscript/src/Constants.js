@@ -5,7 +5,6 @@ const CONSTANTS = {
   FIREBASE_URL: 'https://scheduleteaching-default-rtdb.asia-southeast1.firebasedatabase.app/',
   FIREBASE_WEB_API_KEY: 'AIzaSyDRwHY6mgdHKjkanLJk8BFpOQSeV5sqvaY',
   ADMIN_EMAILS: [
-    'duongkien.090905@gmail.com',
     'ngohoangtruongdat2@gmail.com'
   ],
   SUCCESS: 'success',

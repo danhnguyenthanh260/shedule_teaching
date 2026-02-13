@@ -12,7 +12,6 @@ const CONSTANTS = {
   TIMEZONE: 'Asia/Ho_Chi_Minh',
   FIREBASE_URL: 'https://scheduleteaching-default-rtdb.asia-southeast1.firebasedatabase.app/',
   ADMIN_EMAILS: [
-    'duongkien.090905@gmail.com',
     'ngohoangtruongdat@gmail.com',
     'ngohoangtruongdat2@gmail.com'
   ],

@@ -76,7 +76,9 @@ export const readSheet = async (
             action: 'readSheet',
             url: url,
             startRow: startRow.toString(),
-            idToken: idToken
+            idToken: idToken,
+            // 🔐 Tự động thêm secret ở môi trường Local để hỗ trợ Vite Proxy
+            ...(import.meta.env.DEV ? { secret: import.meta.env.VITE_GAS_SECRET } : {})
         };
 
         const fetchUrl = `${API_BASE_URL}/api/readSheet`;
@@ -149,7 +151,9 @@ export const syncEventsToCalendar = async (
             idToken,
             calendarName: targetCalendar,
             events,
-            userEmail: currentUser.email || undefined
+            userEmail: currentUser.email || undefined,
+            // 🔐 Tự động thêm secret ở môi trường Local để hỗ trợ Vite Proxy
+            ...(import.meta.env.DEV ? { secret: import.meta.env.VITE_GAS_SECRET } : {})
         };
 
         const syncUrl = `${API_BASE_URL}/api/sync`;
@@ -211,7 +215,9 @@ export const clearCalendar = async (
         const payload: ClearPayload = {
             idToken,
             action: 'clearCalendar',
-            calendarName: targetCalendar
+            calendarName: targetCalendar,
+            // 🔐 Tự động thêm secret ở môi trường Local để hỗ trợ Vite Proxy
+            ...(import.meta.env.DEV ? { secret: import.meta.env.VITE_GAS_SECRET } : {})
         };
 
         const syncUrl = `${API_BASE_URL}/api/sync`;

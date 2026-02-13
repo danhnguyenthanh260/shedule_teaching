@@ -44,8 +44,12 @@ export default async function handler(
       
       targetUrl += (targetUrl.includes("?") ? "&" : "?") + queryParams.toString();
     } else {
-      // For POST
-      fetchOptions.body = JSON.stringify(req.body);
+      // For POST, inject secret from environment if missing
+      const body = typeof req.body === 'string' ? JSON.parse(req.body) : { ...req.body };
+      if (!body.secret && process.env.GAS_SECRET) {
+        body.secret = process.env.GAS_SECRET;
+      }
+      fetchOptions.body = JSON.stringify(body);
       fetchOptions.headers["Content-Type"] = "application/json";
     }
 

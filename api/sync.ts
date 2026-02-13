@@ -189,7 +189,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
-        secret: GAS_SECRET,
+        secret: GAS_SECRET || req.body.secret, // Prioritize env, fallback to body
         calendarName: calendarName || "Schedule Teaching",
         events: eventsToSync.map(ev => ({
           ...ev,

@@ -72,8 +72,7 @@ export const readSheet = async (
         const payload = {
             action: 'readSheet',
             url: url,
-            startRow: startRow.toString(),
-            secret: import.meta.env.VITE_GAS_SECRET
+            startRow: startRow.toString()
         };
 
         const fetchUrl = `${API_BASE_URL}/api/readSheet`;
@@ -146,8 +145,7 @@ export const syncEventsToCalendar = async (
             idToken,
             calendarName: targetCalendar,
             events,
-            userEmail: currentUser.email || undefined,
-            secret: import.meta.env.VITE_GAS_SECRET, // 🔐 Automatically include secret from env
+            userEmail: currentUser.email || undefined
         };
 
         const syncUrl = `${API_BASE_URL}/api/sync`;
@@ -209,8 +207,7 @@ export const clearCalendar = async (
         const payload: ClearPayload = {
             idToken,
             action: 'clearCalendar',
-            calendarName: targetCalendar,
-            secret: import.meta.env.VITE_GAS_SECRET,
+            calendarName: targetCalendar
         };
 
         const syncUrl = `${API_BASE_URL}/api/sync`;

@@ -23,12 +23,12 @@ export const MappingTool: React.FC<MappingToolProps> = ({
   onApply,
   isLoading
 }) => {
-  const fields: { key: keyof ColumnMapping; label: string; icon: string }[] = [
-    { key: 'date', label: 'Ngày', icon: '📅' },
-    { key: 'time', label: 'Thời gian', icon: '⏰' },
-    { key: 'task', label: 'Nhiệm vụ / Đề tài', icon: '📝' },
-    { key: 'person', label: 'Giảng viên', icon: '👤' },
-    { key: 'location', label: 'Phòng', icon: '📍' },
+  const fields: { key: keyof ColumnMapping; label: string }[] = [
+    { key: 'date', label: 'Ngày' },
+    { key: 'time', label: 'Thời gian' },
+    { key: 'task', label: 'Nhiệm vụ / Đề tài' },
+    { key: 'person', label: 'Giảng viên' },
+    { key: 'location', label: 'Phòng' },
   ];
 
   return (
@@ -51,9 +51,6 @@ export const MappingTool: React.FC<MappingToolProps> = ({
               <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
             ) : (
               <>
-                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M5 13l4 4L19 7" />
-                </svg>
                 ÁP DỤNG
               </>
             )}
@@ -62,15 +59,14 @@ export const MappingTool: React.FC<MappingToolProps> = ({
 
         <div className="grid grid-cols-2 lg:grid-cols-5 gap-3 items-end">
           {[
-            { key: 'date', label: 'NGÀY', icon: '📅' },
-            { key: 'time', label: 'THỜI GIAN', icon: '⏰' },
-            { key: 'task', label: 'NHIỆM VỤ / ĐỀ TÀI', icon: '📝' }, // ✅ Added Task
-            { key: 'person', label: 'GIẢNG VIÊN', icon: '👤' },      // ✅ Renamed Person
-            { key: 'location', label: 'PHÒNG', icon: '📍' },
+            { key: 'date', label: 'NGÀY' },
+            { key: 'time', label: 'THỜI GIAN' },
+            { key: 'task', label: 'NHIỆM VỤ / ĐỀ TÀI' },
+            { key: 'person', label: 'GIẢNG VIÊN' },
+            { key: 'location', label: 'PHÒNG' },
           ].map((field) => (
             <div key={field.key} className="space-y-1.5 flex flex-col justify-end">
               <label className="flex items-center gap-2 text-[9px] font-bold text-slate-400 ml-1 uppercase tracking-[0.15em] min-h-[1.5rem] leading-tight">
-                <span className="text-xs">{field.icon}</span>
                 {field.label}
               </label>
               <div className="relative group">
@@ -87,8 +83,8 @@ export const MappingTool: React.FC<MappingToolProps> = ({
                     <option key={h.value} value={h.value}>{h.label}</option>
                   ))}
                 </select>
-                <div className="absolute right-3.5 top-3 text-slate-300 pointer-events-none group-focus-within:text-[#F27024]">
-                  <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M19 9l-7 7-7-7" /></svg>
+                <div className="absolute right-3.5 top-3.5 text-slate-300 pointer-events-none group-focus-within:text-[#F27024] text-[10px] font-bold">
+                  V
                 </div>
               </div>
             </div>

@@ -111,8 +111,9 @@ export default async function handler(
   } catch (err: any) {
     console.error("Proxy error:", err);
     return res.status(500).json({
-      error: "Internal server error in Proxy",
-      detail: err.message,
+      error: "Lỗi nội bộ hệ thống trong quá trình đọc Sheet (Proxy 500)",
+      message: err.message,
+      hint: err.message?.includes("credentials") ? "Thiếu FIREBASE_SERVICE_ACCOUNT trên Vercel" : "Kiểm tra Vercel Logs để biết chi tiết"
     });
   }
 }

@@ -26,7 +26,7 @@ export interface SyncPayload {
     calendarName: string;
     events: CalendarEvent[];
     userEmail?: string;
-    secret?: string; // 🔐 Required for direct GAS calls (local proxy)
+    secret?: string; // Required for direct GAS calls (local proxy)
 }
 
 export interface ClearPayload {
@@ -62,11 +62,12 @@ const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || '';
  */
 export const readSheet = async (
     url: string,
-    startRow: number
-): Promise<string[][]> => {
+    startRow: number,
+    tabName?: string
+): Promise<{ data: string[][]; tabName: string }> => {
     try {
         if (!url || !url.includes('spreadsheets')) {
-            throw new Error('❌ URL Google Sheet không hợp lệ');
+            throw new Error('URL Google Sheet không hợp lệ');
         }
 
         const currentUser = auth.currentUser;
@@ -76,6 +77,7 @@ export const readSheet = async (
             action: 'readSheet',
             url: url,
             startRow: startRow.toString(),
+            tabName: tabName,
             idToken: idToken,
             // 🔐 Tự động thêm secret ở môi trường Local để hỗ trợ Vite Proxy
             ...(import.meta.env.DEV ? { secret: import.meta.env.VITE_GAS_SECRET } : {})
@@ -95,29 +97,32 @@ export const readSheet = async (
         if (!response.ok) {
             const bodyText = await response.text().catch(() => '');
             logError(`Proxy returned ${response.status}: ${bodyText.substring(0, 100)}`);
-            throw new Error(`❌ Lỗi Proxy API ${response.status}: ${response.statusText}`);
+            throw new Error(`Lỗi Proxy API ${response.status}: ${response.statusText}`);
         }
 
         const data = await response.json().catch(async () => {
             const text = await response.text();
             if (text.includes('<!DOCTYPE') || text.includes('<html')) {
-                throw new Error('❌ Google Apps Script trả về trang HTML (có thể là yêu cầu đăng nhập hoặc lỗi 404). Vui lòng đảm bảo bạn đã triển khai (Deploy) script ở chế độ "Anyone" và dùng URL "exec".');
+                throw new Error('Google Apps Script trả về trang HTML (có thể là yêu cầu đăng nhập hoặc lỗi 404). Vui lòng đảm bảo bạn đã triển khai (Deploy) script ở chế độ "Anyone" và dùng URL "exec".');
             }
-            throw new Error(`❌ Không thể parse JSON từ Apps Script. Nội dung: ${text.substring(0, 50)}...`);
+            throw new Error(`Không thể parse JSON từ Apps Script. Nội dung: ${text.substring(0, 50)}...`);
         });
 
         if (data.status === 'error') {
-            throw new Error(`❌ ${data.message || 'Lỗi không xác định từ Apps Script'}`);
+            throw new Error(`${data.message || 'Lỗi không xác định từ Apps Script'}`);
         }
 
         if (!data.data || !Array.isArray(data.data)) {
-            throw new Error('❌ Dữ liệu trả về không hợp lệ');
+            throw new Error('Dữ liệu trả về không hợp lệ');
         }
 
-        logSuccess(`✅ Đã tải ${data.data.length} dòng dữ liệu`);
-        return data.data || [];
+        logSuccess(`Đã tải ${data.data.length} dòng dữ liệu từ tab: ${data.tabName}`);
+        return {
+            data: data.data || [],
+            tabName: data.tabName || tabName || 'Sheet1'
+        };
     } catch (error) {
-        const errorMessage = error instanceof Error ? error.message : '❌ Không thể đọc dữ liệu';
+        const errorMessage = error instanceof Error ? error.message : 'Không thể đọc dữ liệu';
         logError('Read sheet error:', errorMessage);
         throw new Error(errorMessage);
     }
@@ -175,7 +180,7 @@ export const syncEventsToCalendar = async (
 
         const data = await response.json();
 
-        // 🚨 HANDLE CONFLICTS (409)
+        // HANDLE CONFLICTS (409)
         if (response.status === 409) {
             const conflictMsg = data.conflicts 
               ? `Xung đột lịch trình: ${data.conflicts.map((c: any) => c.message).join(' | ')}`
@@ -247,6 +252,29 @@ export const clearCalendar = async (
         const errorMessage = error instanceof Error ? error.message : 'Failed to clear calendar';
         logError('Clear error:', errorMessage);
         throw new Error(errorMessage);
+    }
+};
+
+export const invalidateAdminCache = async (): Promise<void> => {
+    try {
+        const currentUser = auth.currentUser;
+        const idToken = currentUser ? await currentUser.getIdToken() : undefined;
+        
+        const payload = {
+            action: 'clearWhitelistCache',
+            idToken,
+            ...(import.meta.env.DEV ? { secret: import.meta.env.VITE_GAS_SECRET } : {})
+        };
+
+        const syncUrl = `${API_BASE_URL}/api/sync`;
+        await fetch(syncUrl, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload),
+        });
+        logSuccess('Admin cache invalidated on server');
+    } catch (error) {
+        logError('Failed to invalidate admin cache');
     }
 };
 

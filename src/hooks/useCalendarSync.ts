@@ -24,17 +24,27 @@ export const useCalendarSync = ({ accessToken }: UseCalendarSyncProps) => {
     setSyncError(null);
 
     try {
-      const events = rowsToSync.map(r => ({
-        title: r.person,
-        start: r.startTime.includes('T') ? r.startTime : `${r.date}T${r.startTime}:00+07:00`,
-        end: r.endTime.includes('T') ? r.endTime : `${r.date}T${r.endTime}:00+07:00`,
-        location: r.location || '',
-        resources: r.resources || [r.person, r.location].filter(Boolean),
-        description: `Đồng bộ từ FPT Scheduler\nNội dung: ${r.person}\nPhòng: ${r.location}`,
-        signature: r.id // ✅ Dùng ID dòng làm signature để chống trùng
-      }));
+      console.log(`📡 Bắt đầu đồng bộ ${rowsToSync.length} mục lên Google Calendar...`);
+      const events = rowsToSync.map(r => {
+        // Fix leading zeros for hours if single digit (e.g., "1" -> "01")
+        const fixTime = (t: string) => t.length === 1 ? `0${t}:00` : t.includes(':') ? t : `${t}:00`;
+        const isoStart = r.date && r.startTime ? (r.startTime.includes('T') ? r.startTime : `${r.date}T${fixTime(r.startTime)}:00+07:00`) : '';
+        const isoEnd = r.date && r.endTime ? (r.endTime.includes('T') ? r.endTime : `${r.date}T${fixTime(r.endTime)}:00+07:00`) : '';
 
+        return {
+          title: r.person,
+          start: isoStart,
+          end: isoEnd,
+          location: r.location || '',
+          resources: r.resources || [r.person, r.location].filter(Boolean),
+          description: `Đồng bộ từ FPT Scheduler\nNội dung: ${r.person}\nPhòng: ${r.location}`,
+          signature: r.id
+        };
+      });
+
+      console.log("📦 Payload events sample:", events[0]);
       const res = await syncEventsToCalendar(events);
+      console.log("✅ API Response:", res);
 
       const successCount = res.data?.success ?? 0;
       const failedCount = res.data?.failed ?? 0;
@@ -51,9 +61,9 @@ export const useCalendarSync = ({ accessToken }: UseCalendarSyncProps) => {
       setSyncResult(result);
       return result;
     } catch (err: any) {
-      console.error("Sync error:", err);
-      const errorMsg = "Lỗi đồng bộ: " + err.message;
-      setSyncError(errorMsg);
+      console.error("❌ Sync error details:", err);
+      const errorMsg = err.message || "Lỗi không xác định khi đồng bộ";
+      setSyncError("Lỗi đồng bộ: " + errorMsg);
       throw new Error(errorMsg);
     } finally {
       setSyncing(false);

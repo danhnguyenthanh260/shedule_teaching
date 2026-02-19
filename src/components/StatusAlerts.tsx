@@ -39,13 +39,13 @@ export const StatusAlerts: React.FC<StatusAlertsProps> = ({ error, result, onClo
       {error && (
         <div className="bg-rose-50 border border-rose-200 p-4 rounded-2xl text-rose-700 text-sm font-bold flex items-center justify-between shadow-2xl shadow-rose-100 mb-2">
           <div className="flex items-center gap-3">
-            <div className="w-8 h-8 bg-rose-100 rounded-xl flex items-center justify-center text-rose-600">
-              <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10" /><line x1="12" y1="8" x2="12" y2="12" /><line x1="12" y1="16" x2="12.01" y2="16" /></svg>
+            <div className="w-8 h-8 bg-rose-100 rounded-xl flex items-center justify-center text-rose-600 font-bold">
+              !
             </div>
             <span>{error}</span>
           </div>
-          <button onClick={onClose} className="p-2 hover:bg-rose-100 rounded-lg transition-colors text-rose-400">
-            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M6 18L18 6M6 6l12 12" /></svg>
+          <button onClick={onClose} className="px-2 py-1 hover:bg-rose-100 rounded-lg transition-colors text-rose-400 font-bold text-xs">
+            X
           </button>
         </div>
       )}
@@ -53,11 +53,11 @@ export const StatusAlerts: React.FC<StatusAlertsProps> = ({ error, result, onClo
       {result && (
         <div className="bg-emerald-50 border border-emerald-200 p-4 rounded-3xl flex items-center justify-between shadow-2xl shadow-emerald-100 border-b-4 border-b-emerald-200">
           <div className="flex items-center gap-4 pl-2">
-            <div className="w-10 h-10 bg-emerald-100 rounded-2xl flex items-center justify-center text-emerald-600">
-              <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M5 13l4 4L19 7" /></svg>
+            <div className="w-10 h-10 bg-emerald-100 rounded-2xl flex items-center justify-center text-emerald-600 font-bold">
+              OK
             </div>
             <div>
-              <h4 className="font-bold text-emerald-900 text-sm uppercase tracking-tight">✓ Đồng bộ hoàn tất!</h4>
+              <h4 className="font-bold text-emerald-900 text-sm uppercase tracking-tight">Đồng bộ hoàn tất</h4>
               <p className="text-emerald-700 text-[10px] font-bold mt-0.5 uppercase tracking-wider opacity-60">
                 Thêm: {result.created} | Bỏ qua: {result.skipped} | Lỗi: {result.failed}
               </p>
@@ -71,9 +71,6 @@ export const StatusAlerts: React.FC<StatusAlertsProps> = ({ error, result, onClo
               rel="noreferrer" 
               className="flex items-center gap-2 bg-[#F27024] hover:bg-orange-600 text-white px-5 py-2.5 rounded-2xl font-bold text-[10px] transition-all whitespace-nowrap shadow-lg shadow-orange-200 active:scale-95 uppercase tracking-wider"
             >
-              <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" />
-              </svg>
               Mở Lịch
             </a>
 
@@ -86,12 +83,10 @@ export const StatusAlerts: React.FC<StatusAlertsProps> = ({ error, result, onClo
               
               <button 
                 onClick={onClose} 
-                className="w-8 h-8 flex items-center justify-center hover:bg-emerald-200/50 rounded-xl transition-all text-emerald-400 hover:text-emerald-600"
+                className="w-8 h-8 flex items-center justify-center hover:bg-emerald-200/50 rounded-xl transition-all text-emerald-400 hover:text-emerald-600 font-bold text-xs"
                 title="Đóng thông báo"
               >
-                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M6 18L18 6M6 6l12 12" />
-                </svg>
+                X
               </button>
             </div>
           </div>

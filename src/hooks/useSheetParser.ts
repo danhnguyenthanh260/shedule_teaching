@@ -202,10 +202,12 @@ export const useSheetParser = ({
       // 🕵️ Handle Duplicate Labels & Clean Triplet Labels
       let finalLabel = label;
       
-      // Triplets in Admin mode should be CLEAN (no "(Cột X)") to represent the group
-      const shouldBeClean = isReview && isUserAdmin && isFirstTriplet;
+      // Triplets should be CLEAN (no "(Cột X)") to represent the group
+      const shouldBeClean = isReview && isFirstTriplet;
 
-      if (!shouldBeClean && seen.has(label)) {
+      // 🏛️ ONLY show index suffixes for ADAMS to identify specific columns.
+      // 🎓 LECTURERS should see clean names (esp. since duplicate columns are filtered out for them).
+      if (isUserAdmin && !shouldBeClean && seen.has(label)) {
         finalLabel = `${label} (${i + 1})`;
       }
 
@@ -218,6 +220,39 @@ export const useSheetParser = ({
     console.log(`📊 [Parser] Generated ${options.length} options. Review Triplet Logic Applied.`);
     return options.length > 0 ? options : [{ label: '-- Chọn cột --', value: -1 }];
   }, [fullDetailHeaders, isReviewMode, isUserAdmin, currentMapping]);
+
+  const searchHeaderOptions = useMemo(() => {
+    // If not review mode, just return same as headerOptions
+    if (!isReviewMode) return headerOptions;
+
+    // In Review Mode: 
+    // 1. Only show headers that appear 3+ times in the Detail row (Triple Data)
+    // 2. Only show the FIRST occurrence for each unique label
+    const counts = new Map<string, number>();
+    
+    fullDetailHeaders.forEach((h) => {
+      const label = (h || "").trim();
+      if (!label || label.startsWith('Column_')) return;
+      counts.set(label, (counts.get(label) || 0) + 1);
+    });
+
+    const seenLabels = new Set<string>();
+
+    return headerOptions.filter(opt => {
+      // Get base label (remove index suffix if added for Admins)
+      const baseLabel = opt.label.split(' (')[0]; 
+      const count = counts.get(baseLabel) || 0;
+      
+      // Rule 1: Must be a triplet (>= 3 occurrences)
+      if (count < 3) return false;
+      
+      // Rule 2: Only 1 representative per label
+      if (seenLabels.has(baseLabel)) return false;
+      
+      seenLabels.add(baseLabel);
+      return true;
+    });
+  }, [headerOptions, isReviewMode, fullDetailHeaders]);
 
   const headerRowOptions = useMemo(() => {
     const limit = Math.min(6, allRows.length);
@@ -270,6 +305,7 @@ export const useSheetParser = ({
     applyHeaderRow,
     applyMapping,
     headerOptions,
+    searchHeaderOptions,
     headerRowOptions,
     effectiveSearchColumns
   };

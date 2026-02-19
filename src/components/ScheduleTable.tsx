@@ -1,5 +1,5 @@
 
-import React, { useMemo } from 'react';
+import React, { useMemo, useRef, useEffect } from 'react';
 import { RowNormalized } from '../types';
 
 interface ScheduleTableProps {
@@ -34,6 +34,17 @@ export const ScheduleTable: React.FC<ScheduleTableProps> = ({
   allRows = [],
   headerRowIndex = 0
 }) => {
+  const headerCheckboxRef = useRef<HTMLInputElement>(null);
+
+  // Handle indeterminate state for header checkbox
+  useEffect(() => {
+    if (headerCheckboxRef.current) {
+      const isAllSelected = selectedIds.size === rows.length && rows.length > 0;
+      const isNoneSelected = selectedIds.size === 0;
+      headerCheckboxRef.current.indeterminate = !isAllSelected && !isNoneSelected;
+    }
+  }, [selectedIds, rows]);
+
   // Parse columns config string into array
   const configCols = useMemo(() => {
     if (!columnsConfig) return [];
@@ -55,10 +66,8 @@ export const ScheduleTable: React.FC<ScheduleTableProps> = ({
   if (displayRows.length === 0) {
     return (
       <div className="py-20 text-center">
-        <div className="w-16 h-16 bg-slate-100 rounded-full flex items-center justify-center mx-auto mb-4 text-slate-400">
-          <svg className="w-8 h-8" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9.172 9.172a4 4 0 015.656 0M9 10h.01M15 10h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-          </svg>
+        <div className="w-16 h-16 bg-slate-100 rounded-full flex items-center justify-center mx-auto mb-4 text-slate-400 font-bold">
+          ?
         </div>
         <p className="text-slate-500 font-medium italic">Không có dữ liệu khớp với bộ lọc</p>
       </div>
@@ -73,14 +82,17 @@ export const ScheduleTable: React.FC<ScheduleTableProps> = ({
       <table className="w-full text-left border-collapse relative">
         <thead className="sticky top-0 z-20 bg-white shadow-sm">
           <tr className="border-b border-slate-200">
-            <th className="pl-8 py-4 w-12 bg-slate-50 sticky top-0">
-              <input
-                type="checkbox"
-                className="w-4 h-4 rounded border-slate-400 text-[#F27024] focus:ring-[#F27024] cursor-pointer disabled:bg-slate-100 disabled:border-slate-300 transition-all"
-                checked={selectedIds.size === displayRows.length && displayRows.length > 0}
-                onChange={onToggleAll}
-                disabled={false}
-              />
+            <th className="pl-8 py-4 w-12 bg-slate-50 sticky top-0 border-b border-slate-200">
+              <div className="flex items-center justify-center w-8 h-8">
+                <input
+                  ref={headerCheckboxRef}
+                  type="checkbox"
+                  className="w-5 h-5 rounded-lg border-slate-300 text-[#F27024] focus:ring-[#F27024] cursor-pointer disabled:bg-slate-100 disabled:border-slate-300 transition-all shadow-sm"
+                  checked={selectedIds.size === displayRows.length && displayRows.length > 0}
+                  onChange={onToggleAll}
+                  disabled={false}
+                />
+              </div>
             </th>
 
             {!isPreview ? (
@@ -111,9 +123,15 @@ export const ScheduleTable: React.FC<ScheduleTableProps> = ({
           {displayRows.map((row) => (
             <tr
               key={row.id}
-              className={`hover:bg-orange-50/30 transition-all group ${selectedIds.has(row.id) ? 'bg-orange-50/50' : ''}`}
+              className={`hover:bg-orange-50/40 transition-all group relative border-l-4 ${
+                selectedIds.has(row.id) 
+                  ? 'bg-orange-100/40 border-l-[#F27024] shadow-[inset_0_1px_0_0_rgba(242,112,36,0.1),inset_0_-1px_0_0_rgba(242,112,36,0.1)]' 
+                  : 'border-l-transparent'
+              }`}
             >
-              <td className="pl-8 py-4">
+              <td className="pl-8 py-4 relative">
+                {/* Selection Accent - Full Cell Height Orange Bar instead of just absolute div if preferred, 
+                    but the border-l-4 on TR is even more robust. */}
                 <label className="flex items-center justify-center w-8 h-8 cursor-pointer pointer-events-auto relative z-10 hover:bg-orange-100/50 rounded-xl transition-all">
                   <input
                     type="checkbox"
@@ -159,12 +177,7 @@ export const ScheduleTable: React.FC<ScheduleTableProps> = ({
                   </td>
                   <td className="px-4 py-4 text-center">
                     <div className="flex items-center justify-center gap-2">
-                      <div className="w-8 h-8 bg-slate-100 rounded-xl flex items-center justify-center flex-none group-hover:bg-white group-hover:shadow-sm transition-all">
-                        <svg className="w-4 h-4 text-slate-400 group-hover:text-[#F27024] transition-colors" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M17.657 16.657L13.414 20.9a1.998 1.998 0 01-2.827 0l-4.244-4.243a8 8 0 1111.314 0z" />
-                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M15 11a3 3 0 11-6 0 3 3 0 016 0z" />
-                        </svg>
-                      </div>
+                      
                       <span className="text-sm font-medium text-slate-500">{row.locationRaw || row.location}</span>
                     </div>
                   </td>
@@ -205,12 +218,7 @@ export const ScheduleTable: React.FC<ScheduleTableProps> = ({
                   </td>
                   <td className="px-4 py-4 text-center">
                     <div className="flex items-center justify-center gap-2">
-                      <div className="w-8 h-8 bg-slate-100 rounded-xl flex items-center justify-center flex-none group-hover:bg-white group-hover:shadow-sm transition-all">
-                        <svg className="w-4 h-4 text-slate-400 group-hover:text-[#F27024] transition-colors" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M17.657 16.657L13.414 20.9a1.998 1.998 0 01-2.827 0l-4.244-4.243a8 8 0 1111.314 0z" />
-                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M15 11a3 3 0 11-6 0 3 3 0 016 0z" />
-                        </svg>
-                      </div>
+                      
                       <span className="text-sm font-medium text-slate-500">{row.locationRaw || row.location}</span>
                     </div>
                   </td>

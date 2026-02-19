@@ -38,26 +38,14 @@ const ConfirmModal: React.FC<ConfirmModalProps> = ({
     return (
         <div className="fixed inset-0 z-[999] flex items-center justify-center p-4 bg-slate-900/40 backdrop-blur-sm animate-in fade-in duration-200">
             <div 
-                className="bg-white rounded-3xl shadow-2xl w-full max-w-sm overflow-hidden animate-in zoom-in-95 slide-in-from-bottom-4 duration-300"
+                className="bg-white rounded-3xl shadow-2xl w-full max-w-sm overflow-hidden animate-in zoom-in-95 slide-in-from-bottom-4 duration-300 ease-out"
                 onClick={(e) => e.stopPropagation()}
             >
                 <div className="p-8 pb-6 text-center">
                     <div className={`w-16 h-16 ${iconColors[variant]} rounded-2xl flex items-center justify-center mx-auto mb-6 shadow-sm`}>
-                        {variant === 'danger' && (
-                            <svg className="w-8 h-8" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
-                            </svg>
-                        )}
-                        {variant === 'warning' && (
-                            <svg className="w-8 h-8" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
-                            </svg>
-                        )}
-                        {variant === 'info' && (
-                            <svg className="w-8 h-8" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-                            </svg>
-                        )}
+                        {variant === 'danger' && <span className="text-2xl font-bold">!</span>}
+                        {variant === 'warning' && <span className="text-2xl font-bold">!</span>}
+                        {variant === 'info' && <span className="text-2xl font-bold">i</span>}
                     </div>
                     <h3 className="text-xl font-bold text-slate-800 mb-2">{title}</h3>
                     <p className="text-sm font-medium text-slate-500 leading-relaxed">

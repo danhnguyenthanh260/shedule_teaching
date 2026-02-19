@@ -23,7 +23,7 @@ import { configService, SemesterConfig } from '../../../services/configService';
 export const LecturerDashboard: React.FC = () => {
   const { user: firebaseUser, accessToken } = useFirebase();
   const [isHistoryOpen, setIsHistoryOpen] = useState(false);
-  const [refreshHistory] = useState(0);
+  const [refreshHistory, setRefreshHistory] = useState(0);
 
   // Semesters & Local state
   const [semesters, setSemesters] = useState<Record<string, SemesterConfig>>({});
@@ -69,6 +69,7 @@ export const LecturerDashboard: React.FC = () => {
     applyHeaderRow,
     applyMapping,
     headerOptions,
+    searchHeaderOptions,
     headerRowOptions,
     effectiveSearchColumns
   } = useSheetParser({
@@ -115,7 +116,7 @@ export const LecturerDashboard: React.FC = () => {
       }
     };
     fetchConfigs();
-  }, [selectedSemesterId]);
+  }, []); // 👈 Fixed: Only fetch once on mount
 
   // Confirmation State
   const [isConfirmingClear, setIsConfirmingClear] = useState(false);
@@ -181,7 +182,7 @@ export const LecturerDashboard: React.FC = () => {
       setIsPreviewMode(true);
     }
 
-    showToast(`✓ Đã tải ${data.rawRows.length} dòng dữ liệu (${isActuallyReview ? 'Review Mode' : 'Normal'})`);
+    showToast(`Đã tải ${data.rawRows.length} dòng dữ liệu (${isActuallyReview ? 'Review Mode' : 'Normal'})`);
   }, [semesters, selectedSemesterId, setSheetMeta, setSheetType, applyHeaderRow, showToast]);
 
   // Filtering Logic
@@ -268,34 +269,38 @@ export const LecturerDashboard: React.FC = () => {
         searchValues = row.rawRow || [];
       } else {
         searchValues = indicesToUse.map(idx => {
-           // 🔒 Shifted Isolation Logic: 
-           // If it's a review event and the search column is in the Review Area (J+):
-           if (row.blockStart !== undefined && row.reviewAreaStart !== undefined && idx >= row.reviewAreaStart) {
-              // 1. Calculate offset relative to the FIRST block start
-              const relativeOffset = idx - row.reviewAreaStart;
-              // 2. Project this offset onto the CURRENT event's block
-              const targetIdx = row.blockStart + relativeOffset;
-              
-              // 3. Extract if within valid range
-              if (targetIdx <= (row.blockEnd || 999)) {
-                return (row.rawRow?.[targetIdx] || "").toString();
-              }
-              return "";
-           }
-           
-           // Otherwise (Global or Standard mode), search exactly what was selected
-           return (row.rawRow?.[idx] || "").toString();
+          // 🔒 Shifted Isolation Logic: 
+          // If it's a review event and the search column is in the Review Area (J+):
+          if (row.blockStart !== undefined && row.reviewAreaStart !== undefined && idx >= row.reviewAreaStart) {
+            // 1. Calculate offset relative to the FIRST block start
+            const relativeOffset = idx - row.reviewAreaStart;
+            // 2. Project this offset onto the CURRENT event's block
+            const targetIdx = row.blockStart + relativeOffset;
+            
+            // 3. Extract if within valid range
+            if (targetIdx <= (row.blockEnd || 999)) {
+              return (row.rawRow?.[targetIdx] || "").toString();
+            }
+            return "";
+          }
+          
+          // Otherwise (Global or Standard mode), search exactly what was selected
+          return (row.rawRow?.[idx] || "").toString();
         });
       }
       
-      const searchSpace = [
-        ...searchValues,
-        row.person,
-        row.groupName,
-        row.location,
-        row.date,
-        row.task
-      ].map(v => khongDau(String(v || ""))).join(' ');
+      const hasSpecificFilter = searchColumnIndices && searchColumnIndices.length > 0;
+      
+      const searchSpace = hasSpecificFilter 
+        ? searchValues.map(v => khongDau(String(v || ""))).join(' ')
+        : [
+            ...searchValues,
+            row.person,
+            row.groupName,
+            row.location,
+            row.date,
+            row.task
+          ].map(v => khongDau(String(v || ""))).join(' ');
 
       // Use .every() to ensure all word tokens are present in the search space
       return filters.every(f => searchSpace.includes(f));
@@ -400,6 +405,7 @@ export const LecturerDashboard: React.FC = () => {
   }, [rows]);
 
   const handleSync = async () => {
+    setSyncError(null);
     let rowsToSync = filteredRows.filter(r => selectedIds.has(r.id));
     
     // 🚨 QUAN TRỌNG: Nếu đang ở preview mode, các dòng trong filteredRows (previewRows) 
@@ -429,13 +435,15 @@ export const LecturerDashboard: React.FC = () => {
       const result = await syncToCalendar(rowsToSync);
       if (result) {
         if (firebaseUser && sheetMeta) {
-          saveSyncLog({
+          await saveSyncLog({
             userId: firebaseUser.uid,
             sheetId: sheetMeta.sheetId,
             tabName: sheetMeta.tab,
             totalRows: rowsToSync.length,
             syncResult: result
           });
+          setRefreshHistory(prev => prev + 1); // 🔄 Force history modal to refresh
+          showToast(`Đã đồng bộ ${rowsToSync.length} mục lên Calendar!`);
         }
       }
     } catch (err: any) {
@@ -452,13 +460,20 @@ export const LecturerDashboard: React.FC = () => {
         {/* Step 1: Import */}
         <section className="lg:w-[42%] bg-white p-4 rounded-3xl border border-slate-100 flex flex-col relative z-[50] border-b-4 border-b-slate-100/50">
           <h2 className="text-[10px] font-bold text-[#F27024] mb-1.5 flex items-center gap-2 uppercase tracking-[0.2em] flex-none">
-            <span className="w-4 h-4 bg-[#F27024] text-white rounded-md flex items-center justify-center text-[10px] shadow-sm font-bold">1</span>
             Dữ liệu
           </h2>
           <div className="flex-1 overflow-visible p-0.5">
             <ExcelImport
               accessToken={accessToken}
               onDataLoaded={handleDataLoaded}
+              onLoadingStart={() => {
+                // 🚀 TRUYỆT TIÊU "GHOST DATA" NGAY LẬP TỨC
+                setRows([]);
+                setAllRows([]);
+                setSelectedIds(new Set());
+                setSyncResult(null);
+                setSyncError(null);
+              }}
               setLoading={() => {}} // Handle locally if needed
               setError={setParserError}
               sheetUrl={sheetUrl}
@@ -481,7 +496,6 @@ export const LecturerDashboard: React.FC = () => {
         {allRows.length > 0 && isAdmin(firebaseUser?.email) ? (
           <section className="lg:w-[58%] bg-white p-4 rounded-3xl border border-slate-100 flex flex-col relative z-[50] border-b-4 border-b-slate-100/50">
             <h2 className="text-[10px] font-bold text-slate-700 mb-2 flex items-center gap-2 uppercase tracking-[0.2em] flex-none">
-              <span className="w-4 h-4 bg-slate-700 text-white rounded-md flex items-center justify-center text-[10px] shadow-sm font-bold">2</span>
               Cấu hình (Quyền Admin)
             </h2>
             <div className="flex-1 overflow-visible p-0.5">
@@ -513,11 +527,11 @@ export const LecturerDashboard: React.FC = () => {
                           columns: columnsConfig,
                           mapping: columnMap // 🏛️ Save this as global mapping for all users
                         });
-                        showToast('✓ Đã lưu cấu hình ánh xạ mặc định cho học kỳ');
+                        showToast('Đã lưu cấu hình ánh xạ mặc định cho học kỳ');
                       }
                     }
                   } catch (err: any) {
-                    showToast('❌ Lỗi khi lưu cấu hình');
+                    showToast('Lỗi khi lưu cấu hình');
                   }
                 }}
                 isLoading={loading}
@@ -525,33 +539,85 @@ export const LecturerDashboard: React.FC = () => {
             </div>
           </section>
         ) : allRows.length > 0 ? (
-          /* Lecturers don't see Step 2, they see a clean welcome/info banner */
-          <div className="lg:w-[58%] bg-[#F27024]/5 border border-[#F27024]/10 rounded-3xl flex flex-col items-center justify-center p-8 text-center gap-4">
-            <div className="w-16 h-16 bg-white rounded-2xl shadow-xl shadow-orange-100 flex items-center justify-center text-[#F27024] text-3xl">
-              <svg className="w-8 h-8" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
-              </svg>
+          /* Lecturers see a comprehensive, categorized User Manual */
+          <div className="lg:w-[58%] bg-white border border-slate-100 rounded-3xl flex flex-col p-5 gap-3 shadow-sm border-b-4 border-b-slate-100/50">
+            <div className="flex items-center justify-between mb-1">
+              <h2 className="text-[10px] font-bold text-slate-700 flex items-center gap-2 uppercase tracking-[0.2em]">
+                Cẩm nang sử dụng
+              </h2>
+              <span className="px-2 py-0.5 bg-orange-100 text-[#F27024] text-[8px] font-bold rounded-full uppercase tracking-tighter">Lecturer Edition</span>
             </div>
-            <div>
-              <h3 className="text-sm font-bold text-slate-800 mb-1 uppercase tracking-wider">Chọn học kỳ & Bắt đầu</h3>
-              <p className="text-[10px] text-slate-500 font-bold uppercase tracking-widest leading-relaxed max-w-[300px]">
-                Mọi thứ đã được Admin thiết lập sẵn. Vui lòng nhập tên của bạn ở Bước 3 để lọc lịch giảng dạy.
-              </p>
+            
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 flex-1 overflow-auto pr-1 scrollbar-thin scrollbar-thumb-slate-200">
+              {/* Category 1: Core Flow */}
+              <div className="bg-slate-50/50 rounded-2xl p-3 border border-slate-100 hover:border-orange-200 transition-colors">
+                <div className="flex items-center gap-2 mb-2">
+                  <span className="w-5 h-5 bg-[#F27024] text-white text-[10px] font-bold rounded-lg flex items-center justify-center shadow-sm">1</span>
+                  <h4 className="text-[11px] font-bold text-slate-800 uppercase tracking-tight">Đồng bộ lịch</h4>
+                </div>
+                <ul className="space-y-1.5 ml-1">
+                  <li className="flex gap-2 text-[9px] text-slate-500 font-medium">
+                    <span className="text-orange-400">•</span> Chọn học kỳ & Nhập tên bạn vào ô tìm kiếm.
+                  </li>
+                  <li className="flex gap-2 text-[9px] text-slate-500 font-medium">
+                    <span className="text-orange-400">•</span> Tích chọn các dòng cần đồng bộ lên Calendar.
+                  </li>
+                </ul>
+              </div>
+
+              {/* Category 2: Management */}
+              <div className="bg-slate-50/50 rounded-2xl p-3 border border-slate-100 hover:border-orange-200 transition-colors">
+                <div className="flex items-center gap-2 mb-2">
+                  <span className="w-5 h-5 bg-blue-500 text-white text-[10px] font-bold rounded-lg flex items-center justify-center shadow-sm">2</span>
+                  <h4 className="text-[11px] font-bold text-slate-800 uppercase tracking-tight">Quản lý hiệu quả</h4>
+                </div>
+                <ul className="space-y-1.5 ml-1">
+                  <li className="flex gap-2 text-[9px] text-slate-500 font-medium">
+                    <span className="text-blue-400">•</span> Click "Lịch sử" (góc trên) để xem các lần import.
+                  </li>
+                  <li className="flex gap-2 text-[9px] text-slate-500 font-medium">
+                    <span className="text-blue-400">•</span> Dùng "Tải lại" nếu dữ liệu Excel vừa thay đổi.
+                  </li>
+                </ul>
+              </div>
+
+              {/* Category 3: Cleanup */}
+              <div className="bg-slate-50/50 rounded-2xl p-3 border border-slate-100 hover:border-orange-200 transition-colors">
+                <div className="flex items-center gap-2 mb-2">
+                  <span className="w-5 h-5 bg-rose-500 text-white text-[10px] font-bold rounded-lg flex items-center justify-center shadow-sm">3</span>
+                  <h4 className="text-[11px] font-bold text-slate-800 uppercase tracking-tight">Dọn dẹp lịch cũ</h4>
+                </div>
+                <p className="text-[9px] text-slate-500 font-medium leading-relaxed">
+                  Dùng nút <span className="text-rose-600 font-bold">"Xóa lịch cũ"</span> ở bảng dưới để xóa sạch các sự kiện app đã tạo, giúp Calendar gọn gàng trước khi sync mới.
+                </p>
+              </div>
+
+              {/* Category 4: Optimization */}
+              <div className="bg-slate-50/50 rounded-2xl p-3 border border-slate-100 hover:border-orange-200 transition-colors">
+                <div className="flex items-center gap-2 mb-2">
+                  <span className="w-5 h-5 bg-emerald-500 text-white text-[10px] font-bold rounded-lg flex items-center justify-center shadow-sm">4</span>
+                  <h4 className="text-[11px] font-bold text-slate-800 uppercase tracking-tight">Lọc nâng cao</h4>
+                </div>
+                <p className="text-[9px] text-slate-500 font-medium leading-relaxed">
+                  Sử dụng biểu tượng <span className="text-slate-800 font-bold">🔍 (biểu tượng phễu)</span> bên cạnh ô tìm kiếm để lọc dữ liệu theo Phòng, Nhiệm vụ hoặc Ngày.
+                </p>
+              </div>
             </div>
           </div>
         ) : (
-          <div className="lg:col-span-7 bg-slate-100/50 border border-dashed border-slate-200 rounded-2xl flex items-center justify-center p-4 grayscale opacity-60">
-            <p className="text-[9px] font-bold text-slate-400 uppercase tracking-widest text-center">Hoàn thành bước 1 để bắt đầu</p>
+          <div className="lg:w-[58%] bg-slate-50/30 border border-dashed border-slate-200 rounded-3xl flex flex-col items-center justify-center p-6 gap-3 opacity-60">
+            <div className="w-10 h-10 rounded-full border-2 border-slate-200 flex items-center justify-center text-slate-300 font-bold">1</div>
+            <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest text-center">Hoàn thành bước 1 (Chọn học kỳ) để bắt đầu</p>
           </div>
         )}
       </div>
 
       {/* Step 3: Preview & Sync (Approx 3/4 of screen) */}
       {(rows.length > 0 || (allRows.length > 0 && isPreviewMode)) && (
-        <section className="flex-1 min-h-0 bg-white p-4 rounded-3xl border border-slate-100 flex flex-col relative z-[60] overflow-visible">
-          <div className="flex-none flex items-center justify-between gap-3 mb-3 border-b border-slate-100 pb-3">
-            <div className="flex items-center gap-2">
-              <div className="w-8 h-8 bg-orange-600 text-white rounded-xl flex items-center justify-center text-xs shadow-lg shadow-orange-100 font-bold">3</div>
+        <section className="flex-1 min-h-0 bg-white p-4 rounded-3xl border border-slate-100 flex flex-col relative z-[60] overflow-visible animate-in fade-in slide-in-from-bottom-4 duration-500 ease-out">
+          <div className="flex-none flex items-center justify-between gap-4 mb-3 border-b border-slate-100 pb-3 h-12">
+            <div className="flex items-center gap-2 shrink-0">
+              
               <div>
                 <h2 className="text-base font-bold text-slate-900 tracking-tight leading-tight">Kiểm tra & Đồng bộ</h2>
                 <p className="text-[10px] text-slate-400 font-bold uppercase tracking-[0.1em]">
@@ -560,42 +626,42 @@ export const LecturerDashboard: React.FC = () => {
               </div>
             </div>
 
-              <div className="flex items-center gap-3">
+              <div className="flex-1 flex items-center justify-end gap-3 min-w-0 pr-2">
                 {mappingLoading && (
-                  <div className="flex items-center gap-2 px-3 py-1.5 bg-orange-50 text-orange-600 rounded-lg text-[10px] font-bold animate-pulse border border-orange-100 italic">
-                    <svg className="w-3 h-3 animate-spin" viewBox="0 0 24 24" fill="none" stroke="currentColor">
-                      <circle className="opacity-25" cx="12" cy="12" r="10" strokeWidth="4"></circle>
-                      <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
-                    </svg>
-                    Đang tải cấu hình học kỳ...
+                  <div className="hidden lg:flex items-center gap-2 px-3 py-1.5 bg-orange-50 text-orange-600 rounded-lg text-[10px] font-bold animate-pulse border border-orange-100 italic shrink-0">
+                    Đang tải...
                   </div>
                 )}
                 
-                <div className="relative group flex items-center gap-2">
-                <div className="relative">
-                  <div className="absolute left-3 top-2 text-slate-400 group-focus-within:text-[#F27024] transition-colors">
-                    <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+                <div className="flex items-center gap-2 w-full max-w-sm min-w-0">
+                  <div className="relative flex-1 min-w-0">
+                  <div className="absolute left-3 top-2.5 text-slate-400 group-focus-within:text-[#F27024] transition-colors pointer-events-none">
+                    <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                      <circle cx="11" cy="11" r="8"></circle>
+                      <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
                     </svg>
                   </div>
-                  <input
-                    type="text"
-                    placeholder="Lọc tên giảng viên..."
-                    className="pl-9 pr-8 py-2 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:ring-2 focus:ring-orange-500 outline-none w-64 transition-all focus:bg-white font-bold text-slate-800 placeholder:text-slate-400 pointer-events-auto cursor-text relative z-[100]"
-                    value={personFilter}
-                    onChange={(e) => {
-                      setPersonFilter(e.target.value);
-                      updateSelections(rows, e.target.value);
-                    }}
+                    <input
+                      type="text"
+                      placeholder="Lọc tên giảng viên..."
+                      className="w-full pl-9 pr-4 py-2 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:ring-2 focus:ring-orange-500 outline-none transition-all focus:bg-white font-bold text-slate-800 placeholder:text-slate-400 pointer-events-auto cursor-text"
+                      value={personFilter}
+                      onChange={(e) => {
+                        setPersonFilter(e.target.value);
+                        updateSelections(rows, e.target.value);
+                      }}
+                    />
+                  </div>
+
+                  <SearchColumnSelector
+                    headers={searchHeaderOptions}
+                    selectedIndices={searchColumnIndices}
+                    onSelectionChange={setSearchColumnIndices}
                   />
                 </div>
-
-                <SearchColumnSelector
-                  headers={headerOptions}
-                  selectedIndices={searchColumnIndices}
-                  onSelectionChange={setSearchColumnIndices}
-                />
               </div>
+
+              <div className="flex items-center gap-2 shrink-0">
 
               <button
                 onClick={handleSync}
@@ -606,9 +672,6 @@ export const LecturerDashboard: React.FC = () => {
                   <div className="w-3 h-3 border-2 border-white/30 border-t-white rounded-full animate-spin" />
                 ) : (
                   <>
-                    <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M8 7H5a2 2 0 00-2 2v9a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-3m-1 4l-3 3m0 0l-3-3m3 3V4" />
-                    </svg>
                     Đồng bộ ({selectedIds.size})
                   </>
                 )}
@@ -623,7 +686,7 @@ export const LecturerDashboard: React.FC = () => {
                       setIsConfirmingClear(false);
                       try {
                         const res = await clearAppEvents();
-                        if (res) showToast("✓ Đã xóa sạch lịch cũ thành công!");
+                        if (res) showToast("Đã xóa sạch lịch cũ thành công!");
                       } catch (e) {}
                     }}
                     className="px-3 py-2 bg-rose-500 text-white rounded-lg font-extrabold text-[10px] hover:bg-rose-600 transition-all active:scale-90"
@@ -651,9 +714,6 @@ export const LecturerDashboard: React.FC = () => {
                     <div className="w-3 h-3 border-2 border-red-500/30 border-t-red-500 rounded-full animate-spin" />
                   ) : (
                     <>
-                      <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1-1v3M4 7h16" />
-                      </svg>
                       Xóa lịch cũ
                     </>
                   )}
@@ -695,10 +755,8 @@ export const LecturerDashboard: React.FC = () => {
               </div>
             ) : (
               <div className="h-full flex flex-col items-center justify-center bg-white">
-                <div className="w-20 h-20 bg-orange-50 rounded-full flex items-center justify-center mb-4 text-[#F27024] animate-pulse">
-                  <svg className="w-10 h-10" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.5" d="M9 17v-2m3 2v-4m3 4v-6m2 10H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
-                  </svg>
+                <div className="w-20 h-20 bg-orange-50 rounded-full flex items-center justify-center mb-4 text-[#F27024] font-bold text-xl">
+                  ?
                 </div>
                 <h3 className="text-slate-400 font-bold text-xs uppercase tracking-[0.3em]">Đang đợi học kỳ...</h3>
               </div>

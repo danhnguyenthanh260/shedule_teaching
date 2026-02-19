@@ -5,7 +5,7 @@ import { configService, SemesterConfig } from '../services/configService';
 import { database } from '../config/firebase';
 import { SUPER_ADMIN_EMAIL, isSuperAdmin, isAdmin } from '../config/admin';
 import { ref, set, push, onValue, remove } from 'firebase/database';
-import { readSheet } from '../services/appsScriptService';
+import { readSheet, invalidateAdminCache } from '../services/appsScriptService';
 import ConfirmModal from '../components/ConfirmModal';
 import Layout from '../components/Layout';
 import { MappingTool } from '../components/MappingTool';
@@ -42,6 +42,7 @@ export const AdminPage: React.FC = () => {
         columns: '',
         dateFormat: 'dd/MM/yyyy' as import('../types').DateFormat,
         sheetType: 'council' as 'review' | 'council',
+        tabName: '',
         mapping: {} as ColumnMapping
     });
 
@@ -97,6 +98,7 @@ export const AdminPage: React.FC = () => {
                 columns: newSemester.columns,
                 dateFormat: newSemester.dateFormat,
                 sheetType: newSemester.sheetType,
+                tabName: newSemester.tabName,
                 mapping: newSemester.mapping || {}
             });
 
@@ -109,6 +111,7 @@ export const AdminPage: React.FC = () => {
                 columns: '', 
                 dateFormat: 'dd/MM/yyyy', 
                 sheetType: 'council',
+                tabName: '',
                 mapping: {}
             });
             setSheetHeaders([]);
@@ -156,6 +159,7 @@ export const AdminPage: React.FC = () => {
             columns: semester.columns,
             dateFormat: semester.dateFormat || 'dd/MM/yyyy',
             sheetType: semester.sheetType || 'council',
+            tabName: semester.tabName || '',
             mapping: semester.mapping || {}
         });
         setEditMode(semester.id);
@@ -243,6 +247,7 @@ export const AdminPage: React.FC = () => {
             const whitelistRef = ref(database, 'admin_whitelist');
             const newAdminRef = push(whitelistRef);
             await set(newAdminRef, cleanEmail);
+            await invalidateAdminCache(); // 🔄 Clear 6h cache on server
             setNewAdminEmail('');
             setToastMessage('✅ Đã thêm admin mới');
             setTimeout(() => setToastMessage(null), 5000);
@@ -262,6 +267,7 @@ export const AdminPage: React.FC = () => {
                 try {
                     const adminRef = ref(database, `admin_whitelist/${key}`);
                     await remove(adminRef);
+                    await invalidateAdminCache(); // 🔄 Clear 6h cache on server
                     setToastMessage('✅ Đã xóa admin');
                     setTimeout(() => setToastMessage(null), 5000);
                 } catch (err: any) {
@@ -382,6 +388,18 @@ export const AdminPage: React.FC = () => {
                                         <option value="council">Chế độ chấm hội đồng</option>
                                         <option value="review">Chế độ chấm review</option>
                                     </select>
+                                </div>
+
+                                <div>
+                                    <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-1.5 ml-1">Tên Tab (Sheet Name)</label>
+                                    <input
+                                        type="text"
+                                        placeholder="Ví dụ: Sheet1"
+                                        className="w-full px-4 py-3 bg-slate-50 border border-slate-100 rounded-2xl focus:ring-2 focus:ring-[#F27024] outline-none text-sm font-bold transition-all focus:bg-white"
+                                        value={newSemester.tabName}
+                                        onChange={(e) => setNewSemester({ ...newSemester, tabName: e.target.value })}
+                                        required
+                                    />
                                 </div>
 
                                 <div className="md:col-span-2">
@@ -538,6 +556,9 @@ export const AdminPage: React.FC = () => {
                                             </div>
                                             <div className="flex items-start gap-2 text-[10px] text-slate-500 font-bold uppercase tracking-wider leading-relaxed">
                                                 <span className="text-blue-500">➔</span> Cột: <span className="normal-case text-slate-600 line-clamp-2">{sem.columns}</span>
+                                            </div>
+                                            <div className="flex items-center gap-2 text-[10px] text-slate-500 font-bold uppercase tracking-wider truncate">
+                                                <span className="text-emerald-500">➔</span> Tab: <span className="normal-case text-slate-600 font-bold">{sem.tabName || 'Sheet mặc định'}</span>
                                             </div>
                                             <div className="flex items-center gap-2 text-[10px] text-slate-500 font-bold uppercase tracking-wider truncate">
                                                 <span className="text-emerald-500">➔</span> Sheet ID: <span className="normal-case text-slate-400 italic">...{sem.sheetUrl.slice(-15)}</span>

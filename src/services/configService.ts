@@ -7,6 +7,7 @@ export interface SemesterConfig {
     columns: string;
     dateFormat?: import('../types').DateFormat;
     sheetType?: 'review' | 'council';
+    tabName?: string;
     mapping?: import('../types').ColumnMapping;
 }
 

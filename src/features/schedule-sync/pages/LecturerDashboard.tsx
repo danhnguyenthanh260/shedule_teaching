@@ -654,7 +654,7 @@ export const LecturerDashboard: React.FC = () => {
 
               <div className="flex items-center gap-2 shrink-0">
 
-               <div className="flex flex-col gap-1 items-end">
+                <div className="flex flex-col gap-1 items-end">
                 <button
                   onClick={() => handleSync(false)}
                   disabled={syncing || clearing || selectedIds.size === 0}
@@ -669,13 +669,17 @@ export const LecturerDashboard: React.FC = () => {
                   )}
                 </button>
                 
-                {syncResult && syncResult.skipped > 0 && !syncing && (
+                {/* 🚨 HIỂN THỊ NÚT FORCE SYNC KHI CÓ TRÙNG HOẶC XUNG ĐỘT */}
+                {((syncResult && syncResult.skipped > 0) || (syncError?.toLowerCase().includes('xung đột'))) && !syncing && (
                   <button
                     onClick={() => handleSync(true)}
-                    className="text-[9px] font-bold text-orange-500 hover:text-orange-700 underline flex items-center gap-1 animate-pulse"
-                    title="Bỏ qua kiểm tra trùng lặp và đồng bộ lại"
+                    className="text-[10px] font-bold text-orange-600 hover:text-orange-800 underline flex items-center gap-1 animate-pulse bg-orange-50 px-2 py-1 rounded-lg border border-orange-100 shadow-sm transition-all"
+                    title="Bỏ qua kiểm tra và đồng bộ ngay lập tức"
                   >
-                    Bị trùng? Đồng bộ cưỡng bức ngay
+                    <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M13 10V3L4 14h7v7l9-11h-7z" />
+                    </svg>
+                    Bỏ qua & Đồng bộ ngay
                   </button>
                 )}
               </div>

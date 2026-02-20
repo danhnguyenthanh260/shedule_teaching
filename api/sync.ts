@@ -127,10 +127,20 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     }
 
     // 3. Process Events or Clear Action
-    const { events, calendarName, action, googleAccessToken } = req.body;
+    const { events, calendarName, action, googleAccessToken, force } = req.body;
 
     // Handle CLEAR action specifically
     if (action === 'clearCalendar') {
+      console.log(`🧹 Clearing Firestore slots for user: ${userEmail}`);
+      const slotsToClear = await db.collection("slots")
+        .where("syncedBy", "==", userEmail)
+        .get();
+      
+      const clearBatch = db.batch();
+      slotsToClear.docs.forEach(doc => clearBatch.delete(doc.ref));
+      await clearBatch.commit();
+      console.log(`✅ Cleared ${slotsToClear.size} slots from Firestore`);
+
       return forwardToGAS(res, {
         action: 'clearCalendar',
         calendarName: calendarName || "Schedule Teaching",
@@ -145,73 +155,78 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     const conflicts: any[] = [];
     const eventsToSync: any[] = [];
 
-    for (const event of events) {
-      const { start, end, resources, title } = event;
-      
-      const isoRegex = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}/;
-      if (!start || !end || !isoRegex.test(start) || !isoRegex.test(end)) {
-        return res.status(400).json({ 
-          error: `Invalid date format for event "${title}". Backend requires strict ISO format (yyyy-MM-ddT...).` 
+    // ONLY check for conflicts if NOT forcing
+    if (!force) {
+      for (const event of events) {
+        const { start, end, resources, title } = event;
+        
+        const isoRegex = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}/;
+        if (!start || !end || !isoRegex.test(start) || !isoRegex.test(end)) {
+          return res.status(400).json({ 
+            error: `Invalid date format for event "${title}". Backend requires strict ISO format (yyyy-MM-ddT...).` 
+          });
+        }
+
+        const startTime = new Date(start);
+        const endTime = new Date(end);
+
+        if (isNaN(startTime.getTime()) || isNaN(endTime.getTime())) {
+          return res.status(400).json({ error: `Invalid date values for event "${title}".` });
+        }
+
+        // Check conflict in Firestore
+        let overlapSnapshot;
+        try {
+          overlapSnapshot = await db.collection("slots")
+            .where("startTime", "<", endTime)
+            .where("endTime", ">", startTime)
+            .get();
+        } catch (dbErr: any) {
+          console.error("❌ Firestore Query Error:", dbErr);
+          if (dbErr.message?.includes("index")) {
+            const indexLink = dbErr.message.match(/https:\/\/console\.firebase\.google\.com[^\s]+/)?.[0];
+            return res.status(500).json({
+              error: "Thiếu Index trong Firestore. Vui lòng bấm vào link này để tạo: " + (indexLink || "Kiểm tra Vercel Logs"),
+              detail: "Bạn cần tạo Composite Index cho collection 'slots' (startTime và endTime). " + (indexLink ? `Link: ${indexLink}` : ""),
+              link: indexLink || null
+            });
+          }
+          throw dbErr;
+        }
+
+        let foundConflict = false;
+        for (const doc of overlapSnapshot.docs) {
+          const existing = doc.data();
+          const commonResources = existing.resources.filter((r: string) => resources.includes(r));
+          if (commonResources.length > 0) {
+            conflicts.push({
+              title,
+              conflictWith: existing.title,
+              resources: commonResources,
+              message: `Xung đột tài nguyên: ${commonResources.join(", ")} với sự kiện "${existing.title}"`
+            });
+            foundConflict = true;
+            break;
+          }
+        }
+
+        if (!foundConflict) {
+          eventsToSync.push(event);
+        }
+      }
+
+      if (conflicts.length > 0) {
+        return res.status(409).json({
+          status: "conflict",
+          message: "Phát hiện xung đột lịch trình",
+          conflicts
         });
       }
-
-      const startTime = new Date(start);
-      const endTime = new Date(end);
-
-      if (isNaN(startTime.getTime()) || isNaN(endTime.getTime())) {
-        return res.status(400).json({ error: `Invalid date values for event "${title}".` });
-      }
-
-      // Check conflict in Firestore
-      let overlapSnapshot;
-      try {
-        overlapSnapshot = await db.collection("slots")
-          .where("startTime", "<", endTime)
-          .where("endTime", ">", startTime)
-          .get();
-      } catch (dbErr: any) {
-        console.error("❌ Firestore Query Error:", dbErr);
-        if (dbErr.message?.includes("index")) {
-          const indexLink = dbErr.message.match(/https:\/\/console\.firebase\.google\.com[^\s]+/)?.[0];
-          return res.status(500).json({
-            error: "Thiếu Index trong Firestore. Vui lòng bấm vào link này để tạo: " + (indexLink || "Kiểm tra Vercel Logs"),
-            detail: "Bạn cần tạo Composite Index cho collection 'slots' (startTime và endTime). " + (indexLink ? `Link: ${indexLink}` : ""),
-            link: indexLink || null
-          });
-        }
-        throw dbErr;
-      }
-
-      let foundConflict = false;
-      for (const doc of overlapSnapshot.docs) {
-        const existing = doc.data();
-        const commonResources = existing.resources.filter((r: string) => resources.includes(r));
-        if (commonResources.length > 0) {
-          conflicts.push({
-            title,
-            conflictWith: existing.title,
-            resources: commonResources,
-            message: `Xung đột tài nguyên: ${commonResources.join(", ")} với sự kiện "${existing.title}"`
-          });
-          foundConflict = true;
-          break;
-        }
-      }
-
-      if (!foundConflict) {
-        eventsToSync.push(event);
-      }
+    } else {
+      // If force is true, all events are ready to sync
+      eventsToSync.push(...events);
     }
 
-    if (conflicts.length > 0) {
-      return res.status(409).json({
-        status: "conflict",
-        message: "Phát hiện xung đột lịch trình",
-        conflicts
-      });
-    }
-
-    const { force } = req.body;
     const batch = db.batch();
     const slotLogRefs: any[] = [];
 

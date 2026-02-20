@@ -172,10 +172,11 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       } catch (dbErr: any) {
         console.error("❌ Firestore Query Error:", dbErr);
         if (dbErr.message?.includes("index")) {
+          const indexLink = dbErr.message.match(/https:\/\/console\.firebase\.google\.com[^\s]+/)?.[0];
           return res.status(500).json({
-            error: "Thiếu Index trong Firestore",
-            detail: "Bạn cần tạo Composite Index. Vui lòng xem link trong Vercel Logs.",
-            link: dbErr.message.match(/https:\/\/console\.firebase\.google\.com[^\s]+/)?.[0] || null
+            error: "Thiếu Index trong Firestore. Vui lòng bấm vào link này để tạo: " + (indexLink || "Kiểm tra Vercel Logs"),
+            detail: "Bạn cần tạo Composite Index cho collection 'slots' (startTime và endTime). " + (indexLink ? `Link: ${indexLink}` : ""),
+            link: indexLink || null
           });
         }
         throw dbErr;

@@ -38,18 +38,23 @@ export const useCalendarSync = ({ accessToken }: UseCalendarSyncProps) => {
           let year, month, day;
           if (cleanDate.includes('/')) {
             const parts = cleanDate.split('/');
-            // Heuristic for dd/mm/yyyy or m/d/yyyy
-            if (parts[2]?.length === 4) {
-              // Guess: parts[0]=day, parts[1]=month if day > 12
+            if (parts.length === 3) {
               const p0 = parseInt(parts[0]);
               const p1 = parseInt(parts[1]);
-              if (p0 > 12) { day = p0; month = p1; } 
-              else { day = p0; month = p1; } // Fallback to VN format dd/MM
-              year = parseInt(parts[2]);
-            } else if (parts[0]?.length === 4) {
-              year = parseInt(parts[0]);
-              month = parseInt(parts[1]);
-              day = parseInt(parts[2]);
+              const p2 = parseInt(parts[2]);
+              
+              if (p2 > 100) { // e.g. 1/25/2026 or 25/1/2026
+                year = p2;
+                // Heuristic: If one is > 12, it must be the day
+                if (p0 > 12) { day = p0; month = p1; }
+                else if (p1 > 12) { day = p1; month = p0; }
+                else { 
+                  // Ambiguous: Assume VN format DD/MM if first part is small
+                  day = p0; month = p1; 
+                }
+              } else if (p0 > 100) { // e.g. 2026/01/25
+                year = p0; month = p1; day = p2;
+              }
             }
           } else if (cleanDate.includes('-')) {
             const parts = cleanDate.split('-');

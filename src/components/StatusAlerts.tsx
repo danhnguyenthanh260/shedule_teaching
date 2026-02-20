@@ -38,7 +38,8 @@ export const StatusAlerts: React.FC<StatusAlertsProps> = ({ error, result, onClo
 
   if (!error && !result) return null;
 
-  const isConflict = error?.toLowerCase().includes('xung đột');
+  const errorText = error || '';
+  const isConflict = errorText.toLowerCase().includes('xung đột') || errorText.toLowerCase().includes('conflict');
 
   return (
     <div className="fixed bottom-8 left-1/2 -translate-x-1/2 z-[1000] w-full max-w-2xl px-6 animate-in slide-in-from-bottom-8 duration-500 ease-out">

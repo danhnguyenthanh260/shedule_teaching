@@ -133,6 +133,8 @@ const CalendarService = {
       mode: useRestApi ? 'DECENTRALIZED' : 'CENTRALIZED'
     };
 
+    AppLogger.info('Starting sync for ' + events.length + ' events. Force: ' + force + ', Mode: ' + (useRestApi ? 'DECENTRALIZED' : 'CENTRALIZED'));
+
     try {
       if (useRestApi) {
         // --- DECENTRALIZED SYNC ---
@@ -142,9 +144,13 @@ const CalendarService = {
         
         events.forEach((ev, i) => {
           try {
-            const start = new Date(ev.start);
-            const end = new Date(ev.end);
+            const startStr = ev.start;
+            const endStr = ev.end;
+            const start = new Date(startStr);
+            const end = new Date(endStr);
             
+            AppLogger.info('Processing Event ' + i + ': ' + ev.title, { start: startStr, iso: start.toISOString() });
+
             let existing = null;
             if (ev.signature && !force) {
                const timeMin = new Date(start.getTime() - 24 * 60 * 60 * 1000).toISOString();
@@ -189,6 +195,7 @@ const CalendarService = {
                results.success++;
             }
           } catch (e) {
+            AppLogger.error('Event ' + i + ' failed', e.toString());
             results.failed++;
             results.errors.push({ index: i, title: ev.title, message: e.toString() });
           }
@@ -231,9 +238,23 @@ const CalendarService = {
           }
         });
       }
-    } catch (e) { throw e; }
-    return results;
-  },
+    } catch (e) { 
+      AppLogger.error('createEvents Critical failure', e.toString());
+      throw e; 
+    }
+    
+    // Explicit plain object for return
+    return {
+      total: results.total,
+      success: results.success,
+      updated: results.updated,
+      skipped: results.skipped,
+      failed: results.failed,
+      errors: results.errors,
+      calendarName: results.calendarName,
+      calendarId: results.calendarId,
+      mode: results.mode
+    };  },
 
   clearEvents: function(calendarName, googleAccessToken = null) {
     let deletedCount = 0;

@@ -8,28 +8,44 @@ import fetch from "node-fetch";
 function initializeFirebase() {
   if (!admin.apps.length) {
     try {
-      if (process.env.FIREBASE_SERVICE_ACCOUNT) {
-        const serviceAccount = JSON.parse(process.env.FIREBASE_SERVICE_ACCOUNT);
-        
-        // 🔒 FIX: Handle escaped newlines in private_key for Vercel
-        if (serviceAccount.private_key) {
-          serviceAccount.private_key = serviceAccount.private_key.replace(/\\n/g, '\n');
-        }
-
-        admin.initializeApp({
-          credential: admin.credential.cert(serviceAccount)
-        });
-        console.log("✅ Firebase Admin initialized via Service Account");
-      } else {
+      const saRaw = process.env.FIREBASE_SERVICE_ACCOUNT;
+      if (!saRaw) {
         // Fallback for local dev
-        admin.initializeApp({
-          projectId: process.env.VITE_FIREBASE_PROJECT_ID
-        });
-        console.log("⚠️ Firebase Admin initialized WITHOUT Service Account (using Project ID)");
+        admin.initializeApp({ projectId: process.env.VITE_FIREBASE_PROJECT_ID });
+        console.log("⚠️ Firebase Admin initialized WITHOUT Service Account");
+        return admin.firestore();
       }
+
+      let serviceAccount: any;
+      
+      if (typeof saRaw === 'object') {
+        serviceAccount = saRaw;
+      } else {
+        const cleanedSa = saRaw.trim();
+        // If it looks like [object Object], the user likely misconfigured the Vercel variable
+        if (cleanedSa.startsWith('[object')) {
+           throw new Error("Biến FIREBASE_SERVICE_ACCOUNT bị gán giá trị '[object Object]'. Hãy kiểm tra lại cách bạn dán (paste) JSON vào Vercel.");
+        }
+        
+        try {
+          serviceAccount = JSON.parse(cleanedSa);
+        } catch (parseErr: any) {
+          console.error("DEBUG: FIREBASE_SERVICE_ACCOUNT starts with:", cleanedSa.substring(0, 30));
+          throw new Error(`JSON Parse Error: ${parseErr.message}. Hãy đảm bảo bạn dán ĐÚNG và ĐỦ nội dung file JSON vào Vercel.`);
+        }
+      }
+        
+      if (serviceAccount.private_key) {
+        serviceAccount.private_key = serviceAccount.private_key.replace(/\\n/g, '\n');
+      }
+
+      admin.initializeApp({
+        credential: admin.credential.cert(serviceAccount)
+      });
+      console.log("✅ Firebase Admin initialized successfully");
     } catch (error: any) {
       console.error("❌ Firebase admin initialization error:", error);
-      throw new Error("Failed to initialize Firebase Admin: " + error.message);
+      throw new Error("Lỗi khởi tạo Firebase: " + error.message);
     }
   }
   return admin.firestore();

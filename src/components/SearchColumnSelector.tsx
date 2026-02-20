@@ -41,23 +41,24 @@ export const SearchColumnSelector: React.FC<SearchColumnSelectorProps> = ({
     <div className="relative" ref={containerRef}>
       <button
         onClick={() => setIsOpen(!isOpen)}
-        className={`p-2.5 rounded-xl border transition-all flex items-center gap-2 ${
+        className={`shrink-0 min-w-[42px] px-3 py-2.5 rounded-xl border transition-all flex items-center justify-center gap-2 ${
           selectedIndices.length > 0 
             ? 'bg-[#F27024]/5 border-[#F27024]/20 text-[#F27024]' 
             : 'bg-white border-slate-200 text-slate-400 hover:border-slate-300'
         }`}
         title="Chọn cột để tìm kiếm"
       >
-        <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M3 4a1 1 0 011-1h16a1 1 0 011 1v2.586a1 1 0 01-.293.707l-6.414 6.414a1 1 0 00-.293.707V17l-4 4v-6.586a1 1 0 00-.293-.707L3.293 7.293A1 1 0 013 6.586V4z" />
+        <svg className="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+          <polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3"></polygon>
         </svg>
+
         {selectedIndices.length > 0 && (
           <span className="text-[10px] font-bold">{selectedIndices.length}</span>
         )}
       </button>
 
       {isOpen && (
-        <div className="absolute right-0 mt-2 w-64 bg-white border border-slate-100 rounded-2xl shadow-2xl p-4 z-[200] animate-in fade-in zoom-in duration-200 origin-top-right">
+        <div className="absolute right-0 mt-3 w-72 bg-white border border-slate-100 rounded-2xl shadow-2xl p-4 z-[999] animate-in fade-in zoom-in slide-in-from-top-2 duration-300 origin-top-right ease-out">
           <div className="flex items-center justify-between mb-3 border-b border-slate-50 pb-2">
             <h3 className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Cột tìm kiếm</h3>
             <button 
@@ -76,9 +77,11 @@ export const SearchColumnSelector: React.FC<SearchColumnSelectorProps> = ({
               onChange={(e) => setSearch(e.target.value)}
               className="w-full pl-8 pr-3 py-1.5 bg-slate-50 border border-slate-100 rounded-lg text-[10px] font-bold outline-none focus:ring-1 focus:ring-[#F27024] transition-all"
             />
-            <svg className="w-3 h-3 absolute left-2.5 top-2.5 text-slate-300" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+            <svg className="absolute left-2.5 top-2.5 w-3 h-3 text-slate-300" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
+              <circle cx="11" cy="11" r="8"></circle>
+              <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
             </svg>
+
           </div>
 
           <div className="max-h-48 overflow-y-auto custom-scrollbar space-y-1">
@@ -94,11 +97,10 @@ export const SearchColumnSelector: React.FC<SearchColumnSelectorProps> = ({
                   <div className={`w-3.5 h-3.5 rounded border transition-all flex items-center justify-center ${
                     isSelected ? 'bg-[#F27024] border-[#F27024]' : 'bg-white border-slate-300'
                   }`}>
-                    {isSelected && (
-                      <svg className="w-2.5 h-2.5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="4" d="M5 13l4 4L19 7" />
+                      <svg className="w-2.5 h-2.5 text-white" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="4" strokeLinecap="round" strokeLinejoin="round">
+                        <polyline points="20 6 9 17 4 12"></polyline>
                       </svg>
-                    )}
+
                   </div>
                   <span className={`text-[11px] font-bold truncate ${
                     isSelected ? 'text-[#F27024]' : 'text-slate-600'

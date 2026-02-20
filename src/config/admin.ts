@@ -10,7 +10,15 @@ export const SUPER_ADMIN_EMAIL = 'ngohoangtruongdat2@gmail.com';
  * Static fallback admins (initial set)
  */
 let dynamicAdminEmails: string[] = [];
-// This is now managed by FirebaseContext to ensure React re-renders
+
+/**
+ * Updates the dynamic admin whitelist from external sources (e.g. Firebase)
+ * @param emails List of admin emails
+ */
+export const setDynamicAdmins = (emails: string[]) => {
+    dynamicAdminEmails = emails.map(e => e.trim().toLowerCase());
+    console.log('🛡️ Admin Config Updated:', dynamicAdminEmails.length, 'admins');
+};
 
 /**
  * Checks if a given email address belongs to an administrator

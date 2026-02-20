@@ -52,6 +52,7 @@ export interface RowNormalized {
 }
 
 export interface SyncResult {
+  type: 'sync' | 'clear';
   created: number;
   updated: number;
   failed: number;

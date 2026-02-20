@@ -5,6 +5,7 @@ import { readSheet } from '../services/appsScriptService';
 import { configService, SemesterConfig } from '../services/configService';
 import { detectSheetType, SheetTypeInfo } from '../utils/sheetTypeDetection';
 import { DateFormat } from '../types';
+import { sheetCacheService } from '../services/sheetCache';
 
 interface ExcelImportProps {
   onDataLoaded: (data: {
@@ -15,6 +16,7 @@ interface ExcelImportProps {
     isDataMau: boolean;
     sheetType?: SheetTypeInfo;
   }) => void;
+  onLoadingStart?: () => void;
   setLoading: (loading: boolean) => void;
   setError: (error: string | null) => void;
   sheetUrl: string;
@@ -35,6 +37,7 @@ interface ExcelImportProps {
 
 export const ExcelImport: React.FC<ExcelImportProps> = ({
   onDataLoaded,
+  onLoadingStart,
   setLoading,
   setError,
   sheetUrl,
@@ -55,9 +58,18 @@ export const ExcelImport: React.FC<ExcelImportProps> = ({
   const [isProcessing, setIsProcessing] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  const processRawData = (rows: string[][], source: string) => {
+  const sortedSemesters = React.useMemo(() => {
+    return (Object.values(semesters) as SemesterConfig[]).sort((a, b) => {
+      const timeA = a.createdAt || 0;
+      const timeB = b.createdAt || 0;
+      if (timeA !== timeB) return timeB - timeA;
+      return b.semester.localeCompare(a.semester);
+    });
+  }, [semesters]);
+
+  const processRawData = (rows: string[][], source: string, sourceTab?: string) => {
     if (!rows || rows.length === 0) {
-      throw new Error('❌ Dữ liệu trống');
+      throw new Error('Dữ liệu trống');
     }
 
     // ✅ Detect sheet type based on tab name or sheet URL
@@ -105,40 +117,63 @@ export const ExcelImport: React.FC<ExcelImportProps> = ({
     onDataLoaded({
       rawRows: rows, 
       sheetId: actualSheetId,
-      tabName: tabName || 'Sheet1',
+      tabName: sourceTab || tabName || 'Sheet1',
       headerRowIndex: detectedHeaderRowIndex,
       isDataMau: finalSheetType.type === 'review',
       sheetType: finalSheetType
     });
   };
 
-  const handleShowData = async () => {
+  const handleShowData = async (forceReload = false) => {
     if (!sheetUrl) return;
 
+    // Check Cache first if not forcing reload
+    const sheetIdMatch = sheetUrl.match(/\/d\/([a-zA-Z0-9-_]+)/);
+    const actualSheetId = sheetIdMatch ? sheetIdMatch[1] : 'unknown';
+    
+    if (!forceReload) {
+      const cached = sheetCacheService.get(actualSheetId, tabName || 'Sheet1');
+      if (cached) {
+        console.log('🚀 [ExcelImport] Loading from Cache:', actualSheetId, tabName);
+        processRawData(cached, 'Cache', tabName);
+        return;
+      }
+    }
+
+    onLoadingStart?.();
     setIsProcessing(true);
     setLoading(true);
     setError(null);
 
     try {
-      const rows = await readSheet(sheetUrl, startRow);
-      processRawData(rows, 'GoogleSheet');
+      const { data: rows, tabName: actualTab } = await readSheet(sheetUrl, startRow, tabName);
+      
+      // ✅ Update the tabName state in parent to reflect reality
+      if (actualTab && actualTab !== tabName) {
+        setTabName(actualTab);
+      }
+
+      processRawData(rows, 'GoogleSheet', actualTab);
+      
+      // Save to cache
+      sheetCacheService.set(actualSheetId, actualTab || 'Sheet1', rows);
       setError(null);
     } catch (err: any) {
       console.error('Fetch data error:', err);
-      setError(err.message || '❌ Không thể lấy dữ liệu từ Sheets');
+      setError(err.message || 'Không thể lấy dữ liệu từ Sheets');
     } finally {
       setIsProcessing(false);
       setLoading(false);
     }
   };
 
-  // ✅ AUTO-SELECT first semester if none selected
+  // ✅ AUTO-SELECT newest semester if none selected
   useEffect(() => {
-    if (!selectedSemesterId && Object.keys(semesters).length > 0) {
-      const firstId = Object.keys(semesters)[0];
+    if (!selectedSemesterId && sortedSemesters.length > 0) {
+      const firstId = sortedSemesters[0].id;
       handleSemesterChange(firstId, semesters);
     }
-  }, [semesters, selectedSemesterId]);
+  }, [sortedSemesters, selectedSemesterId]);
 
   // ✅ AUTO-LOAD when semester changes
   useEffect(() => {
@@ -156,21 +191,24 @@ export const ExcelImport: React.FC<ExcelImportProps> = ({
 
       // ✅ TASK 3: Validate config before applying
       if (!config.sheetUrl) {
-        setError('❌ Cấu hình học kỳ thiếu URL Sheet');
+        setError('Cấu hình học kỳ thiếu URL Sheet');
         return;
       }
       if (!config.startRow) {
-        setError('❌ Cấu hình học kỳ thiếu dòng bắt đầu');
+        setError('Cấu hình học kỳ thiếu dòng bắt đầu');
         return;
       }
       if (!config.columns) {
-        setError('❌ Cấu hình học kỳ thiếu danh sách cột');
+        setError('Cấu hình học kỳ thiếu danh sách cột');
         return;
       }
 
       setSheetUrl(config.sheetUrl);
       setStartRow(parseInt(config.startRow) || 1);
       setColumnsConfig(config.columns);
+      if (config.tabName) {
+        setTabName(config.tabName);
+      }
       if (config.dateFormat) {
         setDateFormat(config.dateFormat);
       }
@@ -226,12 +264,12 @@ export const ExcelImport: React.FC<ExcelImportProps> = ({
               onChange={(e) => handleSemesterChange(e.target.value)}
             >
               <option value="">-- Chọn học kỳ --</option>
-              {(Object.values(semesters) as SemesterConfig[]).map((s) => (
+              {sortedSemesters.map((s) => (
                 <option key={s.id} value={s.id}>{s.semester}</option>
               ))}
             </select>
-            <div className="absolute right-4 top-4 text-slate-400 pointer-events-none group-focus-within:text-fpt-orange transition-colors">
-              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M19 9l-7 7-7-7" /></svg>
+            <div className="absolute right-4 top-4.5 text-slate-400 pointer-events-none group-focus-within:text-fpt-orange transition-colors text-xs font-bold">
+              V
             </div>
           </div>
         </div>
@@ -239,7 +277,7 @@ export const ExcelImport: React.FC<ExcelImportProps> = ({
 
         <div className="flex-none flex items-center gap-2 mb-0.5">
           <button
-            onClick={handleShowData}
+            onClick={() => handleShowData(true)}
             disabled={isProcessing || !sheetUrl}
             className="px-6 h-12 bg-[#F27024] text-white rounded-xl hover:bg-orange-600 active:scale-95 transition-all font-bold shadow-lg shadow-orange-200 flex items-center justify-center gap-2 disabled:bg-slate-100 disabled:text-slate-400 disabled:shadow-none min-w-[140px]"
           >
@@ -247,9 +285,6 @@ export const ExcelImport: React.FC<ExcelImportProps> = ({
               <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
             ) : (
               <>
-                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
-                </svg>
                 <span className="text-[10px] uppercase tracking-wider">Tải lại</span>
               </>
             )}

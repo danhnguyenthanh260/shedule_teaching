@@ -51,6 +51,12 @@ export interface RowNormalized {
   reviewAreaStart?: number; // Boundary index (A-I vs J+)
 }
 
+export interface SyncError {
+  index: number;
+  title: string;
+  message: string;
+}
+
 export interface SyncResult {
   type: 'sync' | 'clear';
   created: number;
@@ -58,6 +64,7 @@ export interface SyncResult {
   failed: number;
   skipped: number;
   logs: string[];
+  errors?: SyncError[];
 }
 
 export interface UserProfile {

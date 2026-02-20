@@ -116,6 +116,7 @@ export const useCalendarSync = ({ accessToken }: UseCalendarSyncProps) => {
         updated: 0,
         failed: failedCount,
         skipped: skippedCount,
+        errors: res.data?.errors || [],
         logs: [
           res.message,
           res.data?.calendarName ? `Lịch: ${res.data.calendarName}` : null,
@@ -127,7 +128,13 @@ export const useCalendarSync = ({ accessToken }: UseCalendarSyncProps) => {
       return result;
     } catch (err: any) {
       console.error("❌ Sync error details:", err);
-      const errorMsg = err.message || "Lỗi không xác định khi đồng bộ";
+      let errorMsg = err.message || "Lỗi không xác định khi đồng bộ";
+      
+      // Clarify conflict message
+      if (errorMsg.includes('xung đột')) {
+        errorMsg = "Phát hiện xung đột: Dữ liệu này đã tồn tại trong Database của hệ thống (nhưng có thể chưa hiện trên Calendar của bạn). Hãy dùng nút 'Ghi đè' để đồng bộ lại.";
+      }
+      
       setSyncError("Lỗi đồng bộ: " + errorMsg);
       throw new Error(errorMsg);
     } finally {

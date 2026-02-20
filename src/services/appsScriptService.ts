@@ -27,6 +27,8 @@ export interface SyncPayload {
     events: CalendarEvent[];
     userEmail?: string;
     secret?: string; // Required for direct GAS calls (local proxy)
+    force?: boolean; // ✅ ADDED: Bypass duplicate check
+    googleAccessToken?: string; // ✅ ADDED: For decentralized sync
 }
 
 export interface ClearPayload {
@@ -34,6 +36,7 @@ export interface ClearPayload {
     action: 'clearCalendar';
     calendarName: string;
     secret?: string;
+    googleAccessToken?: string; // ✅ ADDED
 }
 
 export interface SyncResponse {
@@ -44,6 +47,9 @@ export interface SyncResponse {
         success: number;
         failed: number;
         skipped: number;
+        calendarName?: string;
+        calendarId?: string;
+        availableCalendars?: string[];
         errors?: Array<{
             index: number;
             title: string;
@@ -133,7 +139,9 @@ export const readSheet = async (
  */
 export const syncEventsToCalendar = async (
     events: CalendarEvent[],
-    calendarName?: string
+    calendarName?: string,
+    force: boolean = false,
+    googleAccessToken?: string
 ): Promise<SyncResponse> => {
     try {
         if (!Array.isArray(events) || events.length === 0) {
@@ -157,6 +165,8 @@ export const syncEventsToCalendar = async (
             calendarName: targetCalendar,
             events,
             userEmail: currentUser.email || undefined,
+            force: force,
+            googleAccessToken: googleAccessToken,
             // 🔐 Tự động thêm secret ở môi trường Local để hỗ trợ Vite Proxy
             ...(import.meta.env.DEV ? { secret: import.meta.env.VITE_GAS_SECRET } : {})
         };
@@ -172,13 +182,21 @@ export const syncEventsToCalendar = async (
             body: JSON.stringify(payload),
         });
 
+        const data = await response.json().catch(async () => {
+            const bodyText = await response.text().catch(() => '');
+            if (bodyText.includes('<!DOCTYPE') || bodyText.includes('<html')) {
+                throw new Error('Google Apps Script trả về trang HTML (có thể do lỗi Deploy hoặc Script bị treo). Vui lòng kiểm tra Apps Script Dashboard.');
+            }
+            if (!bodyText.trim()) {
+                throw new Error('Apps Script trả về phản hồi rỗng (Empty Response). Điều này có thể do Script bị Crash hoặc hết thời gian thực thi.');
+            }
+            throw new Error(`SyntaxError: Không thể parse JSON. Nội dung: ${bodyText.substring(0, 100)}...`);
+        });
+
         if (!response.ok) {
             logError(`Sync returned status ${response.status}: ${response.statusText}`);
-            const data = await response.json().catch(() => ({}));
             throw new Error(data.message || data.error || `Proxy error! status: ${response.status}`);
         }
-
-        const data = await response.json();
 
         // HANDLE CONFLICTS (409)
         if (response.status === 409) {
@@ -209,7 +227,8 @@ export const syncEventsToCalendar = async (
  * Clear all events created by the app
  */
 export const clearCalendar = async (
-    calendarName?: string
+    calendarName?: string,
+    googleAccessToken?: string
 ): Promise<SyncResponse> => {
     try {
         const currentUser = auth.currentUser;
@@ -221,6 +240,7 @@ export const clearCalendar = async (
             idToken,
             action: 'clearCalendar',
             calendarName: targetCalendar,
+            googleAccessToken: googleAccessToken,
             // 🔐 Tự động thêm secret ở môi trường Local để hỗ trợ Vite Proxy
             ...(import.meta.env.DEV ? { secret: import.meta.env.VITE_GAS_SECRET } : {})
         };
@@ -237,13 +257,19 @@ export const clearCalendar = async (
             body: JSON.stringify(payload),
         });
 
-        if (!response.ok) {
-            throw new Error(`Proxy error! status: ${response.status}`);
-        }
+        const data = await response.json().catch(async () => {
+            const bodyText = await response.text().catch(() => '');
+            if (bodyText.includes('<!DOCTYPE') || bodyText.includes('<html')) {
+                throw new Error('Google Apps Script trả về trang HTML khi Xóa lịch. Vui lòng kiểm tra lại Deploy của Script.');
+            }
+            if (!bodyText.trim()) {
+                throw new Error('Dữ liệu trả về rỗng khi Xóa lịch. Có thể do Apps Script bị lỗi hoặc trả về 204 No Content không hợp lệ.');
+            }
+            throw new Error(`SyntaxError (Clear): Không thể parse JSON. Nội dung: ${bodyText.substring(0, 100)}...`);
+        });
 
-        const data = await response.json();
-        if (data.status === 'error') {
-            throw new Error(data.message || 'Unknown error from backend during clear');
+        if (!response.ok) {
+            throw new Error(data.message || data.error || `Proxy error! status: ${response.status}`);
         }
 
         logSuccess('Calendar cleared successfully');

@@ -13,7 +13,7 @@ export const useCalendarSync = ({ accessToken }: UseCalendarSyncProps) => {
   const [syncResult, setSyncResult] = useState<SyncResult | null>(null);
   const [syncError, setSyncError] = useState<string | null>(null);
 
-  const syncToCalendar = useCallback(async (rowsToSync: RowNormalized[]) => {
+  const syncToCalendar = useCallback(async (rowsToSync: RowNormalized[], force: boolean = false) => {
     if (!accessToken || rowsToSync.length === 0) {
       setSyncError("Thiếu token truy cập hoặc chưa chọn mục nào.");
       return null;
@@ -24,7 +24,7 @@ export const useCalendarSync = ({ accessToken }: UseCalendarSyncProps) => {
     setSyncError(null);
 
     try {
-      console.log(`📡 Bắt đầu đồng bộ ${rowsToSync.length} mục lên Google Calendar...`);
+      console.log(`📡 Bắt đầu đồng bộ ${rowsToSync.length} mục lên Google Calendar... (Force: ${force})`);
       const events = rowsToSync.map(r => {
         // Fix leading zeros for hours if single digit (e.g., "1" -> "01")
         const fixTime = (t: string) => t.length === 1 ? `0${t}:00` : t.includes(':') ? t : `${t}:00`;
@@ -43,19 +43,30 @@ export const useCalendarSync = ({ accessToken }: UseCalendarSyncProps) => {
       });
 
       console.log("📦 Payload events sample:", events[0]);
-      const res = await syncEventsToCalendar(events);
+      if (events.length > 0) {
+        console.log(`🕒 Event 1 details: Start=${events[0].start}, End=${events[0].end}`);
+      }
+      const res = await syncEventsToCalendar(events, undefined, force, accessToken);
       console.log("✅ API Response:", res);
+      if (res.data?.availableCalendars) {
+        console.log("📅 Available calendars in this GAS session:", res.data.availableCalendars);
+      }
 
       const successCount = res.data?.success ?? 0;
       const failedCount = res.data?.failed ?? 0;
       const skippedCount = res.data?.skipped ?? 0;
 
       const result: SyncResult = {
+        type: 'sync',
         created: successCount,
         updated: 0,
         failed: failedCount,
         skipped: skippedCount,
-        logs: [res.message]
+        logs: [
+          res.message,
+          res.data?.calendarName ? `Lịch: ${res.data.calendarName}` : null,
+          res.data?.calendarId ? `ID: ${res.data.calendarId}` : null
+        ].filter(Boolean) as string[]
       };
 
       setSyncResult(result);
@@ -76,8 +87,9 @@ export const useCalendarSync = ({ accessToken }: UseCalendarSyncProps) => {
     setSyncResult(null);
 
     try {
-      const res = await clearCalendar();
+      const res = await clearCalendar(undefined, accessToken);
       const result: SyncResult = {
+        type: 'clear',
         created: 0,
         updated: 0,
         failed: 0,

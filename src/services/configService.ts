@@ -9,6 +9,7 @@ export interface SemesterConfig {
     sheetType?: 'review' | 'council';
     tabName?: string;
     mapping?: import('../types').ColumnMapping;
+    createdAt?: number;
 }
 
 export const configService = {

@@ -9,8 +9,8 @@ interface MappingToolProps {
   onHeaderRowChange: (idx: number) => void;
   columnMap: ColumnMapping;
   setColumnMap: (map: ColumnMapping) => void;
-  onApply: () => void;
-  isLoading: boolean;
+  onApply?: () => void;
+  isLoading?: boolean;
 }
 
 export const MappingTool: React.FC<MappingToolProps> = ({
@@ -42,19 +42,21 @@ export const MappingTool: React.FC<MappingToolProps> = ({
       <div className="flex flex-col gap-4">
         <div className="flex items-center justify-between">
           <h3 className="text-[10px] font-bold text-slate-400 uppercase tracking-widest ml-1">Ánh xạ cột dữ liệu</h3>
-          <button
-            onClick={onApply}
-            disabled={isLoading}
-            className="px-6 h-10 bg-slate-800 text-white font-bold rounded-xl hover:bg-slate-900 active:scale-95 transition-all shadow-lg shadow-slate-200 flex items-center justify-center gap-2 disabled:bg-slate-100 disabled:text-slate-400 disabled:shadow-none text-xs uppercase tracking-tight"
-          >
-            {isLoading ? (
-              <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
-            ) : (
-              <>
-                ÁP DỤNG
-              </>
-            )}
-          </button>
+          {onApply && (
+            <button
+              onClick={onApply}
+              disabled={isLoading}
+              className="px-6 h-10 bg-slate-800 text-white font-bold rounded-xl hover:bg-slate-900 active:scale-95 transition-all shadow-lg shadow-slate-200 flex items-center justify-center gap-2 disabled:bg-slate-100 disabled:text-slate-400 disabled:shadow-none text-xs uppercase tracking-tight"
+            >
+              {isLoading ? (
+                <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+              ) : (
+                <>
+                  ÁP DỤNG
+                </>
+              )}
+            </button>
+          )}
         </div>
 
         <div className="grid grid-cols-2 lg:grid-cols-5 gap-3 items-end">

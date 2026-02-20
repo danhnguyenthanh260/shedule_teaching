@@ -58,6 +58,15 @@ export const ExcelImport: React.FC<ExcelImportProps> = ({
   const [isProcessing, setIsProcessing] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
+  const sortedSemesters = React.useMemo(() => {
+    return (Object.values(semesters) as SemesterConfig[]).sort((a, b) => {
+      const timeA = a.createdAt || 0;
+      const timeB = b.createdAt || 0;
+      if (timeA !== timeB) return timeB - timeA;
+      return b.semester.localeCompare(a.semester);
+    });
+  }, [semesters]);
+
   const processRawData = (rows: string[][], source: string, sourceTab?: string) => {
     if (!rows || rows.length === 0) {
       throw new Error('Dữ liệu trống');
@@ -158,13 +167,13 @@ export const ExcelImport: React.FC<ExcelImportProps> = ({
     }
   };
 
-  // ✅ AUTO-SELECT first semester if none selected
+  // ✅ AUTO-SELECT newest semester if none selected
   useEffect(() => {
-    if (!selectedSemesterId && Object.keys(semesters).length > 0) {
-      const firstId = Object.keys(semesters)[0];
+    if (!selectedSemesterId && sortedSemesters.length > 0) {
+      const firstId = sortedSemesters[0].id;
       handleSemesterChange(firstId, semesters);
     }
-  }, [semesters, selectedSemesterId]);
+  }, [sortedSemesters, selectedSemesterId]);
 
   // ✅ AUTO-LOAD when semester changes
   useEffect(() => {
@@ -255,7 +264,7 @@ export const ExcelImport: React.FC<ExcelImportProps> = ({
               onChange={(e) => handleSemesterChange(e.target.value)}
             >
               <option value="">-- Chọn học kỳ --</option>
-              {(Object.values(semesters) as SemesterConfig[]).map((s) => (
+              {sortedSemesters.map((s) => (
                 <option key={s.id} value={s.id}>{s.semester}</option>
               ))}
             </select>

@@ -51,7 +51,8 @@ function doPost(e) {
     // 5. THỰC HIỆN ĐỒNG BỘ
     const result = CalendarService.createEvents(
       payload.calendarName || 'Schedule Teaching',
-      payload.events
+      payload.events,
+      payload.force || false
     );
 
     return jsonResponse_({

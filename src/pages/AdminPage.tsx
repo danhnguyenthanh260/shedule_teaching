@@ -6,10 +6,10 @@ import { database } from '../config/firebase';
 import { SUPER_ADMIN_EMAIL, isSuperAdmin, isAdmin } from '../config/admin';
 import { ref, set, push, onValue, remove } from 'firebase/database';
 import { readSheet, invalidateAdminCache } from '../services/appsScriptService';
-import ConfirmModal from '../components/ConfirmModal';
 import Layout from '../components/Layout';
 import { MappingTool } from '../components/MappingTool';
 import { ColumnMapping } from '../types';
+import { generateHeaderOptions } from '../utils/headerUtils';
 
 export const AdminPage: React.FC = () => {
     const { user, logout } = useFirebase();
@@ -20,20 +20,9 @@ export const AdminPage: React.FC = () => {
     const [loading, setLoading] = useState(false);
     const [toastMessage, setToastMessage] = useState<string | null>(null);
 
-    // Modal state
-    const [confirmState, setConfirmState] = useState<{
-        isOpen: boolean;
-        title: string;
-        message: string;
-        onConfirm: () => void;
-        variant: 'danger' | 'warning' | 'info';
-    }>({
-        isOpen: false,
-        title: '',
-        message: '',
-        onConfirm: () => { },
-        variant: 'danger'
-    });
+    // Inline Confirmation state
+    const [confirmingDeleteSemesterId, setConfirmingDeleteSemesterId] = useState<string | null>(null);
+    const [confirmingDeleteAdminKey, setConfirmingDeleteAdminKey] = useState<string | null>(null);
 
     const [newSemester, setNewSemester] = useState({
         semester: '',
@@ -50,6 +39,18 @@ export const AdminPage: React.FC = () => {
 
     // Edit mode state
     const [editMode, setEditMode] = useState<string | null>(null);
+
+    const sortedSemesters = useMemo(() => {
+        return (Object.values(semesters) as SemesterConfig[]).sort((a, b) => {
+            // Sort by createdAt descending
+            const timeA = a.createdAt || 0;
+            const timeB = b.createdAt || 0;
+            if (timeA !== timeB) return timeB - timeA;
+            
+            // Fallback to name/id sorting
+            return b.semester.localeCompare(a.semester);
+        });
+    }, [semesters]);
 
     useEffect(() => {
         fetchConfigs();
@@ -90,6 +91,7 @@ export const AdminPage: React.FC = () => {
             const semesterId = editMode || newSemester.semester.replace(/\s+/g, '_');
             const configRef = ref(database, `configs/${semesterId}`);
 
+            const existingSemester = editMode ? semesters[editMode] : null;
             await set(configRef, {
                 id: semesterId,
                 semester: newSemester.semester,
@@ -99,7 +101,8 @@ export const AdminPage: React.FC = () => {
                 dateFormat: newSemester.dateFormat,
                 sheetType: newSemester.sheetType,
                 tabName: newSemester.tabName,
-                mapping: newSemester.mapping || {}
+                mapping: newSemester.mapping || {},
+                createdAt: existingSemester?.createdAt || Date.now()
             });
 
             setToastMessage(editMode ? '✅ Cập nhật học kỳ thành công!' : '✅ Tạo học kỳ thành công!');
@@ -126,29 +129,21 @@ export const AdminPage: React.FC = () => {
         }
     };
 
-    const handleDeleteSemester = (semesterId: string) => {
-        setConfirmState({
-            isOpen: true,
-            title: 'Xóa học kỳ',
-            message: `Bạn có chắc chắn muốn xóa học kỳ "${semesterId}"? Hành động này không thể hoàn tác.`,
-            variant: 'danger',
-            onConfirm: async () => {
-                try {
-                    setLoading(true);
-                    const configRef = ref(database, `configs/${semesterId}`);
-                    await set(configRef, null);
-                    setToastMessage('✅ Đã xóa học kỳ');
-                    fetchConfigs();
-                    setTimeout(() => setToastMessage(null), 5000);
-                } catch (err: any) {
-                    setToastMessage(`❌ Lỗi khi xóa: ${err.message}`);
-                    setTimeout(() => setToastMessage(null), 5000);
-                } finally {
-                    setLoading(false);
-                    setConfirmState(prev => ({ ...prev, isOpen: false }));
-                }
-            }
-        });
+    const handleDeleteSemester = async (semesterId: string) => {
+        try {
+            setLoading(true);
+            const configRef = ref(database, `configs/${semesterId}`);
+            await set(configRef, null);
+            setToastMessage('✅ Đã xóa học kỳ');
+            fetchConfigs();
+            setTimeout(() => setToastMessage(null), 5000);
+        } catch (err: any) {
+            setToastMessage(`❌ Lỗi khi xóa: ${err.message}`);
+            setTimeout(() => setToastMessage(null), 5000);
+        } finally {
+            setLoading(false);
+            setConfirmingDeleteSemesterId(null);
+        }
     };
 
     const handleEditSemester = async (semester: SemesterConfig) => {
@@ -170,12 +165,15 @@ export const AdminPage: React.FC = () => {
         if (semester.sheetUrl) {
             try {
                 const startRowNum = parseInt(semester.startRow || '1');
-                const rows = await readSheet(semester.sheetUrl, startRowNum);
-                if (rows && rows.length > 0) {
-                    const headers = rows[0];
-                    const headerOptions = headers
-                        .map((h, i) => ({ label: String(h || `Cột ${i + 1}`).trim(), value: i }))
-                        .filter(h => h.label);
+                const response = await readSheet(semester.sheetUrl, startRowNum);
+                if (response?.data && response.data.length > 0) {
+                    const headers = response.data[0];
+                    const headerOptions = generateHeaderOptions(
+                        headers,
+                        semester.sheetType === 'review',
+                        true, // Admin is always true here
+                        semester.mapping
+                    );
                     setSheetHeaders(headerOptions);
                 }
             } catch (err) {
@@ -193,19 +191,22 @@ export const AdminPage: React.FC = () => {
         try {
             setLoading(true);
             const startRowNum = parseInt(newSemester.startRow);
-            const rows = await readSheet(newSemester.sheetUrl, startRowNum);
-            if (!rows || rows.length === 0) {
+            const response = await readSheet(newSemester.sheetUrl, startRowNum);
+            if (!response?.data || response.data.length === 0) {
                 setToastMessage('❌ Không thể đọc dữ liệu từ Sheet.');
                 setTimeout(() => setToastMessage(null), 5000);
                 return;
             }
-            const headers = rows[0];
+            const headers = response.data[0];
             const columnNames = headers.filter(h => h && String(h).trim()).map(h => String(h).trim()).join(', ');
             
             // Populate headers for Mapping Tool
-            const headerOptions = headers
-                .map((h, i) => ({ label: String(h || `Cột ${i + 1}`).trim(), value: i }))
-                .filter(h => h.label);
+            const headerOptions = generateHeaderOptions(
+                headers,
+                newSemester.sheetType === 'review',
+                true,
+                newSemester.mapping
+            );
             setSheetHeaders(headerOptions);
 
             setNewSemester({ ...newSemester, columns: columnNames });
@@ -257,27 +258,19 @@ export const AdminPage: React.FC = () => {
         }
     };
 
-    const handleDeleteAdmin = (key: string) => {
-        setConfirmState({
-            isOpen: true,
-            title: 'Xóa Admin',
-            message: 'Bạn có chắc chắn muốn gỡ bỏ quyền Admin của người này?',
-            variant: 'danger',
-            onConfirm: async () => {
-                try {
-                    const adminRef = ref(database, `admin_whitelist/${key}`);
-                    await remove(adminRef);
-                    await invalidateAdminCache(); // 🔄 Clear 6h cache on server
-                    setToastMessage('✅ Đã xóa admin');
-                    setTimeout(() => setToastMessage(null), 5000);
-                } catch (err: any) {
-                    setToastMessage('❌ Lỗi khi xóa admin: ' + err.message);
-                    setTimeout(() => setToastMessage(null), 5000);
-                } finally {
-                    setConfirmState(prev => ({ ...prev, isOpen: false }));
-                }
-            }
-        });
+    const handleDeleteAdmin = async (key: string) => {
+        try {
+            const adminRef = ref(database, `admin_whitelist/${key}`);
+            await remove(adminRef);
+            await invalidateAdminCache(); // 🔄 Clear 6h cache on server
+            setToastMessage('✅ Đã xóa admin');
+            setTimeout(() => setToastMessage(null), 5000);
+        } catch (err: any) {
+            setToastMessage('❌ Lỗi khi xóa admin: ' + err.message);
+            setTimeout(() => setToastMessage(null), 5000);
+        } finally {
+            setConfirmingDeleteAdminKey(null);
+        }
     };
 
     const userProfile = useMemo(() => ({
@@ -434,11 +427,6 @@ export const AdminPage: React.FC = () => {
                                             onHeaderRowChange={() => {}}
                                             columnMap={newSemester.mapping}
                                             setColumnMap={(map) => setNewSemester({ ...newSemester, mapping: map })}
-                                            onApply={() => {
-                                                setToastMessage('✅ Ánh xạ đã được ghi nhận local! Đừng quên nhấn Cập nhật học kỳ.');
-                                                setTimeout(() => setToastMessage(null), 3000);
-                                            }}
-                                            isLoading={false}
                                         />
                                         <p className="text-[9px] text-[#F27024] font-bold mt-3 uppercase tracking-widest ml-1 flex items-center gap-2">
                                             <span className="w-1.5 h-1.5 bg-[#F27024] rounded-full animate-pulse" />
@@ -507,12 +495,29 @@ export const AdminPage: React.FC = () => {
                                     {Object.entries(adminWhitelist).map(([key, email]) => (
                                         <div key={key} className="flex items-center justify-between p-3 bg-slate-50/50 rounded-xl border border-slate-100 group">
                                             <span className="text-xs font-bold text-slate-700">{email}</span>
-                                            <button
-                                                onClick={() => handleDeleteAdmin(key)}
-                                                className="p-1.5 text-slate-300 hover:text-rose-500 hover:bg-rose-50 rounded-lg transition-all"
-                                            >
-                                                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg>
-                                            </button>
+                                            {confirmingDeleteAdminKey === key ? (
+                                                <div className="flex items-center gap-1 animate-in fade-in slide-in-from-right-2 duration-300">
+                                                    <button
+                                                        onClick={() => handleDeleteAdmin(key)}
+                                                        className="px-2.5 py-1 bg-rose-500 text-white rounded-lg text-[9px] font-bold uppercase tracking-wider hover:bg-rose-600 transition-all active:scale-95 shadow-sm"
+                                                    >
+                                                        Xóa
+                                                    </button>
+                                                    <button
+                                                        onClick={() => setConfirmingDeleteAdminKey(null)}
+                                                        className="px-2.5 py-1 bg-white text-slate-400 border border-slate-100 rounded-lg text-[9px] font-bold uppercase tracking-wider hover:text-slate-600 transition-all"
+                                                    >
+                                                        Hủy
+                                                    </button>
+                                                </div>
+                                            ) : (
+                                                <button
+                                                    onClick={() => setConfirmingDeleteAdminKey(key)}
+                                                    className="p-1.5 text-slate-300 hover:text-rose-500 hover:bg-rose-50 rounded-lg transition-all"
+                                                >
+                                                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg>
+                                                </button>
+                                            )}
                                         </div>
                                     ))}
                                     {Object.keys(adminWhitelist).length === 0 && (
@@ -530,25 +535,42 @@ export const AdminPage: React.FC = () => {
                                 <span className="w-4 h-4 bg-[#F27024] text-white rounded-md flex items-center justify-center text-[10px] shadow-sm font-bold">C</span>
                                 Danh sách học kỳ ({Object.keys(semesters).length})
                             </h2>
-                            <div className="space-y-3 overflow-y-auto max-h-[500px] scrollbar-thin pr-1">
-                                {(Object.values(semesters) as SemesterConfig[]).map((sem) => (
+                            <div className="space-y-3 overflow-y-auto max-h-[400px] scrollbar-thin pr-1 pb-4">
+                                {sortedSemesters.map((sem) => (
                                     <div key={sem.id} className="p-4 border border-slate-100 bg-slate-50/30 rounded-2xl hover:border-orange-200 transition-all group">
                                         <div className="flex items-start justify-between mb-2">
                                             <h3 className="text-sm font-bold text-slate-900 group-hover:text-[#F27024] transition-colors">{sem.semester}</h3>
-                                            <div className="flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-                                                <button
-                                                    onClick={() => handleEditSemester(sem)}
-                                                    className="p-1.5 text-slate-400 hover:text-blue-500 hover:bg-blue-50 rounded-lg"
-                                                >
-                                                    <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" /></svg>
-                                                </button>
-                                                <button
-                                                    onClick={() => handleDeleteSemester(sem.id)}
-                                                    className="p-1.5 text-slate-400 hover:text-rose-500 hover:bg-rose-50 rounded-lg"
-                                                >
-                                                    <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg>
-                                                </button>
-                                            </div>
+                                                {confirmingDeleteSemesterId === sem.id ? (
+                                                    <div className="flex items-center gap-1 animate-in fade-in slide-in-from-right-2 duration-300">
+                                                        <button
+                                                            onClick={() => handleDeleteSemester(sem.id)}
+                                                            className="px-3 py-1 bg-rose-500 text-white rounded-lg text-[9px] font-bold uppercase tracking-wider hover:bg-rose-600 transition-all active:scale-95 shadow-sm"
+                                                        >
+                                                            Xác nhận xóa
+                                                        </button>
+                                                        <button
+                                                            onClick={() => setConfirmingDeleteSemesterId(null)}
+                                                            className="px-3 py-1 bg-white text-slate-400 border border-slate-100 rounded-lg text-[9px] font-bold uppercase tracking-wider hover:text-slate-600 transition-all"
+                                                        >
+                                                            Hủy
+                                                        </button>
+                                                    </div>
+                                                ) : (
+                                                    <div className="flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                                                        <button
+                                                            onClick={() => handleEditSemester(sem)}
+                                                            className="p-1.5 text-slate-400 hover:text-blue-500 hover:bg-blue-50 rounded-lg"
+                                                        >
+                                                            <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" /></svg>
+                                                        </button>
+                                                        <button
+                                                            onClick={() => setConfirmingDeleteSemesterId(sem.id)}
+                                                            className="p-1.5 text-slate-400 hover:text-rose-500 hover:bg-rose-50 rounded-lg"
+                                                        >
+                                                            <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg>
+                                                        </button>
+                                                    </div>
+                                                )}
                                         </div>
                                         <div className="space-y-1 mt-1 border-t border-slate-100 pt-3">
                                             <div className="flex items-center gap-2 text-[10px] text-slate-500 font-bold uppercase tracking-wider">
@@ -572,15 +594,6 @@ export const AdminPage: React.FC = () => {
                 </div>
             </div>
 
-            {/* Confirmation Modal */}
-            <ConfirmModal
-                isOpen={confirmState.isOpen}
-                title={confirmState.title}
-                message={confirmState.message}
-                variant={confirmState.variant}
-                onConfirm={confirmState.onConfirm}
-                onCancel={() => setConfirmState(prev => ({ ...prev, isOpen: false }))}
-            />
 
             {/* Global Toast */}
             {toastMessage && (

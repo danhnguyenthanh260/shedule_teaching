@@ -1,7 +1,7 @@
 const CONSTANTS = {
   CALENDAR_NAME: 'Schedule Teaching',
   TIMEZONE: 'Asia/Ho_Chi_Minh',
-  GAS_SECRET: 'YOUR_SECURE_SECRET_HERE', // 🔑 Cần khớp với GAS_SECRET trên Vercel
+  GAS_SECRET: 'FPTxavalo2026', // 🔑 Cần khớp với GAS_SECRET trên Vercel
   FIREBASE_URL: 'https://scheduleteaching-default-rtdb.asia-southeast1.firebasedatabase.app/',
   FIREBASE_WEB_API_KEY: 'AIzaSyDRwHY6mgdHKjkanLJk8BFpOQSeV5sqvaY',
   ADMIN_EMAILS: [

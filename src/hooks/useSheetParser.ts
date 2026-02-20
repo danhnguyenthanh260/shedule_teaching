@@ -9,6 +9,7 @@ import {
 } from '../utils/sheetUtils';
 import { khongDau } from '../utils/stringUtils';
 import { logWarning } from '../utils/logger';
+import { generateHeaderOptions } from '../utils/headerUtils';
 
 interface UseSheetParserProps {
   allRows: string[][];
@@ -142,83 +143,12 @@ export const useSheetParser = ({
   }, [allRows, fullHeaders, fullDetailHeaders, headerRowIndex, sheetMeta, tabName, dateFormat]);
 
   const headerOptions = useMemo(() => {
-    const options: { label: string; value: number }[] = [];
-    const seen = new Set<string>();
-    const labelCountsInReview = new Map<string, number>();
-    const firstOccurrencesInReview = new Map<string, number>();
-    const isReview = isReviewMode;
-
-    // 🎯 Only count occurrences in the Review Area (index >= 9) to identify true triplets
-    fullDetailHeaders.forEach((h, i) => {
-      let label = (h || "").trim();
-      if (!label || label.startsWith('Column_')) return;
-      
-      if (i >= 9) {
-        labelCountsInReview.set(label, (labelCountsInReview.get(label) || 0) + 1);
-        if (!firstOccurrencesInReview.has(label)) {
-          firstOccurrencesInReview.set(label, i);
-        }
-      }
-    });
-
-    fullDetailHeaders.forEach((h, i) => {
-      let label = (h || "").trim();
-      if (!label || label.startsWith('Column_')) return;
-
-      const isStaticArea = i < 9;
-      const countInReview = labelCountsInReview.get(label) || 0;
-      const isMapped = Object.values(currentMapping).includes(i);
-      const isFirstTriplet = i === firstOccurrencesInReview.get(label) && countInReview === 3;
-
-      if (isReview && isUserAdmin) {
-        // 🏛️ ADMIN in Review Mode:
-        // 1. Static Area: Always show
-        if (isStaticArea) {
-           // Proceed to label decoration
-        }
-        // 2. Review Area: Only show triplets (representative) or mapped columns
-        else if (isFirstTriplet || isMapped) {
-           // Proceed to label decoration, but Triplets get CLEAN labels
-        } else {
-           // Skip everything else in Review Area for Admin
-           return;
-        }
-      } 
-      // 🎓 LECTURER (or Non-Admin) in Review Mode: Apply keyword filter
-      else if (isReview && !isUserAdmin && !isMapped) {
-        const allowedKeywords = [
-          "code", "reviewer", "date", "slot", "room", "time", "gvhd",
-          "ngay", "ngày", "gio", "giờ", "thời gian", "phong", "phòng", "địa điểm", 
-          "nhiệm vụ", "đề tài", "giang vien", "giảng viên", "phân công", "lớp", "mã", "tên"
-        ];
-        const lowerLabel = label.toLowerCase();
-        const isAllowed = allowedKeywords.some(kw => lowerLabel.includes(kw));
-        
-        if (!isAllowed) {
-          return;
-        }
-      }
-
-      // 🕵️ Handle Duplicate Labels & Clean Triplet Labels
-      let finalLabel = label;
-      
-      // Triplets should be CLEAN (no "(Cột X)") to represent the group
-      const shouldBeClean = isReview && isFirstTriplet;
-
-      // 🏛️ ONLY show index suffixes for ADAMS to identify specific columns.
-      // 🎓 LECTURERS should see clean names (esp. since duplicate columns are filtered out for them).
-      if (isUserAdmin && !shouldBeClean && seen.has(label)) {
-        finalLabel = `${label} (${i + 1})`;
-      }
-
-      if (!looksLikeDataRow([label])) {
-        seen.add(label); // Cache the raw label for duplicate detection
-        options.push({ label: finalLabel, value: i });
-      }
-    });
-
-    console.log(`📊 [Parser] Generated ${options.length} options. Review Triplet Logic Applied.`);
-    return options.length > 0 ? options : [{ label: '-- Chọn cột --', value: -1 }];
+    return generateHeaderOptions(
+      fullDetailHeaders,
+      isReviewMode,
+      isUserAdmin,
+      currentMapping
+    );
   }, [fullDetailHeaders, isReviewMode, isUserAdmin, currentMapping]);
 
   const searchHeaderOptions = useMemo(() => {

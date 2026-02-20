@@ -1,7 +1,7 @@
 import React, { createContext, useContext, useEffect, useState } from 'react';
 import { auth, db, database } from '../config/firebase';
 import { ref, onValue } from 'firebase/database';
-import { SUPER_ADMIN_EMAIL } from '../config/admin';
+import { SUPER_ADMIN_EMAIL, setDynamicAdmins } from '../config/admin';
 import {
   createUserWithEmailAndPassword,
   signInWithEmailAndPassword,
@@ -125,6 +125,7 @@ export const FirebaseProvider: React.FC<{ children: React.ReactNode }> = ({ chil
         list = Object.values(data).map((v: any) => String(v).trim().toLowerCase());
       }
       setAdminList(list);
+      setDynamicAdmins(list); // 🔄 Sync with static helper for Legacy/Layout components
       setIsWhitelistLoading(false);
       logInfo('Admin Whitelist Synced in Context');
     }, (error) => {
@@ -206,6 +207,7 @@ export const FirebaseProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       const provider = new GoogleAuthProvider();
       provider.addScope('https://www.googleapis.com/auth/spreadsheets.readonly');
       provider.addScope('https://www.googleapis.com/auth/calendar.events');
+      provider.addScope('https://www.googleapis.com/auth/calendar.readonly');
 
       // FORCE Google to show the account picker and consent screen to avoid 403 session confusion
       provider.setCustomParameters({

@@ -404,27 +404,18 @@ export const LecturerDashboard: React.FC = () => {
     }
   }, [rows]);
 
-  const handleSync = async () => {
+  const handleSync = async (isForce: boolean = false) => {
     setSyncError(null);
     let rowsToSync = filteredRows.filter(r => selectedIds.has(r.id));
     
-    // 🚨 QUAN TRỌNG: Nếu đang ở preview mode, các dòng trong filteredRows (previewRows) 
-    // có thể thiếu dữ liệu ánh xạ chuẩn. Cần ánh xạ lại "nóng" trước khi gửi đi.
+    // ...
     if (isPreviewMode) {
-      if (!columnMap.date || !columnMap.time) {
-        setSyncError("Vui lòng cấu hình cột Ngày và Giờ ở Bước 2 trước khi đồng bộ.");
-        return;
-      }
-      
+      // ...
       const realRows = applyMapping(columnMap, sheetMeta?.isDataMau || false);
       if (realRows) {
-        console.log(`🔄 handleSync (Preview): Selected IDs:`, Array.from(selectedIds));
-        console.log(`🔄 handleSync (Preview): Available Row IDs:`, realRows.map(r => r.id));
         rowsToSync = realRows.filter(r => selectedIds.has(r.id));
       }
     }
-
-    console.log(`🚀 Final rows to sync: ${rowsToSync.length}`);
 
     if (rowsToSync.length === 0) {
       setSyncError("Không tìm thấy mục nào hợp lệ để đồng bộ. Hãy kiểm tra lại ánh xạ cột.");
@@ -432,7 +423,7 @@ export const LecturerDashboard: React.FC = () => {
     }
 
     try {
-      const result = await syncToCalendar(rowsToSync);
+      const result = await syncToCalendar(rowsToSync, isForce);
       if (result) {
         if (firebaseUser && sheetMeta) {
           await saveSyncLog({
@@ -663,62 +654,75 @@ export const LecturerDashboard: React.FC = () => {
 
               <div className="flex items-center gap-2 shrink-0">
 
-              <button
-                onClick={handleSync}
-                disabled={syncing || clearing || selectedIds.size === 0}
-                className="px-5 py-2.5 bg-[#F27024] text-white rounded-xl font-bold hover:bg-orange-600 disabled:bg-slate-100 disabled:text-slate-400 disabled:shadow-none disabled:border-slate-200 border border-transparent transition-all shadow-lg shadow-orange-200 flex items-center gap-2 text-[11px] uppercase tracking-wider"
-              >
-                {syncing ? (
-                  <div className="w-3 h-3 border-2 border-white/30 border-t-white rounded-full animate-spin" />
-                ) : (
-                  <>
-                    Đồng bộ ({selectedIds.size})
-                  </>
-                )}
-              </button>
-
-              {isConfirmingClear ? (
-                <div className="flex items-center bg-rose-50 border border-rose-100 rounded-xl p-0.5 shadow-sm animate-in fade-in zoom-in-95 duration-200">
-                  <span className="hidden sm:inline px-2 py-1 text-[9px] font-extrabold text-rose-500 uppercase tracking-tight">Xóa sạch?</span>
-                  <button
-                    onClick={async (e) => {
-                      e.stopPropagation();
-                      setIsConfirmingClear(false);
-                      try {
-                        const res = await clearAppEvents();
-                        if (res) showToast("Đã xóa sạch lịch cũ thành công!");
-                      } catch (e) {}
-                    }}
-                    className="px-3 py-2 bg-rose-500 text-white rounded-lg font-extrabold text-[10px] hover:bg-rose-600 transition-all active:scale-90"
-                  >
-                    Có
-                  </button>
-                  <button
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      setIsConfirmingClear(false);
-                    }}
-                    className="px-3 py-2 text-slate-400 font-bold text-[10px] hover:text-slate-600 transition-all"
-                  >
-                    Hủy
-                  </button>
-                </div>
-              ) : (
+               <div className="flex flex-col gap-1 items-end">
                 <button
-                  onClick={() => setIsConfirmingClear(true)}
-                  disabled={syncing || clearing}
-                  className="px-4 py-2.5 bg-white text-slate-400 border border-slate-200 rounded-xl font-bold hover:bg-red-50 hover:text-red-500 hover:border-red-100 transition-all text-[11px] uppercase tracking-wider flex items-center gap-2"
-                  title="Xóa tất cả các sự kiện đã tạo bởi ứng dụng này"
+                  onClick={() => handleSync(false)}
+                  disabled={syncing || clearing || selectedIds.size === 0}
+                  className="px-5 py-2.5 bg-[#F27024] text-white rounded-xl font-bold hover:bg-orange-600 disabled:bg-slate-100 disabled:text-slate-400 disabled:shadow-none disabled:border-slate-200 border border-transparent transition-all shadow-lg shadow-orange-200 flex items-center gap-2 text-[11px] uppercase tracking-wider"
                 >
-                  {clearing ? (
-                    <div className="w-3 h-3 border-2 border-red-500/30 border-t-red-500 rounded-full animate-spin" />
+                  {syncing ? (
+                    <div className="w-3 h-3 border-2 border-white/30 border-t-white rounded-full animate-spin" />
                   ) : (
                     <>
-                      Xóa lịch cũ
+                      Đồng bộ ({selectedIds.size})
                     </>
                   )}
                 </button>
-              )}
+                
+                {syncResult && syncResult.skipped > 0 && !syncing && (
+                  <button
+                    onClick={() => handleSync(true)}
+                    className="text-[9px] font-bold text-orange-500 hover:text-orange-700 underline flex items-center gap-1 animate-pulse"
+                    title="Bỏ qua kiểm tra trùng lặp và đồng bộ lại"
+                  >
+                    Bị trùng? Đồng bộ cưỡng bức ngay
+                  </button>
+                )}
+              </div>
+
+              <div className="flex items-center gap-1.5">
+                {isConfirmingClear ? (
+                  <div className="flex items-center gap-1.5 p-1 bg-rose-50 border border-rose-100 rounded-xl animate-in fade-in slide-in-from-right-4 duration-300">
+                    <button
+                      onClick={async (e) => {
+                        e.stopPropagation();
+                        setIsConfirmingClear(false);
+                        await clearAppEvents();
+                      }}
+                      className="px-4 py-2 bg-rose-500 text-white rounded-lg font-bold text-[10px] uppercase tracking-wider hover:bg-rose-600 active:scale-95 shadow-lg shadow-rose-200"
+                    >
+                      Tôi muốn xóa
+                    </button>
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setIsConfirmingClear(false);
+                      }}
+                      className="px-4 py-2 bg-white text-slate-400 border border-slate-200 rounded-lg font-bold text-[10px] uppercase tracking-wider hover:text-slate-600 hover:bg-slate-50 transition-all active:scale-95"
+                    >
+                      Từ chối
+                    </button>
+                  </div>
+                ) : (
+                  <button
+                    onClick={() => setIsConfirmingClear(true)}
+                    disabled={syncing || clearing}
+                    className="px-4 py-2.5 bg-white text-slate-400 border border-slate-200 rounded-xl font-bold hover:bg-rose-50 hover:text-rose-500 hover:border-rose-100 transition-all text-[11px] uppercase tracking-wider flex items-center gap-2 group"
+                    title="Xóa tất cả các sự kiện đã tạo bởi ứng dụng này"
+                  >
+                    {clearing ? (
+                      <div className="w-3 h-3 border-2 border-rose-500/30 border-t-rose-500 rounded-full animate-spin" />
+                    ) : (
+                      <>
+                        <svg className="w-3.5 h-3.5 group-hover:scale-110 transition-transform" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                        </svg>
+                        Xóa lịch cũ
+                      </>
+                    )}
+                  </button>
+                )}
+              </div>
             </div>
           </div>
 

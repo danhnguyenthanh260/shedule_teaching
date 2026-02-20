@@ -14,7 +14,7 @@ const LOGGING_ENABLED = !IS_PROD || FORCE_LOG;
  */
 export function logInfo(message: string, ...args: any[]) {
   if (LOGGING_ENABLED) {
-    console.log(`ℹ️ ${message}`, ...args);
+    console.log(`[INFO] ${message}`, ...args);
   }
 }
 
@@ -23,7 +23,7 @@ export function logInfo(message: string, ...args: any[]) {
  */
 export function logSuccess(message: string, ...args: any[]) {
   if (LOGGING_ENABLED) {
-    console.log(`✅ ${message}`, ...args);
+    console.log(`[SUCCESS] ${message}`, ...args);
   }
 }
 
@@ -32,7 +32,7 @@ export function logSuccess(message: string, ...args: any[]) {
  */
 export function logWarning(message: string, ...args: any[]) {
   if (LOGGING_ENABLED) {
-    console.warn(`⚠️ ${message}`, ...args);
+    console.warn(`[WARNING] ${message}`, ...args);
   }
 }
 
@@ -40,7 +40,7 @@ export function logWarning(message: string, ...args: any[]) {
  * Log error (always shown)
  */
 export function logError(message: string, ...args: any[]) {
-  console.error(`❌ ${message}`, ...args);
+  console.error(`[ERROR] ${message}`, ...args);
 }
 
 /**
@@ -48,7 +48,7 @@ export function logError(message: string, ...args: any[]) {
  */
 export function logDebug(message: string, ...args: any[]) {
   if (LOGGING_ENABLED) {
-    console.log(`🔍 ${message}`, ...args);
+    console.log(`[DEBUG] ${message}`, ...args);
   }
 }
 
@@ -58,7 +58,7 @@ export function logDebug(message: string, ...args: any[]) {
 export function logPerformance(label: string, startTime: number) {
   if (LOGGING_ENABLED) {
     const duration = Date.now() - startTime;
-    console.log(`⏱️ ${label}: ${duration}ms`);
+    console.log(`[PERF] ${label}: ${duration}ms`);
   }
 }
 

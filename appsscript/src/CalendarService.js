@@ -6,10 +6,17 @@ const CalendarService = {
    */
   getOrCreateCalendar: function(calendarName) {
     try {
-      AppLogger.info('Getting calendar: ' + calendarName);
+      const calendars = CalendarApp.getAllCalendars();
+      const availableNames = calendars.map(c => c.getName());
+      AppLogger.info('Getting calendar: ' + calendarName, { available: availableNames });
+
+      // 🎯 SPECIAL CASE: 'primary' or empty means the user's default calendar
+      if (!calendarName || calendarName.toLowerCase() === 'primary') {
+        AppLogger.info('Using default (primary) calendar');
+        return CalendarApp.getDefaultCalendar();
+      }
 
       // Thử lấy calendar theo tên
-      const calendars = CalendarApp.getAllCalendars();
       for (let i = 0; i < calendars.length; i++) {
         if (calendars[i].getName() === calendarName) {
           AppLogger.info('Calendar found: ' + calendarName);
@@ -18,7 +25,7 @@ const CalendarService = {
       }
 
       // Nếu không tìm thấy, dùng calendar chính (Primary)
-      AppLogger.warn('Calendar not found, using primary calendar');
+      AppLogger.warn('Calendar nominated "' + calendarName + '" not found. Falling back to primary calendar');
       return CalendarApp.getDefaultCalendar();
     } catch (e) {
       AppLogger.error('Error getting calendar', e);
@@ -196,9 +203,10 @@ const CalendarService = {
    * Create multiple events
    * @param {string} calendarName - Calendar name
    * @param {Array} events - Array of event objects
+   * @param {boolean} force - Whether to bypass duplicate check
    * @returns {Object} Result with count and details
    */
-  createEvents: function(calendarName, events) {
+  createEvents: function(calendarName, events, force = false) {
     try {
       if (!Array.isArray(events)) {
         throw new Error('Events must be an array');
@@ -209,11 +217,17 @@ const CalendarService = {
       }
 
       const calendar = this.getOrCreateCalendar(calendarName);
+      const allCalendars = CalendarApp.getAllCalendars();
       const results = {
         total: events.length,
         success: 0,
+        updated: 0,
         failed: 0,
-        errors: []
+        skipped: 0,
+        errors: [],
+        calendarName: calendar.getName(),
+        calendarId: calendar.getId(),
+        availableCalendars: allCalendars.map(c => c.getName())
       };
 
       for (let i = 0; i < events.length; i++) {
@@ -232,15 +246,19 @@ const CalendarService = {
         }
 
         // Create event
-        const result = this.createEvent(calendar, event);
+        const result = this.createEvent(calendar, event, force);
         if (result.success) {
-          results.success++;
+          if (result.skipped) {
+            results.skipped++;
+          } else {
+            results.success++;
+          }
         } else {
           results.failed++;
           results.errors.push({
             index: i,
             title: event.title,
-            message: result.error
+            message: result.error || 'Lỗi không xác định'
           });
         }
       }

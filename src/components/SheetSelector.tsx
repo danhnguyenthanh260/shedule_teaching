@@ -68,7 +68,7 @@ export const SheetSelector: React.FC<SheetSelectorProps> = ({
               <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin"></div>
             ) : (
               <span className="flex items-center gap-1">
-                <span>📄</span> test1
+                test1
               </span>
             )}
           </button>
@@ -82,7 +82,7 @@ export const SheetSelector: React.FC<SheetSelectorProps> = ({
               <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin"></div>
             ) : (
               <span className="flex items-center gap-1">
-                <span>📊</span> Review
+                Review
               </span>
             )}
           </button>

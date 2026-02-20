@@ -86,14 +86,15 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     }
 
     // 3. Process Events or Clear Action
-    const { events, calendarName, action } = req.body;
+    const { events, calendarName, action, googleAccessToken } = req.body;
 
     // Handle CLEAR action specifically
     if (action === 'clearCalendar') {
       return forwardToGAS(res, {
         action: 'clearCalendar',
         calendarName: calendarName || "Schedule Teaching",
-        secret: process.env.GAS_SECRET
+        secret: process.env.GAS_SECRET,
+        googleAccessToken: googleAccessToken
       });
     }
 
@@ -173,6 +174,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     }
 
     // 5. Atomic Update: Create Pending Slots & Sync to GAS
+    const { force } = req.body;
     const GAS_URL = process.env.GAS_EXEC_URL;
     const GAS_SECRET = process.env.GAS_SECRET;
 
@@ -199,13 +201,15 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     await batch.commit();
 
     // Step B: Call Apps Script
-    console.log(`🔗 Proxy calling GAS: ${GAS_URL}`);
+    console.log(`🔗 Proxy calling GAS: ${GAS_URL} (Force: ${!!force})`);
     const gasResponse = await fetch(GAS_URL, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         secret: GAS_SECRET || req.body.secret, // Prioritize env, fallback to body
         calendarName: calendarName || "Schedule Teaching",
+        force: !!force,
+        googleAccessToken: googleAccessToken,
         events: eventsToSync.map(ev => ({
           ...ev,
           description: (ev.description || "") + "\nResources: " + ev.resources.join(", ")

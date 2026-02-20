@@ -1,7 +1,7 @@
 import React, { createContext, useContext, useEffect, useState } from 'react';
 import { auth, db, database } from '../config/firebase';
 import { ref, onValue } from 'firebase/database';
-import { SUPER_ADMIN_EMAIL } from '../config/admin';
+import { SUPER_ADMIN_EMAIL, setDynamicAdmins } from '../config/admin';
 import {
   createUserWithEmailAndPassword,
   signInWithEmailAndPassword,
@@ -57,18 +57,18 @@ export const FirebaseProvider: React.FC<{ children: React.ReactNode }> = ({ chil
   useEffect(() => {
     const checkRedirectResult = async () => {
       try {
-        console.log('🔍 Checking redirect result...');
+        console.log('Checking redirect result...');
         const result = await getRedirectResult(auth);
-        console.log('🔍 Redirect result:', result);
+        console.log('Redirect result:', result);
 
         if (result?.user) {
-          console.log('✅ User from redirect:', result.user.email);
+          console.log('User from redirect:', result.user.email);
           setUserUID(result.user.uid);
           const credential = GoogleAuthProvider.credentialFromResult(result);
-          console.log('✅ Credential:', credential);
+          console.log('Credential:', credential);
 
           if (credential?.accessToken) {
-            console.log('✅ Access token obtained');
+            console.log('Access token obtained');
             setAccessToken(credential.accessToken);
 
             // ✅ Store token with expiry time
@@ -80,10 +80,10 @@ export const FirebaseProvider: React.FC<{ children: React.ReactNode }> = ({ chil
             logSuccess('Google login successful (redirect)');
           }
         } else {
-          console.log('⚠️ No redirect result found');
+          console.log('No redirect result found');
         }
       } catch (err) {
-        console.error('❌ Redirect result error:', err);
+        console.error('Redirect result error:', err);
         logError('Redirect result error:', err);
       }
     };
@@ -92,9 +92,9 @@ export const FirebaseProvider: React.FC<{ children: React.ReactNode }> = ({ chil
 
   // Listen to auth state changes
   useEffect(() => {
-    console.log('🔍 Setting up auth state listener...');
+    console.log('Setting up auth state listener...');
     const unsubscribe = onAuthStateChanged(auth, (currentUser) => {
-      console.log('🔍 Auth state changed:', currentUser?.email);
+      console.log('Auth state changed:', currentUser?.email);
       setUser(currentUser);
       setLoading(false);
 
@@ -103,7 +103,7 @@ export const FirebaseProvider: React.FC<{ children: React.ReactNode }> = ({ chil
         const restoreToken = async () => {
           const stored = await secureGetItem('google_access_token', currentUser.uid);
           if (stored) {
-            console.log('✅ Restored access token from localStorage');
+            console.log('Restored access token from localStorage');
             setAccessToken(stored);
             logInfo('Restored access token from localStorage');
           }
@@ -125,10 +125,11 @@ export const FirebaseProvider: React.FC<{ children: React.ReactNode }> = ({ chil
         list = Object.values(data).map((v: any) => String(v).trim().toLowerCase());
       }
       setAdminList(list);
+      setDynamicAdmins(list); // 🔄 Sync with static helper for Legacy/Layout components
       setIsWhitelistLoading(false);
-      logInfo('🛡️ Admin Whitelist Synced in Context');
+      logInfo('Admin Whitelist Synced in Context');
     }, (error) => {
-      console.error('❌ Whitelist fetch error:', error);
+      console.error('Whitelist fetch error:', error);
       setIsWhitelistLoading(false); // Unblock UI even if fetch fails
     });
 
@@ -156,9 +157,9 @@ export const FirebaseProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     try {
       setError(null);
       const isLocalhost = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
-      console.log('🚀 Starting Google login...', isLocalhost ? 'popup' : 'redirect');
+      console.log('Starting Google login...', isLocalhost ? 'popup' : 'redirect');
       
-      // 🔐 SECURITY: Generate and store OAuth state with timestamp for CSRF protection
+      // SECURITY: Generate and store OAuth state with timestamp for CSRF protection
       const oauthState = generateOAuthState();
       const stateData = {
         state: oauthState,
@@ -173,19 +174,19 @@ export const FirebaseProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       
       // Use popup for localhost, redirect for production
       if (isLocalhost) {
-        console.log('🚀 Using popup for localhost...');
+        console.log('Using popup for localhost...');
         const result = await signInWithPopup(auth, provider);
         setUserUID(result.user.uid);
         
         const credential = GoogleAuthProvider.credentialFromResult(result);
         if (credential?.accessToken) {
-          console.log('✅ Access token obtained from popup');
+          console.log('Access token obtained from popup');
           setAccessToken(credential.accessToken);
           await saveAuthTokens(credential.accessToken, '', 3600);
           logSuccess('Google login successful (popup)');
         }
       } else {
-        console.log('🚀 Using redirect for production...');
+        console.log('Using redirect for production...');
         await signInWithRedirect(auth, provider);
       }
     } catch (err) {
@@ -201,13 +202,14 @@ export const FirebaseProvider: React.FC<{ children: React.ReactNode }> = ({ chil
   const loginWithGoogle = async () => {
     try {
       setError(null);
-      console.log('🚀 Starting Google login with popup...');
+      console.log('Starting Google login with popup...');
 
       const provider = new GoogleAuthProvider();
       provider.addScope('https://www.googleapis.com/auth/spreadsheets.readonly');
       provider.addScope('https://www.googleapis.com/auth/calendar.events');
+      provider.addScope('https://www.googleapis.com/auth/calendar.readonly');
 
-      // ✅ FORCE Google to show the account picker and consent screen to avoid 403 session confusion
+      // FORCE Google to show the account picker and consent screen to avoid 403 session confusion
       provider.setCustomParameters({
         prompt: 'select_account'
       });
@@ -220,11 +222,11 @@ export const FirebaseProvider: React.FC<{ children: React.ReactNode }> = ({ chil
         console.log('✅ Access token obtained from popup');
         setAccessToken(credential.accessToken);
 
-        // ✅ Store token with expiry time (Google tokens expire in 1 hour)
+        // Store token with expiry time (Google tokens expire in 1 hour)
         const expiryTime = Date.now() + (3600 * 1000); // 1 hour from now
         await saveAuthTokens(credential.accessToken, '', 3600);
 
-        // ✅ Also store SECURELY (encrypted) for components that might use it
+        // Also store SECURELY (encrypted) for components that might use it
         await secureSetItem('google_access_token', credential.accessToken, result.user.uid);
 
         logSuccess('Google login successful');

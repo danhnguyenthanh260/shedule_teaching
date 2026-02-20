@@ -155,49 +155,100 @@ function doPost(e) {
 }
 
 function handleReadSheet_(params) {
-  if (!params.url) throw new Error('Missing Spreadsheet URL (V10.1)');
-  const ss = SpreadsheetApp.openByUrl(params.url);
-  const data = ss.getSheets()[0].getDataRange().getValues();
+  if (!params.url) throw new Error('Missing Spreadsheet URL (V10.2)');
+  const startTime = new Date().getTime();
+  
+  // Use openById if possible for slightly better performance
+  let ss;
+  const idMatch = params.url.match(/\/d\/([a-zA-Z0-9-_]+)/);
+  if (idMatch) {
+    ss = SpreadsheetApp.openById(idMatch[1]);
+  } else {
+    ss = SpreadsheetApp.openByUrl(params.url);
+  }
+  
+  let sheet;
+  if (params.tabName) {
+    sheet = ss.getSheetByName(params.tabName);
+  }
+  if (!sheet) sheet = ss.getSheets()[0];
+  
+  const data = sheet.getDataRange().getValues();
+  const executionTime = new Date().getTime() - startTime;
+  
   return jsonResponse_({ 
       status: CONSTANTS.SUCCESS, 
-      version: '10.1',
+      version: '10.2',
+      executionTime: executionTime + 'ms',
+      tabName: params.tabName || sheet.getName(),
       data: data.slice(parseInt(params.startRow || '1', 10) - 1) 
   });
 }
 
 function verifyFirebaseToken_(idToken) {
   if (!idToken) return { valid: false };
+  
+  const cache = CacheService.getScriptCache();
+  const cacheKey = 'auth_' + idToken.substring(idToken.length - 30); // Use enough of the signature
+  const cached = cache.get(cacheKey);
+  if (cached) return JSON.parse(cached);
+
   const res = UrlFetchApp.fetch(`https://identitytoolkit.googleapis.com/v1/accounts:lookup?key=${CONSTANTS.FIREBASE_WEB_API_KEY}`, { 
       method: 'post', contentType: 'application/json', payload: JSON.stringify({ idToken }), muteHttpExceptions: true 
   });
   const data = JSON.parse(res.getContentText());
-  return (data.users && data.users.length > 0) ? { valid: true, email: data.users[0].email } : { valid: false };
+  const result = (data.users && data.users.length > 0) ? { valid: true, email: data.users[0].email } : { valid: false };
+  
+  if (result.valid) {
+    cache.put(cacheKey, JSON.stringify(result), 21600); // Max cache: 6 hours
+  }
+  
+  return result;
 }
 
 function isAuthorized_(email) {
   if (!email) return false;
   const cleanEmail = email.trim().toLowerCase();
   if (cleanEmail === CONSTANTS.SUPER_ADMIN_EMAIL.toLowerCase()) return true;
-  try {
-    const url = `${CONSTANTS.FIREBASE_URL}admin_whitelist.json`;
-    const res = UrlFetchApp.fetch(url, { muteHttpExceptions: true });
-    if (res.getResponseCode() !== 200) {
-      console.error(`Firebase error: ${res.getResponseCode()} - ${res.getContentText()}`);
-      return false;
-    }
-    const data = JSON.parse(res.getContentText());
-    if (!data) {
-      console.log('Whitelist is empty');
-      return false;
-    }
-    const list = Object.values(data).map(v => String(v).trim().toLowerCase());
-    const isMaster = list.includes(cleanEmail);
-    console.log(`Auth check for ${cleanEmail}: ${isMaster}`);
-    return isMaster;
-  } catch (e) { 
-    console.error('Whitelist fetch error: ' + e.toString());
-    return false; 
+  
+  const cache = CacheService.getScriptCache();
+  const props = PropertiesService.getScriptProperties();
+  const cacheKey = 'admin_whitelist';
+  
+  // 1. Try CacheService (Fastest, 6h)
+  let whitelist = cache.get(cacheKey);
+  
+  // 2. Try PropertiesService (Permanent, storage of last known valid state)
+  if (!whitelist) {
+    whitelist = props.getProperty(cacheKey);
   }
+  
+  if (!whitelist) {
+    try {
+      const url = `${CONSTANTS.FIREBASE_URL}admin_whitelist.json`;
+      const res = UrlFetchApp.fetch(url, { muteHttpExceptions: true });
+      if (res.getResponseCode() !== 200) {
+        console.error(`Firebase error: ${res.getResponseCode()} - ${res.getContentText()}`);
+        return false;
+      }
+      whitelist = res.getContentText();
+      
+      // Save to both (Cache for speed, Properties for longevity)
+      cache.put(cacheKey, whitelist, 21600); 
+      props.setProperty(cacheKey, whitelist);
+    } catch (e) {
+      console.error('Whitelist fetch error: ' + e.toString());
+      return false;
+    }
+  }
+
+  if (whitelist) {
+    const data = JSON.parse(whitelist);
+    if (!data) return false;
+    const list = Object.values(data).map(v => String(v).trim().toLowerCase());
+    return list.includes(cleanEmail);
+  }
+  return false;
 }
 
 function jsonResponse_(obj) { 

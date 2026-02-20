@@ -37,7 +37,7 @@ interface FirebaseContextType {
   loginWithEmail: (email: string, password: string) => Promise<void>;
   signupWithEmail: (email: string, password: string) => Promise<void>;
   logout: () => Promise<void>;
-  getAccessToken: () => Promise<string | null>;
+  reauthorizeGoogle: () => Promise<void>;
   isWhitelistLoading: boolean;
   isAdmin: boolean;
 }
@@ -102,10 +102,21 @@ export const FirebaseProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       if (currentUser && !accessToken) {
         const restoreToken = async () => {
           const stored = await secureGetItem('google_access_token', currentUser.uid);
-          if (stored) {
-            console.log('Restored access token from localStorage');
-            setAccessToken(stored);
-            logInfo('Restored access token from localStorage');
+          const expiryRaw = localStorage.getItem('google_token_expiry');
+          const now = Date.now();
+
+          if (stored && expiryRaw) {
+            const expiry = parseInt(expiryRaw);
+            if (now < expiry) {
+              console.log('✅ Restored valid access token from localStorage');
+              setAccessToken(stored);
+              logInfo('Restored access token from localStorage');
+            } else {
+              console.warn('⚠️ Stored access token has expired');
+              secureRemoveItem('google_access_token');
+              localStorage.removeItem('google_token_expiry');
+              setAccessToken(null);
+            }
           }
         };
         restoreToken();
@@ -240,6 +251,11 @@ export const FirebaseProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     }
   };
 
+  const reauthorizeGoogle = async () => {
+    logInfo('Manual re-authorization triggered');
+    await loginWithGoogle();
+  };
+
   const loginWithEmail = async (email: string, password: string) => {
     try {
       setError(null);
@@ -303,6 +319,7 @@ export const FirebaseProvider: React.FC<{ children: React.ReactNode }> = ({ chil
         error,
         accessToken,
         loginWithGoogle,
+        reauthorizeGoogle,
         loginWithEmail,
         signupWithEmail,
         logout,

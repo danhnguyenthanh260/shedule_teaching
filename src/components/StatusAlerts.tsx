@@ -40,30 +40,43 @@ export const StatusAlerts: React.FC<StatusAlertsProps> = ({ error, result, onClo
 
   const errorText = error || '';
   const isConflict = errorText.toLowerCase().includes('xung đột') || errorText.toLowerCase().includes('conflict');
+  const isAuthError = errorText.includes('401') || errorText.toLowerCase().includes('unauthenticated') || errorText.toLowerCase().includes('invalid credentials');
 
   return (
     <div className="fixed bottom-8 left-1/2 -translate-x-1/2 z-[1000] w-full max-w-2xl px-6 animate-in slide-in-from-bottom-8 duration-500 ease-out">
-      {/* 🚨 ERROR ALERT (Red for general, Orange for Conflict) */}
+      {/* 🚨 ERROR ALERT (Red for general, Orange for Conflict, Purple for Auth) */}
       {error && (
         <div className={`bg-white/95 backdrop-blur-xl border p-5 rounded-[2rem] flex items-center justify-between shadow-2xl mb-3 animate-in fade-in zoom-in-95 duration-300 border-b-4 ${
-          isConflict ? 'border-orange-100 border-b-orange-200' : 'border-rose-100 border-b-rose-200'
+          isConflict ? 'border-orange-100 border-b-orange-200' : 
+          isAuthError ? 'border-purple-100 border-b-purple-200 shadow-purple-500/10' :
+          'border-rose-100 border-b-rose-200'
         }`}>
           <div className="flex items-center gap-4 flex-1">
             <div className={`w-12 h-12 rounded-2xl flex items-center justify-center shrink-0 ${
-              isConflict ? 'bg-orange-50 text-orange-500' : 'bg-rose-50 text-rose-500'
+              isConflict ? 'bg-orange-50 text-orange-500' : 
+              isAuthError ? 'bg-purple-50 text-purple-500' :
+              'bg-rose-50 text-rose-500'
             }`}>
-              <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
-              </svg>
+              {isAuthError ? (
+                <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M15 7a2 2 0 012 2m4 0a6 6 0 01-7.743 5.743L11 17H9v2H7v2H4a1 1 0 01-1-1v-2.586a1 1 0 01.293-.707l5.964-5.964A6 6 0 1121 9z" />
+                </svg>
+              ) : (
+                <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+                </svg>
+              )}
             </div>
             <div className="min-w-0">
               <h4 className={`text-[10px] font-bold uppercase tracking-[0.2em] mb-1 ${
-                isConflict ? 'text-orange-500' : 'text-rose-500'
+                isConflict ? 'text-orange-500' : 
+                isAuthError ? 'text-purple-500' :
+                'text-rose-500'
               }`}>
-                {isConflict ? 'Phát hiện xung đột' : 'Gặp lỗi hệ thống'}
+                {isConflict ? 'Phát hiện xung đột' : isAuthError ? 'Hết hạn truy cập' : 'Gặp lỗi hệ thống'}
               </h4>
               <p className="text-sm font-bold text-slate-800 leading-tight line-clamp-2">
-                {error}
+                {isAuthError ? 'Phiên đăng nhập Google đã hết hạn. Hãy bấm Cấp lại quyền để tiếp tục.' : error}
               </p>
             </div>
           </div>
@@ -75,6 +88,14 @@ export const StatusAlerts: React.FC<StatusAlertsProps> = ({ error, result, onClo
                 className="px-5 py-2.5 bg-orange-500 text-white rounded-xl font-bold text-[10px] uppercase tracking-wider hover:bg-orange-600 active:scale-95 shadow-lg shadow-orange-100"
               >
                 Ghi đè ngay
+              </button>
+            )}
+            {isAuthError && onForceSync && (
+              <button 
+                onClick={onForceSync}
+                className="px-5 py-2.5 bg-purple-500 text-white rounded-xl font-bold text-[10px] uppercase tracking-wider hover:bg-purple-600 active:scale-95 shadow-lg shadow-purple-100"
+              >
+                Cấp lại quyền
               </button>
             )}
             <button 

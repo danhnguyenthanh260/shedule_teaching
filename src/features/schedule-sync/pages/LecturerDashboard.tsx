@@ -21,7 +21,7 @@ import { ref, set, get } from 'firebase/database';
 import { configService, SemesterConfig } from '../../../services/configService';
 
 export const LecturerDashboard: React.FC = () => {
-  const { user: firebaseUser, accessToken } = useFirebase();
+  const { user: firebaseUser, accessToken, reauthorizeGoogle } = useFirebase();
   const [isHistoryOpen, setIsHistoryOpen] = useState(false);
   const [refreshHistory, setRefreshHistory] = useState(0);
 
@@ -769,7 +769,14 @@ export const LecturerDashboard: React.FC = () => {
           setSyncError(null);
           setParserError(null);
         }}
-        onForceSync={() => handleSync(true)}
+        onForceSync={() => {
+          const errText = (parserError || syncError || '').toLowerCase();
+          if (errText.includes('401') || errText.includes('unauthenticated') || errText.includes('credentials')) {
+            reauthorizeGoogle();
+          } else {
+            handleSync(true);
+          }
+        }}
       />
 
       {toastMessage && (

@@ -606,7 +606,7 @@ export const LecturerDashboard: React.FC = () => {
       {/* Step 3: Preview & Sync (Approx 3/4 of screen) */}
       {(rows.length > 0 || (allRows.length > 0 && isPreviewMode)) && (
         <section className="flex-1 min-h-0 bg-white p-4 rounded-3xl border border-slate-100 flex flex-col relative z-[60] overflow-visible animate-in fade-in slide-in-from-bottom-4 duration-500 ease-out">
-          <div className="flex-none flex items-center justify-between gap-4 mb-3 border-b border-slate-100 pb-3 h-12">
+          <div className="flex-none flex items-center justify-between gap-4 mb-3 border-b border-slate-100 pb-3 min-h-[3.5rem]">
             <div className="flex items-center gap-2 shrink-0">
               
               <div>
@@ -652,37 +652,42 @@ export const LecturerDashboard: React.FC = () => {
                 </div>
               </div>
 
-              <div className="flex items-center gap-2 shrink-0">
-
-                <div className="flex flex-col gap-1 items-end">
-                <button
-                  onClick={() => handleSync(false)}
-                  disabled={syncing || clearing || selectedIds.size === 0}
-                  className="px-5 py-2.5 bg-[#F27024] text-white rounded-xl font-bold hover:bg-orange-600 disabled:bg-slate-100 disabled:text-slate-400 disabled:shadow-none disabled:border-slate-200 border border-transparent transition-all shadow-lg shadow-orange-200 flex items-center gap-2 text-[11px] uppercase tracking-wider"
-                >
-                  {syncing ? (
-                    <div className="w-3 h-3 border-2 border-white/30 border-t-white rounded-full animate-spin" />
-                  ) : (
-                    <>
-                      Đồng bộ ({selectedIds.size})
-                    </>
-                  )}
-                </button>
-                
-                {/* 🚨 HIỂN THỊ NÚT FORCE SYNC KHI CÓ TRÙNG HOẶC XUNG ĐỘT */}
-                {((syncResult && syncResult.skipped > 0) || (syncError?.toLowerCase().includes('xung đột'))) && !syncing && (
+              <div className="flex items-center gap-3 shrink-0">
+                 {/* 🚨 NÚT ĐỒNG BỘ CHÍNH */}
+                <div className="relative group">
                   <button
-                    onClick={() => handleSync(true)}
-                    className="text-[10px] font-bold text-orange-600 hover:text-orange-800 underline flex items-center gap-1 animate-pulse bg-orange-50 px-2 py-1 rounded-lg border border-orange-100 shadow-sm transition-all"
-                    title="Bỏ qua kiểm tra và đồng bộ ngay lập tức"
+                    onClick={() => handleSync(false)}
+                    disabled={syncing || clearing || selectedIds.size === 0}
+                    className="h-11 px-6 bg-[#F27024] text-white rounded-2xl font-bold hover:bg-orange-600 disabled:bg-slate-50 disabled:text-slate-300 disabled:border-slate-100 border border-transparent transition-all shadow-xl shadow-orange-200/50 flex items-center gap-2 text-[11px] uppercase tracking-widest active:scale-95"
                   >
-                    <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M13 10V3L4 14h7v7l9-11h-7z" />
-                    </svg>
-                    Bỏ qua & Đồng bộ ngay
+                    {syncing ? (
+                      <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                    ) : (
+                      <>Đồng bộ ({selectedIds.size})</>
+                    )}
                   </button>
-                )}
-              </div>
+
+                  {/* 🚨 OVERLAY NÚT FORCE SYNC KHI CẦN (DẠNG TOOLTIP/POPUP HOẶC TRÀN LỀ) */}
+                  {((syncResult && syncResult.skipped > 0) || (syncError?.toLowerCase().includes('xung đột'))) && !syncing && (
+                    <div className="absolute top-full right-0 mt-2 bg-white border border-orange-100 rounded-2xl shadow-2xl p-3 z-[70] animate-in slide-in-from-top-2 duration-300 w-48 border-b-4 border-b-orange-100/50">
+                      <div className="text-[9px] font-bold text-slate-400 uppercase tracking-widest mb-2 flex items-center gap-1.5 px-1">
+                        <span className="w-1.5 h-1.5 bg-orange-400 rounded-full" />
+                        Phát hiện trùng lịch
+                      </div>
+                      <button
+                        onClick={() => handleSync(true)}
+                        className="w-full flex items-center justify-center gap-2 px-3 py-2.5 bg-orange-50 text-orange-600 rounded-xl font-bold text-[10px] hover:bg-orange-100 transition-all border border-orange-100 active:scale-95 group/force"
+                      >
+                        <svg className="w-3.5 h-3.5 group-hover/force:rotate-12 transition-transform" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M13 10V3L4 14h7v7l9-11h-7z" />
+                        </svg>
+                        GHI ĐÈ & SYNC NGAY
+                      </button>
+                    </div>
+                  )}
+                </div>
+
+                <div className="w-px h-8 bg-slate-100 mx-1" />
 
               <div className="flex items-center gap-1.5">
                 {isConfirmingClear ? (

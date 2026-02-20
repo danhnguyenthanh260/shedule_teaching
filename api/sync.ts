@@ -152,26 +152,33 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       return res.status(400).json({ error: "Events array is required" });
     }
 
+    const normalizedEvents: any[] = [];
+    for (const event of events) {
+      const { start, end, title } = event;
+      const isoRegex = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}/;
+      
+      if (!start || !end || !isoRegex.test(start) || !isoRegex.test(end)) {
+        console.error(`❌ Date format error for "${title}": start=${start}, end=${end}`);
+        return res.status(400).json({ 
+          error: `Định dạng ngày tháng không hợp lệ cho sự kiện "${title}".`,
+          detail: `Giá trị nhận được: ${start || 'null'} - ${end || 'null'}. Hệ thống yêu cầu chuẩn ISO (YYYY-MM-DD...). Hãy tải lại trang và thử lại.`
+        });
+      }
+      normalizedEvents.push(event);
+    }
+
     const conflicts: any[] = [];
     const eventsToSync: any[] = [];
 
     // ONLY check for conflicts if NOT forcing
     if (!force) {
-      for (const event of events) {
+      for (const event of normalizedEvents) {
         const { start, end, resources, title } = event;
-        
-        const isoRegex = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}/;
-        if (!start || !end || !isoRegex.test(start) || !isoRegex.test(end)) {
-          return res.status(400).json({ 
-            error: `Invalid date format for event "${title}". Backend requires strict ISO format (yyyy-MM-ddT...).` 
-          });
-        }
-
         const startTime = new Date(start);
         const endTime = new Date(end);
 
         if (isNaN(startTime.getTime()) || isNaN(endTime.getTime())) {
-          return res.status(400).json({ error: `Invalid date values for event "${title}".` });
+          return res.status(400).json({ error: `Dữ liệu thời gian không hợp lệ cho sự kiện "${title}".` });
         }
 
         // Check conflict in Firestore
@@ -224,7 +231,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       }
     } else {
       // If force is true, all events are ready to sync
-      eventsToSync.push(...events);
+      eventsToSync.push(...normalizedEvents);
     }
 
     const batch = db.batch();

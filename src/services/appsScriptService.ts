@@ -83,10 +83,7 @@ export const readSheet = async (
             action: 'readSheet',
             url: url,
             startRow: startRow.toString(),
-            tabName: tabName,
-            idToken: idToken,
-            // 🔐 Tự động thêm secret ở môi trường Local để hỗ trợ Vite Proxy
-            ...(import.meta.env.DEV ? { secret: import.meta.env.VITE_GAS_SECRET } : {})
+            idToken: idToken
         };
 
         const fetchUrl = `${API_BASE_URL}/api/readSheet`;

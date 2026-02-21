@@ -213,18 +213,39 @@ export const useSheetParser = ({
   }, [fullHeaders]);
 
   const effectiveSearchColumns = useMemo(() => {
-    // 🛡️ In Review Mode, strictly only search columns mapped in Step 2
-    // to avoid matching Supervisor/Project info columns.
+    // 🛡️ In Review Mode, search columns mapped in Step 2 
+    // PLUS any siblings that share the same labels (to cover all blocks).
     if (sheetMeta?.isDataMau) {
-      const mappedIndices = Object.values(sheetMeta.mapping || {}).filter((idx): idx is number => typeof idx === 'number' && idx !== -1);
-      return mappedIndices.length > 0 ? mappedIndices : inferredSearchIndices;
+      const mapping = sheetMeta.mapping || {};
+      const mappedIndices = Object.values(mapping).filter((idx): idx is number => typeof idx === 'number' && idx !== -1);
+      
+      if (mappedIndices.length === 0) return inferredSearchIndices;
+
+      // Find all labels that are currently mapped
+      const mappedLabels = new Set<string>();
+      mappedIndices.forEach(idx => {
+        const label = (fullDetailHeaders[idx] || "").trim().toLowerCase();
+        if (label && !label.startsWith('column_')) mappedLabels.add(label);
+      });
+
+      // Find ALL columns that share these labels
+      const broadIndices = new Set<number>();
+      fullDetailHeaders.forEach((h, i) => {
+        const label = (h || "").trim().toLowerCase();
+        if (mappedLabels.has(label)) broadIndices.add(i);
+      });
+
+      // Always include mapped indices just in case
+      mappedIndices.forEach(idx => broadIndices.add(idx));
+
+      return Array.from(broadIndices).sort((a, b) => a - b);
     }
 
     if (searchColumnIndices && searchColumnIndices.length > 0) {
       return searchColumnIndices;
     }
     return inferredSearchIndices;
-  }, [searchColumnIndices, inferredSearchIndices, sheetMeta?.isDataMau, sheetMeta?.mapping]);
+  }, [searchColumnIndices, inferredSearchIndices, sheetMeta?.isDataMau, sheetMeta?.mapping, fullDetailHeaders]);
 
   return {
     loading,

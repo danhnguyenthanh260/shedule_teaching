@@ -182,7 +182,9 @@ export const LecturerDashboard: React.FC = () => {
       setIsPreviewMode(true);
     }
 
-    showToast(`Đã tải ${data.rawRows.length} dòng dữ liệu (${isActuallyReview ? 'Review Mode' : 'Normal'})`);
+    const timeStr = data.fetchTime ? ` (Lúc ${data.fetchTime})` : '';
+    const cacheStatus = data.isCached ? ' [Dữ liệu từ máy]' : ' [Dữ liệu mới]';
+    showToast(`Đã tải ${data.rawRows.length} dòng dữ liệu${timeStr}${cacheStatus}`);
   }, [semesters, selectedSemesterId, setSheetMeta, setSheetType, applyHeaderRow, showToast]);
 
   // Filtering Logic
@@ -340,17 +342,21 @@ export const LecturerDashboard: React.FC = () => {
     
     // Choose which mapping to use
     let targetMapping: ColumnMapping = {};
+    let targetColumnsConfig = ''; // Default to empty (standard view)
     let shouldApply = false;
 
-    if (savedMapping && Object.keys(savedMapping).length > 0) {
-      targetMapping = savedMapping;
+    // 🏛️ Priority 1: Admin Configuration (Per Semester)
+    const adminConfig = semesters[selectedSemesterId];
+    if (adminConfig && adminConfig.mapping && Object.keys(adminConfig.mapping).length > 0) {
+      targetMapping = adminConfig.mapping;
+      targetColumnsConfig = adminConfig.columns || ''; // STRICT: Use Admin's columns or standard
       shouldApply = true;
-    } else {
-      const configMapping = semesters[selectedSemesterId]?.mapping;
-      if (configMapping && Object.keys(configMapping).length > 0) {
-        targetMapping = configMapping;
-        shouldApply = true;
-      }
+    } 
+    // 👤 Priority 2: User's Saved Mapping (Per File/Tab)
+    else if (savedMapping && Object.keys(savedMapping).length > 0) {
+      targetMapping = savedMapping;
+      targetColumnsConfig = columnsConfig; // Or saved columns if we tracked them
+      shouldApply = true;
     }
 
     // Always apply if it's new, changed, or it's manual trigger (appliedColumnMap)
@@ -358,12 +364,15 @@ export const LecturerDashboard: React.FC = () => {
        console.log('📥 [Sync] Applying Mapping for', mappingId);
        setColumnMap(targetMapping);
        setAppliedColumnMap(targetMapping);
+       setColumnsConfig(targetColumnsConfig); // 🏛️ Sync columns order
        applyMapping(targetMapping, effectiveIsReview);
        setIsPreviewMode(false);
     } else {
        console.log('🧹 [Sync] Entering Preview Mode for', mappingId);
        setColumnMap({});
        setAppliedColumnMap({});
+       // Preview mode usually uses inferredColumnsConfig (all headers)
+       // This is fine, as long as it doesn't persist when Applying Admin config
        applyMapping({}, effectiveIsReview); // 🚀 Ensure preview rows populated
        setIsPreviewMode(true);
     }
@@ -375,7 +384,7 @@ export const LecturerDashboard: React.FC = () => {
     mappingId, 
     savedMapping, 
     mappingLoading,
-    allRows.length, 
+    allRows, // 🔄 Trigger on ANY data change (content or length)
     semesters, 
     selectedSemesterId,
     effectiveIsReview,

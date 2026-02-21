@@ -2,10 +2,13 @@ import type { VercelRequest, VercelResponse } from "@vercel/node";
 import fetch from "node-fetch";
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
-  // CORS Headers
+  // CORS & Anti-Cache Headers
   res.setHeader("Access-Control-Allow-Origin", "*");
   res.setHeader("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
   res.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization");
+  res.setHeader("Cache-Control", "no-cache, no-store, must-revalidate, max-age=0");
+  res.setHeader("Pragma", "no-cache");
+  res.setHeader("Expires", "0");
 
   if (req.method === "OPTIONS") return res.status(200).end();
 
@@ -30,7 +33,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
     console.log(`🔗 Proxy calling GAS: ${GAS_URL} (Action: ${payload.action || 'readSheet'})`);
     
-    const response = await fetch(GAS_URL, {
+    // 🚀 URL Cache-buster for GAS call
+    const bustUrl = `${GAS_URL}${GAS_URL.includes('?') ? '&' : '?'}t=${Date.now()}`;
+
+    const response = await fetch(bustUrl, {
       method: "POST", // GAS handles POST better for diverse actions
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(finalPayload)
@@ -58,6 +64,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
     try {
       const data = JSON.parse(responseText);
+      console.log(`✅ GAS Response parsed successfully. Action: ${payload.action}, Status: ${data.status}`);
       return res.status(200).json(data);
     } catch (parseErr) {
       console.error(`❌ JSON Parse Error. Body starts with: ${responseText.substring(0, 200)}`);

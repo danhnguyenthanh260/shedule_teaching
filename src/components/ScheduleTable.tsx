@@ -177,19 +177,34 @@ export const ScheduleTable: React.FC<ScheduleTableProps> = ({
                   </td>
                   <td className="px-4 py-4 text-center">
                     <div className="flex items-center justify-center gap-2">
-                      
                       <span className="text-sm font-medium text-slate-500">{row.locationRaw || row.location}</span>
                     </div>
                   </td>
                 </>
               ) : showDynamic ? (
-                colMapping.map((col, i) => (
-                  <td key={i} className="px-4 py-4 text-center border-r border-slate-50/50">
-                    <span className="text-xs font-medium text-slate-700 block">
-                      {col.index !== -1 ? (row.rawRow?.[col.index] || '') : '-'}
-                    </span>
-                  </td>
-                ))
+                colMapping.map((col, i) => {
+                  let cellValue = '-';
+                  if (row.rawRow) {
+                    let targetIndex = col.index;
+                    // If row has block boundaries AND this is a Review/DataMau sheet
+                    if (row.isGrouped && row.blockStart !== undefined && row.blockEnd !== undefined && col.name) {
+                       const lowName = col.name.trim().toLowerCase();
+                       const blockMatch = allHeaders.findIndex((h, idx) => 
+                         idx >= row.blockStart! && idx <= row.blockEnd! && h.trim().toLowerCase() === lowName
+                       );
+                       if (blockMatch !== -1) targetIndex = blockMatch;
+                    }
+                    cellValue = targetIndex !== -1 ? (row.rawRow[targetIndex] || '') : '-';
+                  }
+
+                  return (
+                    <td key={i} className="px-4 py-4 text-center border-r border-slate-50/50">
+                      <span className="text-xs font-medium text-slate-700 block">
+                        {cellValue}
+                      </span>
+                    </td>
+                  );
+                })
               ) : (
                 <>
                   <td className="px-4 py-4 text-center border-r border-slate-50/50">
@@ -218,7 +233,6 @@ export const ScheduleTable: React.FC<ScheduleTableProps> = ({
                   </td>
                   <td className="px-4 py-4 text-center">
                     <div className="flex items-center justify-center gap-2">
-                      
                       <span className="text-sm font-medium text-slate-500">{row.locationRaw || row.location}</span>
                     </div>
                   </td>

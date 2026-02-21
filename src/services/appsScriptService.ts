@@ -82,11 +82,13 @@ export const readSheet = async (
         const payload = {
             action: 'readSheet',
             url: url,
+            tabName: tabName,
             startRow: startRow.toString(),
-            idToken: idToken
+            idToken: idToken,
+            t: Date.now() // 🚀 Cache-buster: Force fresh data from proxy/GAS
         };
 
-        const fetchUrl = `${API_BASE_URL}/api/readSheet`;
+        const fetchUrl = `${API_BASE_URL}/api/readSheet?t=${Date.now()}`;
         logInfo(`Reading sheet via proxy (POST): ${fetchUrl}`);
 
         const response = await fetch(fetchUrl, {

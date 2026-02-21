@@ -25,11 +25,70 @@ export const useCalendarSync = ({ accessToken }: UseCalendarSyncProps) => {
 
     try {
       console.log(`📡 Bắt đầu đồng bộ ${rowsToSync.length} mục lên Google Calendar... (Force: ${force})`);
+      
       const events = rowsToSync.map(r => {
-        // Fix leading zeros for hours if single digit (e.g., "1" -> "01")
-        const fixTime = (t: string) => t.length === 1 ? `0${t}:00` : t.includes(':') ? t : `${t}:00`;
-        const isoStart = r.date && r.startTime ? (r.startTime.includes('T') ? r.startTime : `${r.date}T${fixTime(r.startTime)}:00+07:00`) : '';
-        const isoEnd = r.date && r.endTime ? (r.endTime.includes('T') ? r.endTime : `${r.date}T${fixTime(r.endTime)}:00+07:00`) : '';
+        // 🛠️ Robust Date Formatter
+        const formatToISO = (dateStr: string, timeStr: string) => {
+          if (!dateStr || !timeStr) return '';
+          
+          // 1. Clean date - remove any prefix like "Ngày "
+          let cleanDate = dateStr.replace(/ngày\s*/i, '').trim();
+          
+          // 2. Simple split to extract YMD
+          let year, month, day;
+          if (cleanDate.includes('/')) {
+            const parts = cleanDate.split('/');
+            if (parts.length === 3) {
+              const p0 = parseInt(parts[0]);
+              const p1 = parseInt(parts[1]);
+              const p2 = parseInt(parts[2]);
+              
+              if (p2 > 100) { // e.g. 1/25/2026 or 25/1/2026
+                year = p2;
+                // Heuristic: If one is > 12, it must be the day
+                if (p0 > 12) { day = p0; month = p1; }
+                else if (p1 > 12) { day = p1; month = p0; }
+                else { 
+                  // Ambiguous: Assume VN format DD/MM if first part is small
+                  day = p0; month = p1; 
+                }
+              } else if (p0 > 100) { // e.g. 2026/01/25
+                year = p0; month = p1; day = p2;
+              }
+            }
+          } else if (cleanDate.includes('-')) {
+            const parts = cleanDate.split('-');
+            if (parts[0]?.length === 4) {
+              year = parseInt(parts[0]);
+              month = parseInt(parts[1]);
+              day = parseInt(parts[2]);
+            } else {
+              day = parseInt(parts[0]);
+              month = parseInt(parts[1]);
+              year = parseInt(parts[2]);
+            }
+          }
+
+          if (!year || !month || !day) return '';
+
+          const yyyy = year;
+          const mm = month.toString().padStart(2, '0');
+          const dd = day.toString().padStart(2, '0');
+          
+          const fixTime = (t: string) => {
+             const clean = t.replace(/h/i, ':').trim();
+             if (clean.includes(':')) {
+                const [h, m] = clean.split(':');
+                return `${h.padStart(2, '0')}:${m.padStart(2, '0')}`;
+             }
+             return `${clean.padStart(2, '0')}:00`;
+          };
+
+          return `${yyyy}-${mm}-${dd}T${fixTime(timeStr)}:00+07:00`;
+        };
+
+        const isoStart = r.startTime?.includes('T') ? r.startTime : formatToISO(r.date, r.startTime);
+        const isoEnd = r.endTime?.includes('T') ? r.endTime : formatToISO(r.date, r.endTime);
 
         return {
           title: r.person,
@@ -62,6 +121,7 @@ export const useCalendarSync = ({ accessToken }: UseCalendarSyncProps) => {
         updated: 0,
         failed: failedCount,
         skipped: skippedCount,
+        errors: res.data?.errors || [],
         logs: [
           res.message,
           res.data?.calendarName ? `Lịch: ${res.data.calendarName}` : null,
@@ -73,7 +133,13 @@ export const useCalendarSync = ({ accessToken }: UseCalendarSyncProps) => {
       return result;
     } catch (err: any) {
       console.error("❌ Sync error details:", err);
-      const errorMsg = err.message || "Lỗi không xác định khi đồng bộ";
+      let errorMsg = err.message || "Lỗi không xác định khi đồng bộ";
+      
+      // Clarify conflict message
+      if (errorMsg.includes('xung đột')) {
+        errorMsg = "Phát hiện xung đột: Dữ liệu này đã tồn tại trong Database của hệ thống (nhưng có thể chưa hiện trên Calendar của bạn). Hãy dùng nút 'Ghi đè' để đồng bộ lại.";
+      }
+      
       setSyncError("Lỗi đồng bộ: " + errorMsg);
       throw new Error(errorMsg);
     } finally {

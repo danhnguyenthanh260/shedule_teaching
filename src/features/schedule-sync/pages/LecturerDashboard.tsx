@@ -21,7 +21,7 @@ import { ref, set, get } from 'firebase/database';
 import { configService, SemesterConfig } from '../../../services/configService';
 
 export const LecturerDashboard: React.FC = () => {
-  const { user: firebaseUser, accessToken } = useFirebase();
+  const { user: firebaseUser, accessToken, reauthorizeGoogle } = useFirebase();
   const [isHistoryOpen, setIsHistoryOpen] = useState(false);
   const [refreshHistory, setRefreshHistory] = useState(0);
 
@@ -182,7 +182,9 @@ export const LecturerDashboard: React.FC = () => {
       setIsPreviewMode(true);
     }
 
-    showToast(`Đã tải ${data.rawRows.length} dòng dữ liệu (${isActuallyReview ? 'Review Mode' : 'Normal'})`);
+    const timeStr = data.fetchTime ? ` (Lúc ${data.fetchTime})` : '';
+    const cacheStatus = data.isCached ? ' [Dữ liệu từ máy]' : ' [Dữ liệu mới]';
+    showToast(`Đã tải ${data.rawRows.length} dòng dữ liệu${timeStr}${cacheStatus}`);
   }, [semesters, selectedSemesterId, setSheetMeta, setSheetType, applyHeaderRow, showToast]);
 
   // Filtering Logic
@@ -340,17 +342,21 @@ export const LecturerDashboard: React.FC = () => {
     
     // Choose which mapping to use
     let targetMapping: ColumnMapping = {};
+    let targetColumnsConfig = ''; // Default to empty (standard view)
     let shouldApply = false;
 
-    if (savedMapping && Object.keys(savedMapping).length > 0) {
-      targetMapping = savedMapping;
+    // 🏛️ Priority 1: Admin Configuration (Per Semester)
+    const adminConfig = semesters[selectedSemesterId];
+    if (adminConfig && adminConfig.mapping && Object.keys(adminConfig.mapping).length > 0) {
+      targetMapping = adminConfig.mapping;
+      targetColumnsConfig = adminConfig.columns || ''; // STRICT: Use Admin's columns or standard
       shouldApply = true;
-    } else {
-      const configMapping = semesters[selectedSemesterId]?.mapping;
-      if (configMapping && Object.keys(configMapping).length > 0) {
-        targetMapping = configMapping;
-        shouldApply = true;
-      }
+    } 
+    // 👤 Priority 2: User's Saved Mapping (Per File/Tab)
+    else if (savedMapping && Object.keys(savedMapping).length > 0) {
+      targetMapping = savedMapping;
+      targetColumnsConfig = columnsConfig; // Or saved columns if we tracked them
+      shouldApply = true;
     }
 
     // Always apply if it's new, changed, or it's manual trigger (appliedColumnMap)
@@ -358,12 +364,15 @@ export const LecturerDashboard: React.FC = () => {
        console.log('📥 [Sync] Applying Mapping for', mappingId);
        setColumnMap(targetMapping);
        setAppliedColumnMap(targetMapping);
+       setColumnsConfig(targetColumnsConfig); // 🏛️ Sync columns order
        applyMapping(targetMapping, effectiveIsReview);
        setIsPreviewMode(false);
     } else {
        console.log('🧹 [Sync] Entering Preview Mode for', mappingId);
        setColumnMap({});
        setAppliedColumnMap({});
+       // Preview mode usually uses inferredColumnsConfig (all headers)
+       // This is fine, as long as it doesn't persist when Applying Admin config
        applyMapping({}, effectiveIsReview); // 🚀 Ensure preview rows populated
        setIsPreviewMode(true);
     }
@@ -375,7 +384,7 @@ export const LecturerDashboard: React.FC = () => {
     mappingId, 
     savedMapping, 
     mappingLoading,
-    allRows.length, 
+    allRows, // 🔄 Trigger on ANY data change (content or length)
     semesters, 
     selectedSemesterId,
     effectiveIsReview,
@@ -606,7 +615,7 @@ export const LecturerDashboard: React.FC = () => {
       {/* Step 3: Preview & Sync (Approx 3/4 of screen) */}
       {(rows.length > 0 || (allRows.length > 0 && isPreviewMode)) && (
         <section className="flex-1 min-h-0 bg-white p-4 rounded-3xl border border-slate-100 flex flex-col relative z-[60] overflow-visible animate-in fade-in slide-in-from-bottom-4 duration-500 ease-out">
-          <div className="flex-none flex items-center justify-between gap-4 mb-3 border-b border-slate-100 pb-3 h-12">
+          <div className="flex-none flex items-center justify-between gap-4 mb-3 border-b border-slate-100 pb-3 min-h-[3.5rem]">
             <div className="flex items-center gap-2 shrink-0">
               
               <div>
@@ -652,33 +661,24 @@ export const LecturerDashboard: React.FC = () => {
                 </div>
               </div>
 
-              <div className="flex items-center gap-2 shrink-0">
-
-               <div className="flex flex-col gap-1 items-end">
-                <button
-                  onClick={() => handleSync(false)}
-                  disabled={syncing || clearing || selectedIds.size === 0}
-                  className="px-5 py-2.5 bg-[#F27024] text-white rounded-xl font-bold hover:bg-orange-600 disabled:bg-slate-100 disabled:text-slate-400 disabled:shadow-none disabled:border-slate-200 border border-transparent transition-all shadow-lg shadow-orange-200 flex items-center gap-2 text-[11px] uppercase tracking-wider"
-                >
-                  {syncing ? (
-                    <div className="w-3 h-3 border-2 border-white/30 border-t-white rounded-full animate-spin" />
-                  ) : (
-                    <>
-                      Đồng bộ ({selectedIds.size})
-                    </>
-                  )}
-                </button>
-                
-                {syncResult && syncResult.skipped > 0 && !syncing && (
+              <div className="flex items-center gap-3 shrink-0">
+                 {/* 🚨 NÚT ĐỒNG BỘ CHÍNH */}
+                <div className="relative group">
                   <button
-                    onClick={() => handleSync(true)}
-                    className="text-[9px] font-bold text-orange-500 hover:text-orange-700 underline flex items-center gap-1 animate-pulse"
-                    title="Bỏ qua kiểm tra trùng lặp và đồng bộ lại"
+                    onClick={() => handleSync(false)}
+                    disabled={syncing || clearing || selectedIds.size === 0}
+                    className="h-11 px-6 bg-[#F27024] text-white rounded-2xl font-bold hover:bg-orange-600 disabled:bg-slate-50 disabled:text-slate-300 disabled:border-slate-100 border border-transparent transition-all shadow-xl shadow-orange-200/50 flex items-center gap-2 text-[11px] uppercase tracking-widest active:scale-95"
                   >
-                    Bị trùng? Đồng bộ cưỡng bức ngay
+                    {syncing ? (
+                      <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                    ) : (
+                      <>Đồng bộ ({selectedIds.size})</>
+                    )}
                   </button>
-                )}
-              </div>
+
+                </div>
+
+                <div className="w-px h-8 bg-slate-100 mx-1" />
 
               <div className="flex items-center gap-1.5">
                 {isConfirmingClear ? (
@@ -777,6 +777,14 @@ export const LecturerDashboard: React.FC = () => {
           setSyncResult(null);
           setSyncError(null);
           setParserError(null);
+        }}
+        onForceSync={() => {
+          const errText = (parserError || syncError || '').toLowerCase();
+          if (errText.includes('401') || errText.includes('unauthenticated') || errText.includes('credentials')) {
+            reauthorizeGoogle();
+          } else {
+            handleSync(true);
+          }
         }}
       />
 

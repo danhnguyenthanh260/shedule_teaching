@@ -15,8 +15,11 @@ interface ExcelImportProps {
     headerRowIndex: number;
     isDataMau: boolean;
     sheetType?: SheetTypeInfo;
+    fetchTime?: string;
+    isCached?: boolean; // 👈 Báo cho UI biết dữ liệu này từ cache hay mới fetch
   }) => void;
   onLoadingStart?: () => void;
+  // ...
   setLoading: (loading: boolean) => void;
   setError: (error: string | null) => void;
   sheetUrl: string;
@@ -67,7 +70,7 @@ export const ExcelImport: React.FC<ExcelImportProps> = ({
     });
   }, [semesters]);
 
-  const processRawData = (rows: string[][], source: string, sourceTab?: string) => {
+  const processRawData = (rows: string[][], source: string, sourceTab?: string, fetchTime?: string, isCached?: boolean) => {
     if (!rows || rows.length === 0) {
       throw new Error('Dữ liệu trống');
     }
@@ -78,19 +81,6 @@ export const ExcelImport: React.FC<ExcelImportProps> = ({
     // Extract Sheet ID from URL
     const sheetIdMatch = sheetUrl.match(/\/d\/([a-zA-Z0-9-_]+)/);
     const actualSheetId = sheetIdMatch ? sheetIdMatch[1] : source;
-
-    // "Data Mẫu" Sheet ID - check for garbage in this specific sheet
-    const DATA_MAU_SHEET_ID = '1nshAfx6vf11FUDOTOTiLu0D-zulNfM5uKoCI0A106Sk';
-
-    if (actualSheetId === DATA_MAU_SHEET_ID && rows.length > 0) {
-      const firstRow = rows[0];
-      const firstColumns = firstRow.slice(0, 9).map(h => String(h || '').toLowerCase().trim());
-      const projectInfoKeywords = ['stt', 'mã nhóm', 'mã đề tài', 'tên đề tài', 'gvhd'];
-      const hasProjectInfoGarbage = firstColumns.filter(h =>
-        projectInfoKeywords.some(k => h.includes(k))
-      ).length >= 2;
-      // Note: hasProjectInfoGarbage logic exists but we don't slice anymore as per user request
-    }
 
     // ✅ Check if config explicitly defines sheet type
     const configSheetType = semesters[selectedSemesterId]?.sheetType;
@@ -120,24 +110,36 @@ export const ExcelImport: React.FC<ExcelImportProps> = ({
       tabName: sourceTab || tabName || 'Sheet1',
       headerRowIndex: detectedHeaderRowIndex,
       isDataMau: finalSheetType.type === 'review',
-      sheetType: finalSheetType
+      sheetType: finalSheetType,
+      fetchTime: fetchTime,
+      isCached: isCached // 👈 Truyền trạng thái cache
     });
   };
 
   const handleShowData = async (forceReload = false) => {
     if (!sheetUrl) return;
 
-    // Check Cache first if not forcing reload
     const sheetIdMatch = sheetUrl.match(/\/d\/([a-zA-Z0-9-_]+)/);
     const actualSheetId = sheetIdMatch ? sheetIdMatch[1] : 'unknown';
     
+    // 🕒 REFRESH THRESHOLD: If cache is older than 30 seconds, fetch fresh regardless
+    const REFRESH_THRESHOLD = 30 * 1000; 
+
     if (!forceReload) {
-      const cached = sheetCacheService.get(actualSheetId, tabName || 'Sheet1');
+      const cached = sheetCacheService.getFull(actualSheetId, tabName || 'Sheet1');
       if (cached) {
-        console.log('🚀 [ExcelImport] Loading from Cache:', actualSheetId, tabName);
-        processRawData(cached, 'Cache', tabName);
-        return;
+        const age = Date.now() - cached.timestamp;
+        if (age < REFRESH_THRESHOLD) {
+          console.log(`🚀 [ExcelImport] Loading from Cache (Age: ${Math.round(age/1000)}s):`, actualSheetId, tabName);
+          processRawData(cached.data, 'Cache', tabName, undefined, true);
+          return;
+        }
+        console.log(`🕦 [ExcelImport] Cache expired (${Math.round(age/1000)}s > 30s). Auto-refreshing...`);
       }
+    } else {
+      // 🚀 HARD RESET: Remove from local cache before fetching fresh
+      console.log('🧹 [ExcelImport] Force Reload: Clearing local cache...');
+      sheetCacheService.remove(actualSheetId, tabName || 'Sheet1');
     }
 
     onLoadingStart?.();
@@ -146,18 +148,29 @@ export const ExcelImport: React.FC<ExcelImportProps> = ({
     setError(null);
 
     try {
-      const { data: rows, tabName: actualTab } = await readSheet(sheetUrl, startRow, tabName);
+      console.log(`📡 [ExcelImport] Fetching Nuclear Fresh Data for ${actualSheetId} (Tab: ${tabName})...`);
+      const response = await readSheet(sheetUrl, startRow, tabName) as any;
+      const { data: rows, tabName: actualTab, rowCount, fetchTime: serverTime, isFresh } = response;
       
+      const fetchTime = serverTime ? new Date(serverTime).toLocaleTimeString() : new Date().toLocaleTimeString();
+      console.log(`✅ [ExcelImport] Data received: ${rowCount} rows. Server Time: ${fetchTime}${isFresh ? ' (NUCLEAR FRESH 🚀)' : ''}`);
+
       // ✅ Update the tabName state in parent to reflect reality
       if (actualTab && actualTab !== tabName) {
         setTabName(actualTab);
       }
 
-      processRawData(rows, 'GoogleSheet', actualTab);
+      processRawData(rows, 'GoogleSheet', actualTab, fetchTime, false);
       
       // Save to cache
       sheetCacheService.set(actualSheetId, actualTab || 'Sheet1', rows);
       setError(null);
+      
+      // 🚀 Explicitly tell the user the data is fresh
+      if (forceReload) {
+        // We can't call showToast directly from here without passing it as prop, 
+        // but the parent's handleDataLoaded will show a toast.
+      }
     } catch (err: any) {
       console.error('Fetch data error:', err);
       setError(err.message || 'Không thể lấy dữ liệu từ Sheets');

@@ -13,22 +13,25 @@ export interface CachedSheetData {
 
 export const sheetCacheService = {
   get: (sheetId: string, tabName: string): string[][] | null => {
+    const cached = sheetCacheService.getFull(sheetId, tabName);
+    return cached ? cached.data : null;
+  },
+
+  getFull: (sheetId: string, tabName: string): CachedSheetData | null => {
     try {
       const key = `${CACHE_PREFIX}${sheetId}_${tabName}`;
       const cached = localStorage.getItem(key);
       if (!cached) return null;
 
-      const { data, timestamp }: CachedSheetData = JSON.parse(cached);
+      const parsed: CachedSheetData = JSON.parse(cached);
       
-      // Check if cache is too old (optional, but good for data integrity)
-      if (Date.now() - timestamp > MAX_CACHE_AGE) {
+      if (Date.now() - parsed.timestamp > MAX_CACHE_AGE) {
         localStorage.removeItem(key);
         return null;
       }
 
-      return data;
+      return parsed;
     } catch (e) {
-      console.error('Failed to read from sheet cache:', e);
       return null;
     }
   },
@@ -40,18 +43,21 @@ export const sheetCacheService = {
         data,
         timestamp: Date.now()
       };
-      
-      // Simple strategy: if localStorage is full, clear old caches
-      try {
-        localStorage.setItem(key, JSON.stringify(payload));
-      } catch (e) {
-        // Clear all caches if full and try again
-        sheetCacheService.clearAll();
-        localStorage.setItem(key, JSON.stringify(payload));
-      }
+      localStorage.setItem(key, JSON.stringify(payload));
     } catch (e) {
-      console.error('Failed to save to sheet cache:', e);
+      sheetCacheService.clearAll();
+      try {
+        const key = `${CACHE_PREFIX}${sheetId}_${tabName}`;
+        localStorage.setItem(key, JSON.stringify({ data, timestamp: Date.now() }));
+      } catch (e2) {}
     }
+  },
+
+  remove: (sheetId: string, tabName: string) => {
+    try {
+      const key = `${CACHE_PREFIX}${sheetId}_${tabName}`;
+      localStorage.removeItem(key);
+    } catch (e) {}
   },
 
   clearAll: () => {

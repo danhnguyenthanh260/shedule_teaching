@@ -8,28 +8,44 @@ import fetch from "node-fetch";
 function initializeFirebase() {
   if (!admin.apps.length) {
     try {
-      if (process.env.FIREBASE_SERVICE_ACCOUNT) {
-        const serviceAccount = JSON.parse(process.env.FIREBASE_SERVICE_ACCOUNT);
-        
-        // 🔒 FIX: Handle escaped newlines in private_key for Vercel
-        if (serviceAccount.private_key) {
-          serviceAccount.private_key = serviceAccount.private_key.replace(/\\n/g, '\n');
-        }
-
-        admin.initializeApp({
-          credential: admin.credential.cert(serviceAccount)
-        });
-        console.log("✅ Firebase Admin initialized via Service Account");
-      } else {
+      const saRaw = process.env.FIREBASE_SERVICE_ACCOUNT;
+      if (!saRaw) {
         // Fallback for local dev
-        admin.initializeApp({
-          projectId: process.env.VITE_FIREBASE_PROJECT_ID
-        });
-        console.log("⚠️ Firebase Admin initialized WITHOUT Service Account (using Project ID)");
+        admin.initializeApp({ projectId: process.env.VITE_FIREBASE_PROJECT_ID });
+        console.log("⚠️ Firebase Admin initialized WITHOUT Service Account");
+        return admin.firestore();
       }
+
+      let serviceAccount: any;
+      
+      if (typeof saRaw === 'object') {
+        serviceAccount = saRaw;
+      } else {
+        const cleanedSa = saRaw.trim();
+        // If it looks like [object Object], the user likely misconfigured the Vercel variable
+        if (cleanedSa.startsWith('[object')) {
+           throw new Error("Biến FIREBASE_SERVICE_ACCOUNT bị gán giá trị '[object Object]'. Hãy kiểm tra lại cách bạn dán (paste) JSON vào Vercel.");
+        }
+        
+        try {
+          serviceAccount = JSON.parse(cleanedSa);
+        } catch (parseErr: any) {
+          console.error("DEBUG: FIREBASE_SERVICE_ACCOUNT starts with:", cleanedSa.substring(0, 30));
+          throw new Error(`JSON Parse Error: ${parseErr.message}. Hãy đảm bảo bạn dán ĐÚNG và ĐỦ nội dung file JSON vào Vercel.`);
+        }
+      }
+        
+      if (serviceAccount.private_key) {
+        serviceAccount.private_key = serviceAccount.private_key.replace(/\\n/g, '\n');
+      }
+
+      admin.initializeApp({
+        credential: admin.credential.cert(serviceAccount)
+      });
+      console.log("✅ Firebase Admin initialized successfully");
     } catch (error: any) {
       console.error("❌ Firebase admin initialization error:", error);
-      throw new Error("Failed to initialize Firebase Admin: " + error.message);
+      throw new Error("Lỗi khởi tạo Firebase: " + error.message);
     }
   }
   return admin.firestore();
@@ -111,10 +127,20 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     }
 
     // 3. Process Events or Clear Action
-    const { events, calendarName, action, googleAccessToken } = req.body;
+    const { events, calendarName, action, googleAccessToken, force } = req.body;
 
     // Handle CLEAR action specifically
     if (action === 'clearCalendar') {
+      console.log(`🧹 Clearing Firestore slots for user: ${userEmail}`);
+      const slotsToClear = await db.collection("slots")
+        .where("syncedBy", "==", userEmail)
+        .get();
+      
+      const clearBatch = db.batch();
+      slotsToClear.docs.forEach(doc => clearBatch.delete(doc.ref));
+      await clearBatch.commit();
+      console.log(`✅ Cleared ${slotsToClear.size} slots from Firestore`);
+
       return forwardToGAS(res, {
         action: 'clearCalendar',
         calendarName: calendarName || "Schedule Teaching",
@@ -126,76 +152,88 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       return res.status(400).json({ error: "Events array is required" });
     }
 
+    const normalizedEvents: any[] = [];
+    for (const event of events) {
+      const { start, end, title } = event;
+      const isoRegex = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}/;
+      
+      if (!start || !end || !isoRegex.test(start) || !isoRegex.test(end)) {
+        console.error(`❌ Date format error for "${title}": start=${start}, end=${end}`);
+        return res.status(400).json({ 
+          error: `Định dạng ngày tháng không hợp lệ cho sự kiện "${title}".`,
+          detail: `Giá trị nhận được: ${start || 'null'} - ${end || 'null'}. Hệ thống yêu cầu chuẩn ISO (YYYY-MM-DD...). Hãy tải lại trang và thử lại.`
+        });
+      }
+      normalizedEvents.push(event);
+    }
+
     const conflicts: any[] = [];
     const eventsToSync: any[] = [];
 
-    for (const event of events) {
-      const { start, end, resources, title } = event;
-      
-      const isoRegex = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}/;
-      if (!start || !end || !isoRegex.test(start) || !isoRegex.test(end)) {
-        return res.status(400).json({ 
-          error: `Invalid date format for event "${title}". Backend requires strict ISO format (yyyy-MM-ddT...).` 
+    // ONLY check for conflicts if NOT forcing
+    if (!force) {
+      for (const event of normalizedEvents) {
+        const { start, end, resources, title } = event;
+        const startTime = new Date(start);
+        const endTime = new Date(end);
+
+        if (isNaN(startTime.getTime()) || isNaN(endTime.getTime())) {
+          return res.status(400).json({ error: `Dữ liệu thời gian không hợp lệ cho sự kiện "${title}".` });
+        }
+
+        // Check conflict in Firestore
+        let overlapSnapshot;
+        try {
+          overlapSnapshot = await db.collection("slots")
+            .where("startTime", "<", endTime)
+            .where("endTime", ">", startTime)
+            .get();
+        } catch (dbErr: any) {
+          console.error("❌ Firestore Query Error:", dbErr);
+          if (dbErr.message?.includes("index")) {
+            const indexLink = dbErr.message.match(/https:\/\/console\.firebase\.google\.com[^\s]+/)?.[0];
+            return res.status(500).json({
+              error: "Thiếu Index trong Firestore. Vui lòng bấm vào link này để tạo: " + (indexLink || "Kiểm tra Vercel Logs"),
+              detail: "Bạn cần tạo Composite Index cho collection 'slots' (startTime và endTime). " + (indexLink ? `Link: ${indexLink}` : ""),
+              link: indexLink || null
+            });
+          }
+          throw dbErr;
+        }
+
+        let foundConflict = false;
+        for (const doc of overlapSnapshot.docs) {
+          const existing = doc.data();
+          const commonResources = existing.resources.filter((r: string) => resources.includes(r));
+          if (commonResources.length > 0) {
+            conflicts.push({
+              title,
+              conflictWith: existing.title,
+              resources: commonResources,
+              message: `Xung đột tài nguyên: ${commonResources.join(", ")} với sự kiện "${existing.title}"`
+            });
+            foundConflict = true;
+            break;
+          }
+        }
+
+        if (!foundConflict) {
+          eventsToSync.push(event);
+        }
+      }
+
+      if (conflicts.length > 0) {
+        return res.status(409).json({
+          status: "conflict",
+          message: "Phát hiện xung đột lịch trình",
+          conflicts
         });
       }
-
-      const startTime = new Date(start);
-      const endTime = new Date(end);
-
-      if (isNaN(startTime.getTime()) || isNaN(endTime.getTime())) {
-        return res.status(400).json({ error: `Invalid date values for event "${title}".` });
-      }
-
-      // Check conflict in Firestore
-      let overlapSnapshot;
-      try {
-        overlapSnapshot = await db.collection("slots")
-          .where("startTime", "<", endTime)
-          .where("endTime", ">", startTime)
-          .get();
-      } catch (dbErr: any) {
-        console.error("❌ Firestore Query Error:", dbErr);
-        if (dbErr.message?.includes("index")) {
-          const indexLink = dbErr.message.match(/https:\/\/console\.firebase\.google\.com[^\s]+/)?.[0];
-          return res.status(500).json({
-            error: "Thiếu Index trong Firestore. Vui lòng bấm vào link này để tạo: " + (indexLink || "Kiểm tra Vercel Logs"),
-            detail: "Bạn cần tạo Composite Index cho collection 'slots' (startTime và endTime). " + (indexLink ? `Link: ${indexLink}` : ""),
-            link: indexLink || null
-          });
-        }
-        throw dbErr;
-      }
-
-      let foundConflict = false;
-      for (const doc of overlapSnapshot.docs) {
-        const existing = doc.data();
-        const commonResources = existing.resources.filter((r: string) => resources.includes(r));
-        if (commonResources.length > 0) {
-          conflicts.push({
-            title,
-            conflictWith: existing.title,
-            resources: commonResources,
-            message: `Xung đột tài nguyên: ${commonResources.join(", ")} với sự kiện "${existing.title}"`
-          });
-          foundConflict = true;
-          break;
-        }
-      }
-
-      if (!foundConflict) {
-        eventsToSync.push(event);
-      }
+    } else {
+      // If force is true, all events are ready to sync
+      eventsToSync.push(...normalizedEvents);
     }
 
-    if (conflicts.length > 0) {
-      return res.status(409).json({
-        status: "conflict",
-        message: "Phát hiện xung đột lịch trình",
-        conflicts
-      });
-    }
-
-    const { force } = req.body;
     const batch = db.batch();
     const slotLogRefs: any[] = [];
 

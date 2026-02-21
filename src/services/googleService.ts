@@ -349,8 +349,13 @@ export class GoogleSyncService {
     let blockStartIndices = findTripleAnchors(detailHeaders);
 
     // 🚀 UNIFIED REVIEW MODE DETECTION:
-    // It's Review Mode if: explicit flag OR tab name contains review.
-    const suspectReview = !!isDataMau || (tab || "").toLowerCase().includes("review");
+    const hasReviewerHeaders = detailHeaders.some(h => {
+      const low = (h || "").toLowerCase();
+      return low.includes('reviewer 1') || low.includes('gv 1') || (low.includes('reviewer') && low.includes('1'));
+    });
+    
+    // It's Review Mode if: explicit flag OR (tab has "review" AND has specific headers).
+    const suspectReview = !!isDataMau || ((tab || "").toLowerCase().includes("review") && hasReviewerHeaders);
     
     // 🚀 Robustness: Search first 10 rows for anchors if needed
     if (suspectReview && blockStartIndices.length !== 3) {
@@ -405,16 +410,31 @@ export class GoogleSyncService {
             const originalIdx = mapping[field];
             if (originalIdx === undefined) return "";
             
-            const firstAnchor = blockStartIndices[0];
+            const J_INDEX = 9;
+            const firstAnchor = Math.min(J_INDEX, blockStartIndices[0] || J_INDEX);
             const targetHeader = (detailHeaders[originalIdx] || "").trim().toLowerCase();
 
-            // 🎯 Strategy 1: Header Label Matching (Best for irregular blocks)
-            // Look for a column in the CURRENT block that has the same header name as the one mapped in block 1.
-            if (targetHeader && !targetHeader.startsWith('column_')) {
-              const matchingIdx = detailHeaders.findIndex((h, i) => 
-                i >= blockStart && i <= blockEnd && (h || "").trim().toLowerCase() === targetHeader
-              );
-              if (matchingIdx !== -1) return (row[matchingIdx] || "").toString().trim();
+            // 🎯 Strategy 1: Occurrence-Aware Header Label Matching
+            // Handles cases like "Reviewer" appearing multiple times in one block.
+            if (targetHeader && !targetHeader.startsWith('column_') && originalIdx >= firstAnchor) {
+              // 1. Find which occurrence of targetHeader this originalIdx was in the FIRST block
+              let occurrenceIndex = 0;
+              for (let i = firstAnchor; i < originalIdx; i++) {
+                if ((detailHeaders[i] || "").trim().toLowerCase() === targetHeader) {
+                  occurrenceIndex++;
+                }
+              }
+
+              // 2. Find the SAME occurrence index in the CURRENT block
+              let currentOccurrence = 0;
+              for (let i = blockStart; i <= blockEnd; i++) {
+                if ((detailHeaders[i] || "").trim().toLowerCase() === targetHeader) {
+                  if (currentOccurrence === occurrenceIndex) {
+                    return (row[i] || "").toString().trim();
+                  }
+                  currentOccurrence++;
+                }
+              }
             }
 
             // 🎯 Strategy 2: Relative Offset (Fallback for unlabelled columns)
@@ -436,6 +456,7 @@ export class GoogleSyncService {
           let rTime = getMappedValueInBlock('time');
           let rLocation = getMappedValueInBlock('location');
           let rPerson = getMappedValueInBlock('person');
+          let rTask = getMappedValueInBlock('task');
           
           // 👥 FALLBACK: If per-block extraction failed, use auto-infer logic
           // (Only for missing data, not to overwrite explicit mapping)
@@ -462,6 +483,8 @@ export class GoogleSyncService {
           if (!rDate) rDate = autoInferList('date')[0] || "";
           if (!rTime) rTime = autoInferList('time')[0] || "";
           if (!rLocation) rLocation = autoInferList('location')[0] || "";
+          if (!rTask) rTask = autoInferList('task')[0] || "";
+          
           if (!rPerson) {
              const persons = autoInferList('person');
              rPerson = persons.length > 0 ? persons.join(" & ") : (basePerson || "");
@@ -492,11 +515,11 @@ export class GoogleSyncService {
             allEvents.push({
               id: eventId,
               groupName: `Review ${blockIdx + 1}`,
-              person: rPerson || baseTask,
+              person: rPerson || rTask || baseTask,
               date: finalDate,
               startTime: start,
               endTime: end,
-              task: baseTask,
+              task: rTask || baseTask,
               location: rLocation || "Chưa xác định",
               resources: [
                 rPerson ? `teacher:${rPerson}` : null,
@@ -510,6 +533,7 @@ export class GoogleSyncService {
               blockEnd,
               reviewAreaStart: blockStartIndices[0],
               status: 'pending',
+              isGrouped: true, // 🚀 CRITICAL FIX: Tell table this is a grouped event
               rawRow: row
             });
           } catch (e) {

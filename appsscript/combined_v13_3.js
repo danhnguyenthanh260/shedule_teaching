@@ -328,9 +328,63 @@ function doPost(e) {
     }
 
     if (action === 'readSheet') {
-      const ss = SpreadsheetApp.openByUrl(payload.url);
-      const data = ss.getSheets()[0].getDataRange().getValues();
-      return jsonResponse_({ status: CONSTANTS.SUCCESS, data: data.slice(parseInt(payload.startRow || '1') - 1) });
+      const sheetIdMatch = payload.url.match(/\/d\/([a-zA-Z0-9-_]+)/);
+      const sheetId = sheetIdMatch ? sheetIdMatch[1] : null;
+      if (!sheetId) throw new Error("Invalid Spreadsheet URL");
+
+      // Extract GID from URL if present (e.g. #gid=12345)
+      const gidMatch = payload.url.match(/[#&]gid=([0-9]+)/);
+      const urlGid = gidMatch ? gidMatch[1] : null;
+
+      try {
+        const ss = SpreadsheetApp.openById(sheetId);
+        let sheet = null;
+        
+        // 1. Try by Name
+        if (payload.tabName) {
+           sheet = ss.getSheetByName(payload.tabName.trim());
+        }
+        
+        // 2. Try by GID from URL
+        if (!sheet && urlGid) {
+           const sheets = ss.getSheets();
+           sheet = sheets.find(s => s.getSheetId().toString() === urlGid);
+        }
+        
+        // 3. Fallback to first
+        if (!sheet) sheet = ss.getSheets()[0];
+
+        const sheetName = sheet.getName();
+        
+        // 🚀 THE NUCLEAR CACHE BUSTER (Atomic Metadata Touch)
+        // Adding a temp note and flushing is the most reliable way to force 
+        // SpreadsheetApp to fetch fresh data from the Drive backend.
+        try {
+          const touchRange = sheet.getRange(1, 1);
+          const oldNote = touchRange.getNote();
+          touchRange.setNote("FRESH_FETCH_" + Date.now());
+          SpreadsheetApp.flush(); // Force commit note
+          touchRange.setNote(oldNote); // Restore note
+          SpreadsheetApp.flush(); // Force sync again
+        } catch (e) {
+          AppLogger.warn("Metadata touch failed: " + e.message);
+        }
+
+        const data = sheet.getDataRange().getValues();
+        AppLogger.info(`Nuclear ReadSheet: Tab="${sheetName}", Rows=${data.length}, Source=LIVE_VALUES`);
+
+        return jsonResponse_({ 
+          status: CONSTANTS.SUCCESS, 
+          data: data.slice(parseInt(payload.startRow || '1') - 1),
+          tabName: sheetName,
+          rowCount: data.length,
+          fetchTime: new Date().toISOString(),
+          isFresh: true
+        });
+      } catch (e) {
+        AppLogger.error("Nuclear fetch failed: " + e.message);
+        throw e;
+      }
     }
 
     if (action === 'clearCalendar') {

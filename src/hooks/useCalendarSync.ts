@@ -14,8 +14,13 @@ export const useCalendarSync = ({ accessToken }: UseCalendarSyncProps) => {
   const [syncError, setSyncError] = useState<string | null>(null);
 
   const syncToCalendar = useCallback(async (rowsToSync: RowNormalized[], force: boolean = false) => {
-    if (!accessToken || rowsToSync.length === 0) {
-      setSyncError("Thiếu token truy cập hoặc chưa chọn mục nào.");
+    if (!accessToken) {
+      setSyncError("Hết hạn truy cập (401): Phiên làm việc với Google đã kết thúc. Vui lòng bấm 'Cấp lại quyền'.");
+      return null;
+    }
+    
+    if (rowsToSync.length === 0) {
+      setSyncError("Chưa chọn mục nào để đồng bộ.");
       return null;
     }
 
@@ -115,6 +120,12 @@ export const useCalendarSync = ({ accessToken }: UseCalendarSyncProps) => {
       const failedCount = res.data?.failed ?? 0;
       const skippedCount = res.data?.skipped ?? 0;
 
+      // 🚨 ATOMIC ESCALATION: Treat "Skipped" as "Conflict" if not forcing
+      if (skippedCount > 0 && !force && successCount === 0) {
+        const conflictMsg = `Xung đột: ${skippedCount} mục đã có sẵn. Bạn muốn ghi đè không?`;
+        throw new Error(conflictMsg);
+      }
+
       const result: SyncResult = {
         type: 'sync',
         created: successCount,
@@ -136,11 +147,13 @@ export const useCalendarSync = ({ accessToken }: UseCalendarSyncProps) => {
       let errorMsg = err.message || "Lỗi không xác định khi đồng bộ";
       
       // Clarify conflict message
-      if (errorMsg.includes('xung đột')) {
-        errorMsg = "Phát hiện xung đột: Dữ liệu này đã tồn tại trong Database của hệ thống (nhưng có thể chưa hiện trên Calendar của bạn). Hãy dùng nút 'Ghi đè' để đồng bộ lại.";
+      if (errorMsg.includes('xung đột') || errorMsg.includes('tồn tại')) {
+        errorMsg = "Xung đột: Dữ liệu đã có sẵn. Bạn muốn ghi đè không?";
       }
       
-      setSyncError("Lỗi đồng bộ: " + errorMsg);
+      // Don't add long prefix for conflicts/auth
+      const prefix = (errorMsg.includes('xung đột') || errorMsg.includes('401')) ? "" : "Lỗi đồng bộ: ";
+      setSyncError(prefix + errorMsg);
       throw new Error(errorMsg);
     } finally {
       setSyncing(false);

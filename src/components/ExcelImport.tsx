@@ -60,6 +60,14 @@ export const ExcelImport: React.FC<ExcelImportProps> = ({
 }) => {
   const [isProcessing, setIsProcessing] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  
+  // ✅ ATOMIC SWAP: Local state to prevent immediate parent update
+  const [tempSemesterId, setTempSemesterId] = useState(selectedSemesterId);
+  
+  // Sync local selection with parent (e.g. on mount or force reset)
+  useEffect(() => {
+    setTempSemesterId(selectedSemesterId);
+  }, [selectedSemesterId]);
 
   const sortedSemesters = React.useMemo(() => {
     return (Object.values(semesters) as SemesterConfig[]).sort((a, b) => {
@@ -116,30 +124,40 @@ export const ExcelImport: React.FC<ExcelImportProps> = ({
     });
   };
 
-  const handleShowData = async (forceReload = false) => {
-    if (!sheetUrl) return;
+  const lastLoadedRef = useRef<string>('');
 
-    const sheetIdMatch = sheetUrl.match(/\/d\/([a-zA-Z0-9-_]+)/);
+  const handleShowData = async (forceReload = false, pSemesterId?: string) => {
+    // 🏛️ Determine target config (manual override or selected)
+    const targetId = pSemesterId || tempSemesterId || selectedSemesterId;
+    const config = semesters[targetId];
+    
+    const targetUrl = config?.sheetUrl || sheetUrl;
+    const targetTab = config?.tabName || tabName;
+    const targetStartRow = config?.startRow ? parseInt(config.startRow) : startRow;
+
+    if (!targetUrl) return;
+
+    const sheetIdMatch = targetUrl.match(/\/d\/([a-zA-Z0-9-_]+)/);
     const actualSheetId = sheetIdMatch ? sheetIdMatch[1] : 'unknown';
     
-    // 🕒 REFRESH THRESHOLD: If cache is older than 30 seconds, fetch fresh regardless
+    // 🕒 REFRESH THRESHOLD: 30 seconds
     const REFRESH_THRESHOLD = 30 * 1000; 
 
     if (!forceReload) {
-      const cached = sheetCacheService.getFull(actualSheetId, tabName || 'Sheet1');
+      const cached = sheetCacheService.getFull(actualSheetId, targetTab || 'Sheet1');
       if (cached) {
         const age = Date.now() - cached.timestamp;
         if (age < REFRESH_THRESHOLD) {
-          console.log(`🚀 [ExcelImport] Loading from Cache (Age: ${Math.round(age/1000)}s):`, actualSheetId, tabName);
-          processRawData(cached.data, 'Cache', tabName, undefined, true);
+          console.log(`🚀 [ExcelImport] Cache Hit (${Math.round(age/1000)}s):`, actualSheetId, targetTab);
+          
+          // ✅ ATOMIC COMMIT: Update parent only WHEN data is ready
+          if (pSemesterId) commitSemesterChange(pSemesterId);
+          
+          processRawData(cached.data, 'Cache', targetTab, undefined, true);
+          lastLoadedRef.current = `${targetUrl}-${targetTab || 'Sheet1'}`;
           return;
         }
-        console.log(`🕦 [ExcelImport] Cache expired (${Math.round(age/1000)}s > 30s). Auto-refreshing...`);
       }
-    } else {
-      // 🚀 HARD RESET: Remove from local cache before fetching fresh
-      console.log('🧹 [ExcelImport] Force Reload: Clearing local cache...');
-      sheetCacheService.remove(actualSheetId, tabName || 'Sheet1');
     }
 
     onLoadingStart?.();
@@ -148,36 +166,40 @@ export const ExcelImport: React.FC<ExcelImportProps> = ({
     setError(null);
 
     try {
-      console.log(`📡 [ExcelImport] Fetching Nuclear Fresh Data for ${actualSheetId} (Tab: ${tabName})...`);
-      const response = await readSheet(sheetUrl, startRow, tabName) as any;
-      const { data: rows, tabName: actualTab, rowCount, fetchTime: serverTime, isFresh } = response;
+      console.log(`📡 [ExcelImport] Fetching Data for ${actualSheetId} (Tab: ${targetTab})...`);
+      const response = await readSheet(targetUrl, targetStartRow, targetTab) as any;
+      const { data: rows, tabName: actualTab, rowCount, fetchTime: serverTime } = response;
       
       const fetchTime = serverTime ? new Date(serverTime).toLocaleTimeString() : new Date().toLocaleTimeString();
-      console.log(`✅ [ExcelImport] Data received: ${rowCount} rows. Server Time: ${fetchTime}${isFresh ? ' (NUCLEAR FRESH 🚀)' : ''}`);
 
-      // ✅ Update the tabName state in parent to reflect reality
-      if (actualTab && actualTab !== tabName) {
+      // ✅ ATOMIC COMMIT: Update EVERYTHING at once on success
+      if (pSemesterId) {
+        commitSemesterChange(pSemesterId, actualTab);
+      } else if (actualTab && actualTab !== tabName) {
         setTabName(actualTab);
       }
 
       processRawData(rows, 'GoogleSheet', actualTab, fetchTime, false);
-      
-      // Save to cache
       sheetCacheService.set(actualSheetId, actualTab || 'Sheet1', rows);
-      setError(null);
-      
-      // 🚀 Explicitly tell the user the data is fresh
-      if (forceReload) {
-        // We can't call showToast directly from here without passing it as prop, 
-        // but the parent's handleDataLoaded will show a toast.
-      }
+      lastLoadedRef.current = `${targetUrl}-${actualTab || 'Sheet1'}`;
     } catch (err: any) {
-      console.error('Fetch data error:', err);
       setError(err.message || 'Không thể lấy dữ liệu từ Sheets');
     } finally {
       setIsProcessing(false);
       setLoading(false);
     }
+  };
+
+  const commitSemesterChange = (id: string, actualTab?: string) => {
+    const config = semesters[id];
+    if (!config) return;
+
+    setSelectedSemesterId(id);
+    setSheetUrl(config.sheetUrl);
+    setStartRow(parseInt(config.startRow) || 1);
+    setColumnsConfig(config.columns);
+    setTabName(actualTab || config.tabName || 'Sheet1');
+    if (config.dateFormat) setDateFormat(config.dateFormat);
   };
 
   // ✅ AUTO-SELECT newest semester if none selected
@@ -190,41 +212,20 @@ export const ExcelImport: React.FC<ExcelImportProps> = ({
 
   // ✅ AUTO-LOAD when semester changes
   useEffect(() => {
-    if (selectedSemesterId && sheetUrl) {
+    const currentKey = `${sheetUrl}-${tabName}`;
+    if (selectedSemesterId && sheetUrl && lastLoadedRef.current !== currentKey) {
       handleShowData();
     }
-  }, [selectedSemesterId, sheetUrl]);
+  }, [selectedSemesterId, sheetUrl, tabName]);
 
   const handleSemesterChange = (semesterId: string, currentSemesters = semesters) => {
-    setSelectedSemesterId(semesterId);
-    setError(null); // Clear previous errors
+    setTempSemesterId(semesterId); // ✅ Update locally immediately
+    setError(null);
 
-    if (semesterId && currentSemesters[semesterId]) {
-      const config = currentSemesters[semesterId];
-
-      // ✅ TASK 3: Validate config before applying
-      if (!config.sheetUrl) {
-        setError('Cấu hình học kỳ thiếu URL Sheet');
-        return;
-      }
-      if (!config.startRow) {
-        setError('Cấu hình học kỳ thiếu dòng bắt đầu');
-        return;
-      }
-      if (!config.columns) {
-        setError('Cấu hình học kỳ thiếu danh sách cột');
-        return;
-      }
-
-      setSheetUrl(config.sheetUrl);
-      setStartRow(parseInt(config.startRow) || 1);
-      setColumnsConfig(config.columns);
-      if (config.tabName) {
-        setTabName(config.tabName);
-      }
-      if (config.dateFormat) {
-        setDateFormat(config.dateFormat);
-      }
+    const config = currentSemesters[semesterId];
+    if (config) {
+      if (!config.sheetUrl) return setError('Cấu hình học kỳ thiếu URL Sheet');
+      handleShowData(false, semesterId); // ✅ Fetch BEFORE updating parent
     }
   };
 
@@ -273,7 +274,7 @@ export const ExcelImport: React.FC<ExcelImportProps> = ({
           <div className="relative group">
             <select
               className="w-full pl-4 pr-10 py-2.5 bg-white border border-slate-200 rounded-xl focus:ring-2 focus:ring-fpt-orange outline-none text-sm font-bold text-slate-700 h-12 appearance-none transition-all group-hover:border-slate-300 pointer-events-auto cursor-pointer relative z-10"
-              value={selectedSemesterId}
+              value={tempSemesterId}
               onChange={(e) => handleSemesterChange(e.target.value)}
             >
               <option value="">-- Chọn học kỳ --</option>

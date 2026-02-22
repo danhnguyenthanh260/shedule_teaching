@@ -192,7 +192,13 @@ export const ScheduleTable: React.FC<ScheduleTableProps> = ({
                        const blockMatch = allHeaders.findIndex((h, idx) => 
                          idx >= row.blockStart! && idx <= row.blockEnd! && h.trim().toLowerCase() === lowName
                        );
-                       if (blockMatch !== -1) targetIndex = blockMatch;
+                       
+                       if (blockMatch !== -1) {
+                         targetIndex = blockMatch;
+                       } else if (row.reviewAreaStart !== undefined && targetIndex >= row.reviewAreaStart) {
+                         // 🚨 Block match failed AND original mapping is in review area -> Clear the data
+                         targetIndex = -1;
+                       }
                     }
                     cellValue = targetIndex !== -1 ? (row.rawRow[targetIndex] || '') : '-';
                   }

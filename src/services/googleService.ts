@@ -487,15 +487,15 @@ export class GoogleSyncService {
           
           if (!rPerson) {
              const persons = autoInferList('person');
-             rPerson = persons.length > 0 ? persons.join(" & ") : (basePerson || "");
+             rPerson = persons.length > 0 ? persons.join(" & ") : "";
           }
 
-          // 🚀 2. ROBUSTNESS FIX: Chỉ skip nếu block này THỰC SỰ trống rỗng (không ngày, giờ, phòng, người)
-          // Điều này giúp giữ lại các "slot" trống nhưng có lịch (11 -> 12 events)
+          // 🚀 2. ROBUSTNESS FIX: Strictly skip any block that is actually empty.
+          // This now applies to ALL blocks (1, 2, and 3) to ensure total accuracy.
           const hasAnyDataInBlock = rPerson || rDate || rTime || rLocation || (row[blockStart] && row[blockStart].trim().length > 0);
           
           if (!hasAnyDataInBlock) {
-             console.log(`[Grouping] Skipping Block ${blockIdx} row ${rowIndex}: Absolute empty block.`);
+             console.log(`[Grouping] Skipping Empty Block ${blockIdx} row ${rowIndex}`);
              return;
           }
 

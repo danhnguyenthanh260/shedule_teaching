@@ -23,7 +23,8 @@ const STANDARD_SLOTS: TimeSlot[] = [
   { slot: 1, startTime: '07:00', endTime: '09:15', display: '07:00 - 09:15' },
   { slot: 2, startTime: '09:30', endTime: '11:45', display: '09:30 - 11:45' },
   { slot: 3, startTime: '12:30', endTime: '14:45', display: '12:30 - 14:45' },
-  { slot: 4, startTime: '15:00', endTime: '17:15', display: '15:00 - 17:15' }
+  { slot: 4, startTime: '15:00', endTime: '17:15', display: '15:00 - 17:15' },
+  { slot: 5, startTime: '17:30', endTime: '19:45', display: '17:30 - 19:45' }
 ];
 
 /**

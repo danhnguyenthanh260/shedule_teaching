@@ -61,6 +61,8 @@ export const LecturerDashboard: React.FC = () => {
     return !!sheetMeta?.isDataMau;
   }, [semesters, selectedSemesterId, sheetMeta]);
 
+  const [isFetchingData, setIsFetchingData] = useState(false);
+
   // Hooks
   const {
     loading,
@@ -187,33 +189,64 @@ export const LecturerDashboard: React.FC = () => {
     showToast(`Đã tải ${data.rawRows.length} dòng dữ liệu${timeStr}${cacheStatus}`);
   }, [semesters, selectedSemesterId, setSheetMeta, setSheetType, applyHeaderRow, showToast]);
 
+  // ✅ Unified filtering logic to ensure display and selection are always in sync
+  const rowMatchesFilter = useCallback((row: RowNormalized, filterText: string) => {
+    const rawFilter = (filterText || '').trim();
+    if (!rawFilter) return true;
+
+    const filters = khongDau(rawFilter.toLowerCase()).split(/\s+/).filter(Boolean);
+    
+    let searchValues: any[] = [];
+    const indicesToUse = (searchColumnIndices && searchColumnIndices.length > 0) 
+      ? searchColumnIndices 
+      : (isPreviewMode ? [] : effectiveSearchColumns);
+
+    if (isPreviewMode && indicesToUse.length === 0) {
+      searchValues = row.rawRow || [];
+    } else {
+      searchValues = indicesToUse.map(idx => {
+        // 🔒 Shifted Isolation Logic: 
+        // If it's a review event and the search column is in the Review Area (J+):
+        if (row.blockStart !== undefined && row.reviewAreaStart !== undefined && idx >= row.reviewAreaStart) {
+          // 1. Calculate offset relative to the FIRST block start
+          const relativeOffset = idx - row.reviewAreaStart;
+          // 2. Project this offset onto the CURRENT event's block
+          const targetIdx = row.blockStart + relativeOffset;
+          
+          // 3. Extract if within valid range
+          if (targetIdx <= (row.blockEnd || 999)) {
+            return (row.rawRow?.[targetIdx] || "").toString();
+          }
+          return "";
+        }
+        
+        // Otherwise (Global or Standard mode), search exactly what was selected
+        return (row.rawRow?.[idx] || "").toString();
+      });
+    }
+    
+    const hasSpecificFilter = searchColumnIndices && searchColumnIndices.length > 0;
+    
+    const searchSpace = hasSpecificFilter 
+      ? searchValues.map(v => khongDau(String(v || ""))).join(' ')
+      : [
+          ...searchValues,
+          row.person,
+          row.groupName,
+          row.location,
+          row.date,
+          row.task
+        ].map(v => khongDau(String(v || ""))).join(' ');
+
+    return filters.every(f => searchSpace.includes(f));
+  }, [searchColumnIndices, isPreviewMode, effectiveSearchColumns]);
+
   // Filtering Logic
   const updateSelections = useCallback((data: RowNormalized[], filterValue?: string) => {
     const fValue = filterValue !== undefined ? filterValue : personFilter;
-    const rawFilter = (fValue || '').trim();
-
-    if (!rawFilter) {
-      setSelectedIds(new Set(data.map(r => r.id)));
-      return;
-    }
-
-    const filters = rawFilter.split(/\s+/).map(f => khongDau(f)).filter(Boolean);
-    const matches = data.filter(row => {
-      const searchValues = (searchColumnIndices && searchColumnIndices.length > 0)
-        ? searchColumnIndices.map(idx => row.rawRow[idx] || "")
-        : effectiveSearchColumns.map(idx => row.rawRow[idx] || "");
-        
-      const searchSpace = [
-        ...searchValues,
-        row.person,
-        row.groupName
-      ].map(v => khongDau(v)).join(' ');
-
-      return filters.every(f => searchSpace.includes(f));
-    });
-
+    const matches = data.filter(row => rowMatchesFilter(row, fValue));
     setSelectedIds(new Set(matches.map(m => m.id)));
-  }, [personFilter, setSelectedIds, effectiveSearchColumns, searchColumnIndices]);
+  }, [personFilter, setSelectedIds, rowMatchesFilter]);
 
   // ✅ Filter display rows for both Preview and Mapped modes
   const previewRows = useMemo(() => {
@@ -250,64 +283,13 @@ export const LecturerDashboard: React.FC = () => {
         rawRow: r,
       } as RowNormalized;
     });
-  }, [isPreviewMode, allRows, headerRowIndex, sheetMeta, tabName, fullDetailHeaders, dateFormat]);
+  }, [isPreviewMode, allRows, headerRowIndex, sheetMeta, tabName, fullDetailHeaders, dateFormat, effectiveIsReview]);
 
   const baseRows = isPreviewMode ? previewRows : rows;
 
   const filteredRows = useMemo(() => {
-    const rawFilter = (personFilter || '').trim();
-    if (!rawFilter) return baseRows;
-
-    const filters = khongDau(rawFilter.toLowerCase()).split(/\s+/).filter(Boolean);
-
-    return baseRows.filter(row => {
-      let searchValues: any[] = [];
-      
-      const indicesToUse = (searchColumnIndices && searchColumnIndices.length > 0) 
-        ? searchColumnIndices 
-        : (isPreviewMode ? [] : effectiveSearchColumns);
-
-      if (isPreviewMode && indicesToUse.length === 0) {
-        searchValues = row.rawRow || [];
-      } else {
-        searchValues = indicesToUse.map(idx => {
-          // 🔒 Shifted Isolation Logic: 
-          // If it's a review event and the search column is in the Review Area (J+):
-          if (row.blockStart !== undefined && row.reviewAreaStart !== undefined && idx >= row.reviewAreaStart) {
-            // 1. Calculate offset relative to the FIRST block start
-            const relativeOffset = idx - row.reviewAreaStart;
-            // 2. Project this offset onto the CURRENT event's block
-            const targetIdx = row.blockStart + relativeOffset;
-            
-            // 3. Extract if within valid range
-            if (targetIdx <= (row.blockEnd || 999)) {
-              return (row.rawRow?.[targetIdx] || "").toString();
-            }
-            return "";
-          }
-          
-          // Otherwise (Global or Standard mode), search exactly what was selected
-          return (row.rawRow?.[idx] || "").toString();
-        });
-      }
-      
-      const hasSpecificFilter = searchColumnIndices && searchColumnIndices.length > 0;
-      
-      const searchSpace = hasSpecificFilter 
-        ? searchValues.map(v => khongDau(String(v || ""))).join(' ')
-        : [
-            ...searchValues,
-            row.person,
-            row.groupName,
-            row.location,
-            row.date,
-            row.task
-          ].map(v => khongDau(String(v || ""))).join(' ');
-
-      // Use .every() to ensure all word tokens are present in the search space
-      return filters.every(f => searchSpace.includes(f));
-    });
-  }, [baseRows, personFilter, effectiveSearchColumns, isPreviewMode, searchColumnIndices]);
+    return baseRows.filter(row => rowMatchesFilter(row, personFilter));
+  }, [baseRows, personFilter, rowMatchesFilter]);
 
   // ✅ 2. CALLBACK HANDLERS (Must be at top level)
   const handleToggleSelect = useCallback((id: string) => {
@@ -465,16 +447,19 @@ export const LecturerDashboard: React.FC = () => {
           <div className="flex-1 overflow-visible p-0.5">
             <ExcelImport
               accessToken={accessToken}
-              onDataLoaded={handleDataLoaded}
+              onDataLoaded={(data) => {
+                handleDataLoaded(data);
+                setIsFetchingData(false);
+              }}
               onLoadingStart={() => {
-                // 🚀 TRUYỆT TIÊU "GHOST DATA" NGAY LẬP TỨC
                 setRows([]);
                 setAllRows([]);
                 setSelectedIds(new Set());
                 setSyncResult(null);
                 setSyncError(null);
+                setIsFetchingData(true);
               }}
-              setLoading={() => {}} // Handle locally if needed
+              setLoading={setIsFetchingData} 
               setError={setParserError}
               sheetUrl={sheetUrl}
               setSheetUrl={setSheetUrl}
@@ -727,7 +712,7 @@ export const LecturerDashboard: React.FC = () => {
           </div>
 
           <div className="flex-1 min-h-0 overflow-hidden rounded-xl border border-slate-50 bg-slate-50/30">
-            {(loading || mappingLoading) ? (
+            {(loading || mappingLoading || isFetchingData) ? (
               <div className="h-full flex flex-col items-center justify-center bg-white animate-in fade-in duration-500">
                 <div className="relative mb-6">
                   <div className="w-16 h-16 border-4 border-orange-100 border-t-[#F27024] rounded-full animate-spin"></div>

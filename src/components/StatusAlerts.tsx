@@ -75,7 +75,7 @@ export const StatusAlerts: React.FC<StatusAlertsProps> = ({ error, result, onClo
               }`}>
                 {isConflict ? 'Phát hiện xung đột' : isAuthError ? 'Hết hạn truy cập' : 'Gặp lỗi hệ thống'}
               </h4>
-              <p className="text-sm font-bold text-slate-800 leading-tight line-clamp-2">
+              <p className="text-sm font-bold text-slate-800 leading-tight">
                 {isAuthError ? 'Phiên đăng nhập Google đã hết hạn. Hãy bấm Cấp lại quyền để tiếp tục.' : error}
               </p>
             </div>

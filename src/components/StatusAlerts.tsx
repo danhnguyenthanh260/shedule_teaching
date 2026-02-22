@@ -151,7 +151,7 @@ export const StatusAlerts: React.FC<StatusAlertsProps> = ({ error, result, onClo
                     : 'bg-emerald-400 shadow-emerald-400/50'
                 }`} />
                 {result.type === 'clear' 
-                  ? 'Dọn dẹp hoàn tất' 
+                  ? 'Đã xóa tất cả sự kiện' 
                   : (result.created > 0 ? 'Đồng bộ thành công' : (result.failed > 0 ? 'Đồng bộ thất bại' : 'Lịch đã có sẵn'))}
               </h4>
               
@@ -189,9 +189,18 @@ export const StatusAlerts: React.FC<StatusAlertsProps> = ({ error, result, onClo
                   )}
                 </div>
               ) : (
-                <p className="text-sm font-extrabold text-slate-800 leading-tight">
-                  Đã dọn dẹp sạch sẽ các sự kiện trên lịch FPT của bạn.
-                </p>
+                <div className="flex flex-col gap-1">
+                  <p className="text-sm font-extrabold text-slate-800 leading-tight">
+                    {result.logs && result.logs.length > 0 
+                      ? result.logs[0] 
+                      : 'Đã dọn dẹp sạch sẽ các sự kiện trên lịch của bạn.'}
+                  </p>
+                  {result.logs && result.logs.length > 1 && (
+                    <p className="text-[10px] font-medium text-slate-400">
+                      {result.logs[1]}
+                    </p>
+                  )}
+                </div>
               )}
             </div>
           </div>

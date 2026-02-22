@@ -95,14 +95,26 @@ export const useCalendarSync = ({ accessToken }: UseCalendarSyncProps) => {
         const isoStart = r.startTime?.includes('T') ? r.startTime : formatToISO(r.date, r.startTime);
         const isoEnd = r.endTime?.includes('T') ? r.endTime : formatToISO(r.date, r.endTime);
 
+        // 🚀 CLEAN TITLE MERGE (Only for Calendar Sync)
+        let eventTitle = r.person;
+        
+        if (r.isGrouped) {
+           const names = r.reviewers && r.reviewers.length > 0 ? r.reviewers : [r.person];
+           const timePart = r.timeRaw ? `(${r.timeRaw})` : '';
+           const locPart = r.location && r.location !== 'Chưa xác định' ? `- ${r.location}` : '';
+           
+           eventTitle = `${names.join(' & ')} ${timePart} ${locPart}`.trim();
+        }
+
         return {
-          title: r.person,
+          title: eventTitle,
           start: isoStart,
           end: isoEnd,
           location: r.location || '',
           resources: r.resources || [r.person, r.location].filter(Boolean),
-          description: `Đồng bộ từ FPT Scheduler\nNội dung: ${r.person}\nPhòng: ${r.location}`,
-          signature: r.id
+          description: `Đồng bộ từ FPT Scheduler\nGV: ${eventTitle}\nPhòng: ${r.location}\n[ID: ${r.id}]`,
+          signature: r.id,
+          colorId: r.isGrouped ? '' : '11' // 🎨 Tomato (Red) for Councils, Default for Reviews
         };
       });
 
@@ -116,9 +128,13 @@ export const useCalendarSync = ({ accessToken }: UseCalendarSyncProps) => {
         console.log("📅 Available calendars in this GAS session:", res.data.availableCalendars);
       }
 
-      const successCount = res.data?.success ?? 0;
-      const failedCount = res.data?.failed ?? 0;
-      const skippedCount = res.data?.skipped ?? 0;
+      // 🔍 ROBUST EXTRACTION: Try both nested and flat structure
+      const dataPayload: any = res.data || res || {};
+      const successCount = Number(dataPayload.success ?? 0);
+      const failedCount = Number(dataPayload.failed ?? 0);
+      const skippedCount = Number(dataPayload.skipped ?? 0);
+
+      console.log(`📊 Sync Result Processed: Success=${successCount}, Skipped=${skippedCount}, Failed=${failedCount}`);
 
       // 🚨 ATOMIC ESCALATION: Treat "Skipped" as "Conflict" if not forcing
       if (skippedCount > 0 && !force && successCount === 0) {
@@ -132,11 +148,11 @@ export const useCalendarSync = ({ accessToken }: UseCalendarSyncProps) => {
         updated: 0,
         failed: failedCount,
         skipped: skippedCount,
-        errors: res.data?.errors || [],
+        errors: dataPayload.errors || [],
         logs: [
           res.message,
-          res.data?.calendarName ? `Lịch: ${res.data.calendarName}` : null,
-          res.data?.calendarId ? `ID: ${res.data.calendarId}` : null
+          dataPayload.calendarName ? `Lịch: ${dataPayload.calendarName}` : null,
+          dataPayload.calendarId ? `ID: ${dataPayload.calendarId}` : null
         ].filter(Boolean) as string[]
       };
 
@@ -166,14 +182,16 @@ export const useCalendarSync = ({ accessToken }: UseCalendarSyncProps) => {
     setSyncResult(null);
 
     try {
-      const res = await clearCalendar(undefined, accessToken);
+      const res: any = await clearCalendar(undefined, accessToken);
+      const deletedCount = res.data?.deletedCount ?? res.deletedCount ?? 0;
+      
       const result: SyncResult = {
         type: 'clear',
         created: 0,
         updated: 0,
         failed: 0,
         skipped: 0,
-        logs: [res.message || "Đã xóa sạch lịch"]
+        logs: [`Đã xóa tất cả ${deletedCount} sự kiện cũ trên lịch.`]
       };
       setSyncResult(result);
       return result;

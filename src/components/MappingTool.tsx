@@ -26,8 +26,8 @@ export const MappingTool: React.FC<MappingToolProps> = ({
   const fields: { key: keyof ColumnMapping; label: string }[] = [
     { key: 'date', label: 'Ngày' },
     { key: 'time', label: 'Thời gian' },
-    { key: 'task', label: 'Nhiệm vụ / Đề tài' },
-    { key: 'person', label: 'Giảng viên' },
+    { key: 'task', label: 'Tiêu đề / Reviewer 1' },
+    { key: 'person', label: 'Họ tên / Reviewer 2' },
     { key: 'location', label: 'Phòng' },
   ];
 
@@ -63,8 +63,8 @@ export const MappingTool: React.FC<MappingToolProps> = ({
           {[
             { key: 'date', label: 'NGÀY' },
             { key: 'time', label: 'THỜI GIAN' },
-            { key: 'task', label: 'NHIỆM VỤ / ĐỀ TÀI' },
-            { key: 'person', label: 'GIẢNG VIÊN' },
+            { key: 'task', label: 'TIÊU ĐỀ / REVIEWER 1' },
+            { key: 'person', label: 'HỌ TÊN / REVIEWER 2' },
             { key: 'location', label: 'PHÒNG' },
           ].map((field) => (
             <div key={field.key} className="space-y-1.5 flex flex-col justify-end">

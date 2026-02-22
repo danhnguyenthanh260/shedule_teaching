@@ -464,8 +464,8 @@ export class GoogleSyncService {
             date: ['ngày', 'date'],
             time: ['slot', 'giờ', 'time'],
             location: ['phòng', 'room', 'location'],
-            person: ['reviewer', 'giảng viên', 'cán bộ'],
-            task: ['nhiệm vụ', 'đề tài', 'task', 'code']
+            person: ['reviewer', 'giảng viên', 'cán bộ', 'họ tên'],
+            task: ['nhiệm vụ', 'đề tài', 'task', 'code', 'tiêu đề']
           };
 
           const autoInferList = (field: keyof ColumnMapping) => {
@@ -487,7 +487,7 @@ export class GoogleSyncService {
           
           if (!rPerson) {
              const persons = autoInferList('person');
-             rPerson = persons.length > 0 ? persons.join(" & ") : "";
+             rPerson = persons[0] || "";
           }
 
           // 🚀 2. ROBUSTNESS FIX: Strictly skip any block that is actually empty.
@@ -509,20 +509,24 @@ export class GoogleSyncService {
               ? parseVNTime(rDate, rTime, preferredFormat)
               : { start: "", end: "" };
             
+            const reviewersFromInference = autoInferList('person');
+            const finalReviewers = reviewersFromInference.slice(0, 2); // 🎯 Only take Reviewer 1 & 2
+            
             const eventId = `${generateRowId(sheetId, tab, rowIndex + headerRowIndex + 1)}-b${blockIdx}`;
-            console.log(`[Grouping] Row ${rowIndex} Block ${blockIdx} -> ID: ${eventId}, Date: ${finalDate}, Person: ${rPerson}`);
+            console.log(`[Grouping] Row ${rowIndex} Block ${blockIdx} -> ID: ${eventId}, Date: ${finalDate}, Reviewers: ${finalReviewers.join(', ')}`);
 
             allEvents.push({
               id: eventId,
               groupName: `Review ${blockIdx + 1}`,
-              person: rPerson || rTask || baseTask,
+              person: finalReviewers[0] || rPerson || rTask || baseTask,
+              reviewers: finalReviewers, // 🚀 PRECISE NAMES
               date: finalDate,
               startTime: start,
               endTime: end,
               task: rTask || baseTask,
               location: rLocation || "Chưa xác định",
               resources: [
-                rPerson ? `teacher:${rPerson}` : null,
+                ...finalReviewers.map(p => `teacher:${p}`),
                 rLocation ? `room:${rLocation}` : null
               ].filter(Boolean) as string[],
               dateRaw: finalDate,
@@ -533,7 +537,7 @@ export class GoogleSyncService {
               blockEnd,
               reviewAreaStart: blockStartIndices[0],
               status: 'pending',
-              isGrouped: true, // 🚀 CRITICAL FIX: Tell table this is a grouped event
+              isGrouped: true, 
               rawRow: row
             });
           } catch (e) {

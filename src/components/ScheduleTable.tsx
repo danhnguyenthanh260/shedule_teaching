@@ -99,8 +99,8 @@ export const ScheduleTable: React.FC<ScheduleTableProps> = ({
               <>
                 <th className="px-4 py-4 text-[11px] font-bold text-black uppercase tracking-wider bg-slate-50 text-center sticky top-0 min-w-[120px] border-r border-slate-100/50">{columnLabels?.date || 'Ngày'}</th>
                 <th className="px-4 py-4 text-[11px] font-bold text-black uppercase tracking-wider bg-slate-50 text-center sticky top-0 min-w-[140px] border-r border-slate-100/50">{columnLabels?.time || 'Thời gian'}</th>
-                <th className="px-4 py-4 text-[11px] font-bold text-black uppercase tracking-wider bg-slate-50 text-center sticky top-0 min-w-[200px] border-r border-slate-100/50">{columnLabels?.task || 'Nhiệm vụ'}</th>
-                <th className="px-4 py-4 text-[11px] font-bold text-black uppercase tracking-wider bg-slate-50 text-center sticky top-0 min-w-[200px] border-r border-slate-100/50">{columnLabels?.person || 'Giảng viên'}</th>
+                <th className="px-4 py-4 text-[11px] font-bold text-black uppercase tracking-wider bg-slate-50 text-center sticky top-0 min-w-[200px] border-r border-slate-100/50">{columnLabels?.task || 'Tiêu đề / Reviewer 1'}</th>
+                <th className="px-4 py-4 text-[11px] font-bold text-black uppercase tracking-wider bg-slate-50 text-center sticky top-0 min-w-[200px] border-r border-slate-100/50">{columnLabels?.person || 'Họ tên / Reviewer 2'}</th>
                 <th className="px-4 py-4 text-[11px] font-bold text-black uppercase tracking-wider bg-slate-50 text-center sticky top-0 min-w-[150px]">{columnLabels?.location || 'Phòng'}</th>
               </>
             ) : showDynamic ? (

@@ -38,28 +38,22 @@ function doPost(e) {
     const action = payload.action || 'sync';
 
     if (action === 'clearCalendar') {
-      const clearResult = CalendarService.clearEvents(
-        payload.calendarName || 'Schedule Teaching'
+      const res = CalendarService.clearEvents(
+        payload.calendarName || 'Schedule Teaching',
+        payload.googleAccessToken || null
       );
-      return jsonResponse_({
-        status: 'success',
-        message: `Đã xóa sạch ${clearResult.deletedCount} sự kiện cũ`,
-        data: clearResult
-      });
+      return jsonResponse_({ status: CONSTANTS.SUCCESS, version: '13.3', message: 'Cleared', data: res });
     }
 
     // 5. THỰC HIỆN ĐỒNG BỘ
-    const result = CalendarService.createEvents(
+    const res = CalendarService.createEvents(
       payload.calendarName || 'Schedule Teaching',
-      payload.events,
-      payload.force || false
+      payload.events || [], 
+      payload.force || false,
+      payload.googleAccessToken || null
     );
-
-    return jsonResponse_({
-      status: CONSTANTS.SUCCESS,
-      message: `Sync processed successfully`,
-      data: result
-    });
+    
+    return jsonResponse_({ status: CONSTANTS.SUCCESS, version: '13.3', data: res });
 
   } catch (err) {
     return jsonResponse_({ status: CONSTANTS.ERROR, message: err.toString() });

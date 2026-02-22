@@ -584,7 +584,7 @@ export const LecturerDashboard: React.FC = () => {
                   <h4 className="text-[11px] font-bold text-slate-800 uppercase tracking-tight">Lọc nâng cao</h4>
                 </div>
                 <p className="text-[9px] text-slate-500 font-medium leading-relaxed">
-                  Sử dụng biểu tượng <span className="text-slate-800 font-bold">🔍 (biểu tượng phễu)</span> bên cạnh ô tìm kiếm để lọc dữ liệu theo Phòng, Nhiệm vụ hoặc Ngày.
+                  Sử dụng biểu tượng <span className="text-slate-800 font-bold">🔍 (biểu tượng phễu)</span> bên cạnh ô tìm kiếm để lọc dữ liệu theo Phòng, Tiêu đề hoặc Ngày.
                 </p>
               </div>
             </div>

@@ -350,46 +350,21 @@ export class GoogleSyncService {
 
     // 🚀 UNIFIED REVIEW MODE DETECTION:
     const hasReviewerHeaders = detailHeaders.some(h => {
-      const low = (h || "").toLowerCase();
+      const low = String(h || "").toLowerCase();
       return low.includes('reviewer 1') || low.includes('gv 1') || (low.includes('reviewer') && low.includes('1'));
     });
     
     // It's Review Mode if: explicit flag OR (tab has "review" AND has specific headers).
     const suspectReview = !!isDataMau || ((tab || "").toLowerCase().includes("review") && hasReviewerHeaders);
     
-    // 🚀 Robustness: Search first 10 rows for anchors if needed
-    if (suspectReview && blockStartIndices.length !== 3) {
-      console.log("[Grouping] Searching first 10 rows for best triple anchors...");
-      for (let i = 0; i < Math.min(10, rawRows.length); i++) {
-        const potential = rawRows[i].map(h => String(h || ""));
-        const found = findTripleAnchors(potential);
-        if (found.length === 3) {
-          console.log(`[Grouping] SUCCESS: Triple anchors found on row index ${i}:`, found);
-          blockStartIndices = found;
-          break;
-        }
-      }
+    // 🚀 NEW LOGIC: Only use Triple Mode if we actually found 3 blocks on the CURRENT header row.
+    // We REMOVED the "search first 10 rows" logic because it caused false positives on simple review sheets (like Review1).
+    const isTripleMode = suspectReview && blockStartIndices.length === 3;
+    const finalBlockStarts = isTripleMode ? blockStartIndices : [0]; 
+    
+    if (suspectReview) {
+       console.log(`[Grouping] Sheet: ${tab}, TripleMode: ${isTripleMode}, Anchors:`, blockStartIndices);
     }
-
-    // 🚨 FINAL FALLBACK: If we are in Review Mode but anchors still failed, 
-    // we MUST FORCE 12 items by splitting from Column J.
-    if (suspectReview && blockStartIndices.length !== 3) {
-      const J_INDEX = 9;
-      const total = detailHeaders.length;
-      if (total >= J_INDEX + 3) {
-        const blockSize = Math.floor((total - J_INDEX) / 3);
-        blockStartIndices = [J_INDEX, J_INDEX + blockSize, J_INDEX + (2 * blockSize)];
-        console.warn("[Grouping] Anchors not found. Falling back to heuristic split:", blockStartIndices);
-      } else {
-        // Absolute fallback for smaller sheets
-        blockStartIndices = [0, Math.floor(total/3), Math.floor(2*total/3)];
-        console.warn("[Grouping] Sheet too small. Using absolute split:", blockStartIndices);
-      }
-    }
-
-    // In Review Mode, Triple Mode is MANDATORY
-    const isTripleMode = suspectReview;
-    console.log(`[Grouping] Expansion Mode: ${isTripleMode}, Block Starts:`, blockStartIndices);
 
     dataRows.forEach((row, rowIndex) => {
       // 🚨 1. CHẶN DÒNG TRỐNG (Mềm mỏng hơn để không mất dòng cuối)
@@ -399,86 +374,83 @@ export class GoogleSyncService {
       const baseTask = (mapping.task !== undefined ? (row[mapping.task] || "Review") : "Review").toString().trim();
       const basePerson = (mapping.person !== undefined ? (row[mapping.person] || "") : "").toString().trim();
 
-      if (isTripleMode) {
-        // 🔄 Expand 1 row -> 3 events
-        blockStartIndices.forEach((blockStart, blockIdx) => {
-          const firstAnchor = blockStartIndices[0];
-          // Calculate block end dynamically based on next block start
-          const blockEnd = blockIdx < 2 ? blockStartIndices[blockIdx + 1] - 1 : detailHeaders.length - 1;
+      finalBlockStarts.forEach((blockStart, blockIdx) => {
+        // Calculate block end dynamically based on next block start
+        const blockEnd = isTripleMode 
+          ? (blockIdx < 2 ? blockStartIndices[blockIdx + 1] - 1 : detailHeaders.length - 1)
+          : detailHeaders.length - 1;
 
-          const getMappedValueInBlock = (field: keyof ColumnMapping) => {
-            const originalIdx = mapping[field];
-            if (originalIdx === undefined) return "";
-            
-            const J_INDEX = 9;
-            const firstAnchor = Math.min(J_INDEX, blockStartIndices[0] || J_INDEX);
-            const targetHeader = (detailHeaders[originalIdx] || "").trim().toLowerCase();
-
-            // 🎯 Strategy 1: Occurrence-Aware Header Label Matching
-            // Handles cases like "Reviewer" appearing multiple times in one block.
-            if (targetHeader && !targetHeader.startsWith('column_') && originalIdx >= firstAnchor) {
-              // 1. Find which occurrence of targetHeader this originalIdx was in the FIRST block
-              let occurrenceIndex = 0;
-              for (let i = firstAnchor; i < originalIdx; i++) {
-                if ((detailHeaders[i] || "").trim().toLowerCase() === targetHeader) {
-                  occurrenceIndex++;
-                }
-              }
-
-              // 2. Find the SAME occurrence index in the CURRENT block
-              let currentOccurrence = 0;
-              for (let i = blockStart; i <= blockEnd; i++) {
-                if ((detailHeaders[i] || "").trim().toLowerCase() === targetHeader) {
-                  if (currentOccurrence === occurrenceIndex) {
-                    return (row[i] || "").toString().trim();
-                  }
-                  currentOccurrence++;
-                }
-              }
-            }
-
-            // 🎯 Strategy 2: Relative Offset (Fallback for unlabelled columns)
-            if (originalIdx >= firstAnchor) {
-              const offset = originalIdx - firstAnchor;
-              const relativeIdx = blockStart + offset;
-              if (relativeIdx < row.length) {
-                return (row[relativeIdx] || "").toString().trim();
-              }
-            } else {
-              // Global area (A-I)
-              return (row[originalIdx] || "").toString().trim();
-            }
-
-            return "";
-          };
-
-          let rDate = getMappedValueInBlock('date');
-          let rTime = getMappedValueInBlock('time');
-          let rLocation = getMappedValueInBlock('location');
-          let rPerson = getMappedValueInBlock('person');
-          let rTask = getMappedValueInBlock('task');
+        const getMappedValueInBlock = (field: keyof ColumnMapping) => {
+          const originalIdx = mapping[field];
+          if (originalIdx === undefined) return "";
           
-          // 👥 FALLBACK: If per-block extraction failed, use auto-infer logic
-          // (Only for missing data, not to overwrite explicit mapping)
-          const fieldKeywords: Record<string, string[]> = {
-            date: ['ngày', 'date'],
-            time: ['slot', 'giờ', 'time'],
-            location: ['phòng', 'room', 'location'],
-            person: ['reviewer', 'giảng viên', 'cán bộ', 'họ tên'],
-            task: ['nhiệm vụ', 'đề tài', 'task', 'code', 'tiêu đề']
-          };
+          if (!isTripleMode) {
+            return (row[originalIdx] || "").toString().trim();
+          }
 
-          const autoInferList = (field: keyof ColumnMapping) => {
-            const keywords = fieldKeywords[field] || [];
-            const matches: string[] = [];
-            detailHeaders.forEach((h, i) => {
-               if (i >= blockStart && i <= blockEnd && keywords.some(k => (h || "").toLowerCase().includes(k))) {
-                 const val = (row[i] || "").toString().trim();
-                 if (val) matches.push(val);
-               }
-            });
-            return matches;
-          };
+          const J_INDEX = 9;
+          const firstAnchor = Math.min(J_INDEX, blockStartIndices[0] || J_INDEX);
+          const targetHeader = String(detailHeaders[originalIdx] || "").trim().toLowerCase();
+
+          // 🎯 Strategy 1: Occurrence-Aware Header Label Matching
+          if (targetHeader && !targetHeader.startsWith('column_') && originalIdx >= firstAnchor) {
+            let occurrenceIndex = 0;
+            for (let i = firstAnchor; i < originalIdx; i++) {
+              if (String(detailHeaders[i] || "").trim().toLowerCase() === targetHeader) {
+                occurrenceIndex++;
+              }
+            }
+
+            let currentOccurrence = 0;
+            for (let i = blockStart; i <= blockEnd; i++) {
+              if (String(detailHeaders[i] || "").trim().toLowerCase() === targetHeader) {
+                if (currentOccurrence === occurrenceIndex) {
+                  return (row[i] || "").toString().trim();
+                }
+                currentOccurrence++;
+              }
+            }
+          }
+
+          // 🎯 Strategy 2: Relative Offset (Fallback)
+          if (originalIdx >= firstAnchor) {
+             const offset = originalIdx - firstAnchor;
+             const relativeIdx = blockStart + offset;
+             if (relativeIdx < row.length) {
+               return (row[relativeIdx] || "").toString().trim();
+             }
+          } else {
+             return (row[originalIdx] || "").toString().trim();
+          }
+          return "";
+        };
+
+        let rDate = getMappedValueInBlock('date');
+        let rTime = getMappedValueInBlock('time');
+        let rLocation = getMappedValueInBlock('location');
+        let rPerson = getMappedValueInBlock('person');
+        let rTask = getMappedValueInBlock('task');
+        
+        const fieldKeywords: Record<string, string[]> = {
+          date: ['ngày', 'date'],
+          time: ['slot', 'giờ', 'time'],
+          location: ['phòng', 'room', 'location'],
+          person: ['reviewer', 'giảng viên', 'cán bộ', 'họ tên'],
+          task: ['nhiệm vụ', 'đề tài', 'task', 'code', 'tiêu đề']
+        };
+
+        const autoInferList = (field: keyof ColumnMapping) => {
+          const keywords = fieldKeywords[field] || [];
+          const matches: string[] = [];
+          detailHeaders.forEach((h, i) => {
+             const inBlock = isTripleMode ? (i >= blockStart && i <= blockEnd) : true;
+             if (inBlock && keywords.some(k => String(h || "").toLowerCase().includes(k))) {
+                const val = (row[i] || "").toString().trim();
+                if (val) matches.push(val);
+             }
+          });
+          return matches;
+        };
 
           if (!rDate) rDate = autoInferList('date')[0] || "";
           if (!rTime) rTime = autoInferList('time')[0] || "";
@@ -544,43 +516,6 @@ export class GoogleSyncService {
             console.error(`[Grouping] Error Row ${rowIndex} Block ${blockIdx}:`, e);
           }
         });
-      } else {
-        // Fallback to 1 row -> 1 event (Normal Mode)
-        // Auto-infer for normal mode too if it helps debugging
-        const getNormalVal = (field: keyof ColumnMapping) => {
-          if (mapping[field] !== undefined) return (row[mapping[field]!] || "").toString().trim();
-          // Minimal auto-infer for preview
-          const fieldKeywords: Record<string, string[]> = {
-            date: ['ngày', 'date'],
-            time: ['slot', 'giờ', 'time'],
-            person: ['giảng viên', 'họ tên', 'name']
-          };
-          const keywords = fieldKeywords[field] || [];
-          const idx = detailHeaders.findIndex(h => keywords.some(k => (h || "").toLowerCase().includes(k)));
-          return idx !== -1 ? (row[idx] || "").toString().trim() : "";
-        };
-
-        const rDate = getNormalVal('date');
-        const rTime = getNormalVal('time');
-        const rPerson = getNormalVal('person') || basePerson;
-
-        if (!rDate && !rTime && !rPerson) return;
-
-        try {
-          const { start, end } = (rDate && rTime) ? parseVNTime(rDate, rTime, preferredFormat) : { start: "", end: "" };
-          allEvents.push({
-            id: `${sheetId}-${tab}-${rowIndex}`,
-            person: rPerson || baseTask,
-            date: rDate || "Chưa chọn",
-            startTime: start,
-            endTime: end,
-            task: baseTask,
-            location: (mapping.location !== undefined ? (row[mapping.location] || "Chưa xác định") : "Chưa xác định").toString().trim(),
-            status: 'pending',
-            rawRow: row
-          });
-        } catch (e) {}
-      }
     });
 
     return allEvents;

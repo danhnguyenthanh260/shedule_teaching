@@ -29,6 +29,7 @@ export interface SyncPayload {
     secret?: string; // Required for direct GAS calls (local proxy)
     force?: boolean; // ✅ ADDED: Bypass duplicate check
     googleAccessToken?: string; // ✅ ADDED: For decentralized sync
+    conflictMode?: 'insert' | 'keep_old' | 'replace'; // ✅ Xử lý xung đột thời gian
 }
 
 export interface ClearPayload {
@@ -55,6 +56,15 @@ export interface SyncResponse {
             title: string;
             message: string;
         }>;
+        conflicts?: Array<{
+            newEvent: string;
+            newStart: string;
+            newEnd: string;
+            oldEvent: string;
+            oldStart: string;
+            oldEnd: string;
+            oldEventId: string;
+        }>;
     };
     timestamp: string;
     executionTime: string;
@@ -70,7 +80,7 @@ export const readSheet = async (
     url: string,
     startRow: number,
     tabName?: string
-): Promise<{ data: string[][]; tabName: string }> => {
+): Promise<{ data: string[][]; tabName: string; allTabs?: string[] }> => {
     try {
         if (!url || !url.includes('spreadsheets')) {
             throw new Error('URL Google Sheet không hợp lệ');
@@ -124,7 +134,8 @@ export const readSheet = async (
         logSuccess(`Đã tải ${data.data.length} dòng dữ liệu từ tab: ${data.tabName}`);
         return {
             data: data.data || [],
-            tabName: data.tabName || tabName || 'Sheet1'
+            tabName: data.tabName || tabName || 'Sheet1',
+            allTabs: data.allTabs || []
         };
     } catch (error) {
         const errorMessage = error instanceof Error ? error.message : 'Không thể đọc dữ liệu';
@@ -140,7 +151,8 @@ export const syncEventsToCalendar = async (
     events: CalendarEvent[],
     calendarName?: string,
     force: boolean = false,
-    googleAccessToken?: string
+    googleAccessToken?: string,
+    conflictMode?: 'insert' | 'keep_old' | 'replace'
 ): Promise<SyncResponse> => {
     try {
         if (!Array.isArray(events) || events.length === 0) {
@@ -166,6 +178,7 @@ export const syncEventsToCalendar = async (
             userEmail: currentUser.email || undefined,
             force: force,
             googleAccessToken: googleAccessToken,
+            conflictMode: conflictMode,
             // 🔐 Tự động thêm secret ở môi trường Local để hỗ trợ Vite Proxy
             ...(import.meta.env.DEV ? { secret: import.meta.env.VITE_GAS_SECRET } : {})
         };
@@ -300,6 +313,50 @@ export const invalidateAdminCache = async (): Promise<void> => {
         logSuccess('Admin cache invalidated on server');
     } catch (error) {
         logError('Failed to invalidate admin cache');
+    }
+};
+
+export const getTabNames = async (url: string): Promise<string[]> => {
+    try {
+        if (!url || !url.includes('spreadsheets')) {
+            throw new Error('URL Google Sheet không hợp lệ');
+        }
+
+        const currentUser = auth.currentUser;
+        const idToken = currentUser ? await currentUser.getIdToken() : undefined;
+
+        const payload = {
+            action: 'getTabNames',
+            url: url,
+            idToken: idToken,
+            ...(import.meta.env.DEV ? { secret: import.meta.env.VITE_GAS_SECRET } : {})
+        };
+
+        const fetchUrl = `${API_BASE_URL}/api/readSheet?t=${Date.now()}`;
+        logInfo(`Fetching tab names via proxy: ${fetchUrl}`);
+
+        const response = await fetch(fetchUrl, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify(payload)
+        });
+
+        if (!response.ok) {
+            throw new Error(`Lỗi Proxy API ${response.status}`);
+        }
+
+        const data = await response.json();
+        if (data.status === 'error') {
+            throw new Error(data.message || 'Lỗi từ Backend');
+        }
+
+        return data.tabs || [];
+    } catch (error) {
+        const errorMessage = error instanceof Error ? error.message : 'Không thể lấy danh sách tab';
+        logError('Get tabs error:', errorMessage);
+        throw new Error(errorMessage);
     }
 };
 

@@ -4,6 +4,7 @@ import { ExcelImport } from '../../../components/ExcelImport';
 import { MappingTool } from '../../../components/MappingTool';
 import { ScheduleTable } from '../../../components/ScheduleTable';
 import { StatusAlerts } from '../../../components/StatusAlerts';
+import { InternalConflictModal, detectInternalOverlaps } from '../../../components/InternalConflictModal';
 import SyncHistoryModal from '../../../components/SyncHistoryModal';
 import { useFirebaseMapping } from '../../../hooks/useFirebaseMapping';
 import { useAppPersistence } from '../../../hooks/useAppPersistence';
@@ -62,6 +63,15 @@ export const LecturerDashboard: React.FC = () => {
   }, [semesters, selectedSemesterId, sheetMeta]);
 
   const [isFetchingData, setIsFetchingData] = useState(false);
+  const [isMappingSettled, setIsMappingSettled] = useState(false);
+  const [isSemestersLoading, setIsSemestersLoading] = useState(true);
+
+  // Internal conflict modal state
+  const [internalConflictOpen, setInternalConflictOpen] = useState(false);
+  const [internalConflictGroups, setInternalConflictGroups] = useState<any[]>([]);
+  const [pendingNonConflicting, setPendingNonConflicting] = useState<RowNormalized[]>([]);
+  const [pendingAllRows, setPendingAllRows] = useState<RowNormalized[]>([]);
+  const [lastSyncedRows, setLastSyncedRows] = useState<RowNormalized[]>([]); // Lưu rows cuối cùng đã gửi sync
 
   // Hooks
   const {
@@ -102,7 +112,8 @@ export const LecturerDashboard: React.FC = () => {
     syncResult, setSyncResult,
     syncError, setSyncError,
     syncToCalendar,
-    clearAppEvents
+    clearAppEvents,
+    conflicts, setConflicts
   } = useCalendarSync({ accessToken });
 
   // Toast State
@@ -111,10 +122,13 @@ export const LecturerDashboard: React.FC = () => {
   useEffect(() => {
     const fetchConfigs = async () => {
       try {
+        setIsSemestersLoading(true);
         const configs = await configService.fetchConfigs();
         setSemesters(configs);
       } catch (e) {
         console.error('Failed to fetch configs:', e);
+      } finally {
+        setIsSemestersLoading(false);
       }
     };
     fetchConfigs();
@@ -162,6 +176,7 @@ export const LecturerDashboard: React.FC = () => {
     setSelectedIds(new Set());
     setParserError(null);
     setSyncError(null);
+    setIsMappingSettled(false); // 🚨 Khóa UI cho đến khi mapping mới được nạp
 
     // 🛡️ Pre-emptive mode detection to prevent flicker
     const fromConfig = semesters[selectedSemesterId]?.sheetType;
@@ -314,8 +329,8 @@ export const LecturerDashboard: React.FC = () => {
 
   useEffect(() => {
     // 🛡️ Guard Clause
-    if (!isRestored || !mappingId || allRows.length === 0 || mappingLoading) {
-      if (mappingLoading) setRows([]); 
+    if (!isRestored || !mappingId || allRows.length === 0 || mappingLoading || isSemestersLoading) {
+      if (mappingLoading || isSemestersLoading) setIsMappingSettled(false);
       return;
     }
 
@@ -361,6 +376,7 @@ export const LecturerDashboard: React.FC = () => {
 
     lastAppliedMappingId.current = mappingId;
     lastAppliedDateFormat.current = dateFormat;
+    setIsMappingSettled(true); // ✅ Đã áp dụng Mapping xong, mở khóa UI
   }, [
     isRestored,
     mappingId, 
@@ -395,7 +411,30 @@ export const LecturerDashboard: React.FC = () => {
     }
   }, [rows]);
 
-  const handleSync = async (isForce: boolean = false) => {
+  // 🔄 Hàm sync chính (có thể nhận rows đã filter sẵn)
+  const doSyncRows = async (rowsToSync: RowNormalized[], isForce: boolean = false, conflictMode?: 'insert' | 'keep_old' | 'replace') => {
+    setLastSyncedRows(rowsToSync); // 💾 Lưu lại để dùng khi resolve conflict
+    try {
+      const result = await syncToCalendar(rowsToSync, isForce, conflictMode);
+      if (result) {
+        if (firebaseUser && sheetMeta) {
+          await saveSyncLog({
+            userId: firebaseUser.uid,
+            sheetId: sheetMeta.sheetId,
+            tabName: sheetMeta.tab,
+            totalRows: rowsToSync.length,
+            syncResult: result
+          });
+          setRefreshHistory(prev => prev + 1);
+          showToast(`Đã đồng bộ ${rowsToSync.length} mục lên Calendar!`);
+        }
+      }
+    } catch (err: any) {
+      // syncToCalendar already sets syncError
+    }
+  };
+
+  const handleSync = async (isForce: boolean = false, conflictMode?: 'insert' | 'keep_old' | 'replace') => {
     setSyncError(null);
     let rowsToSync = filteredRows.filter(r => selectedIds.has(r.id));
     
@@ -413,24 +452,18 @@ export const LecturerDashboard: React.FC = () => {
       return;
     }
 
-    try {
-      const result = await syncToCalendar(rowsToSync, isForce);
-      if (result) {
-        if (firebaseUser && sheetMeta) {
-          await saveSyncLog({
-            userId: firebaseUser.uid,
-            sheetId: sheetMeta.sheetId,
-            tabName: sheetMeta.tab,
-            totalRows: rowsToSync.length,
-            syncResult: result
-          });
-          setRefreshHistory(prev => prev + 1); // 🔄 Force history modal to refresh
-          showToast(`Đã đồng bộ ${rowsToSync.length} mục lên Calendar!`);
-        }
-      }
-    } catch (err: any) {
-      // syncToCalendar already sets syncError
+    // 🔍 Check internal overlaps (event trùng nhau trong batch)
+    const { groups, nonConflicting } = detectInternalOverlaps(rowsToSync);
+    if (groups.length > 0 && !conflictMode) {
+      // Có event trùng nội bộ → mở modal
+      setInternalConflictGroups(groups);
+      setPendingNonConflicting(nonConflicting);
+      setPendingAllRows(rowsToSync);
+      setInternalConflictOpen(true);
+      return; // Dừng sync, đợi user chọn
     }
+
+    await doSyncRows(rowsToSync, isForce, conflictMode);
   };
 
   if (!firebaseUser) return null;
@@ -712,7 +745,7 @@ export const LecturerDashboard: React.FC = () => {
           </div>
 
           <div className="flex-1 min-h-0 overflow-hidden rounded-xl border border-slate-50 bg-slate-50/30">
-            {(loading || mappingLoading || isFetchingData) ? (
+            {(!isRestored || loading || mappingLoading || isFetchingData || !isMappingSettled || isSemestersLoading) ? (
               <div className="h-full flex flex-col items-center justify-center bg-white animate-in fade-in duration-500">
                 <div className="relative mb-6">
                   <div className="w-16 h-16 border-4 border-orange-100 border-t-[#F27024] rounded-full animate-spin"></div>
@@ -723,7 +756,9 @@ export const LecturerDashboard: React.FC = () => {
                   </div>
                 </div>
                 <div className="text-center">
-                  <h3 className="text-sm font-bold text-slate-800 uppercase tracking-[0.2em] mb-2">Đang tải dữ liệu Sheet</h3>
+                  <h3 className="text-sm font-bold text-slate-800 uppercase tracking-[0.2em] mb-2">
+                    {(!isRestored || mappingLoading || !isMappingSettled || isSemestersLoading) ? 'Đang khôi phục phiên làm việc' : 'Đang tải dữ liệu Sheet'}
+                  </h3>
                   <p className="text-[10px] text-slate-400 font-bold uppercase tracking-widest animate-pulse">Vui lòng đợi trong giây lát...</p>
                 </div>
               </div>
@@ -755,13 +790,32 @@ export const LecturerDashboard: React.FC = () => {
       )}
 
       {/* Global Components: Alerts & Toasts */}
+      {/* Internal Conflict Modal */}
+      <InternalConflictModal
+        isOpen={internalConflictOpen}
+        conflictGroups={internalConflictGroups}
+        onAcceptAll={() => {
+          setInternalConflictOpen(false);
+          doSyncRows(pendingAllRows);
+        }}
+        onSyncSelected={(selectedEvents) => {
+          setInternalConflictOpen(false);
+          // Merge: events đã chọn + events không trùng
+          const finalRows = [...pendingNonConflicting, ...selectedEvents];
+          doSyncRows(finalRows);
+        }}
+        onClose={() => setInternalConflictOpen(false)}
+      />
+
       <StatusAlerts
         result={syncResult}
         error={parserError || syncError}
+        conflicts={conflicts}
         onClose={() => {
           setSyncResult(null);
           setSyncError(null);
           setParserError(null);
+          setConflicts([]);
         }}
         onForceSync={() => {
           const errText = (parserError || syncError || '').toLowerCase();
@@ -770,6 +824,12 @@ export const LecturerDashboard: React.FC = () => {
           } else {
             handleSync(true);
           }
+        }}
+        onConflictResolve={(mode) => {
+          setSyncError(null);
+          setConflicts([]);
+          // ✅ Dùng lastSyncedRows (rows đã lọc) thay vì gọi handleSync lại từ đầu
+          doSyncRows(lastSyncedRows, false, mode);
         }}
       />
 

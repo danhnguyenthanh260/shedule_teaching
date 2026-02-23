@@ -266,6 +266,7 @@ export const useSheetLogic = ({
       const skippedCount = res.data?.skipped ?? res.skipped ?? 0;
 
       const syncRes: SyncResult = {
+        type: 'sync',
         created: successCount,
         updated: 0,
         failed: failedCount,

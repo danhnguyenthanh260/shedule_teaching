@@ -5,11 +5,12 @@ import { configService, SemesterConfig } from '../services/configService';
 import { database } from '../config/firebase';
 import { SUPER_ADMIN_EMAIL, isSuperAdmin, isAdmin } from '../config/admin';
 import { ref, set, push, onValue, remove } from 'firebase/database';
-import { readSheet, invalidateAdminCache } from '../services/appsScriptService';
+import { readSheet, invalidateAdminCache, getTabNames } from '../services/appsScriptService';
 import Layout from '../components/Layout';
 import { MappingTool } from '../components/MappingTool';
 import { ColumnMapping } from '../types';
 import { generateHeaderOptions } from '../utils/headerUtils';
+import useDebounce from '../hooks/useDebounce';
 
 export const AdminPage: React.FC = () => {
     const { user, logout } = useFirebase();
@@ -36,6 +37,11 @@ export const AdminPage: React.FC = () => {
     });
 
     const [sheetHeaders, setSheetHeaders] = useState<{ label: string; value: number }[]>([]);
+    const [availableTabs, setAvailableTabs] = useState<string[]>([]);
+    const [isFetchingTabs, setIsFetchingTabs] = useState(false);
+
+    // Debounce URL to fetch tabs automatically
+    const debouncedUrl = useDebounce(newSemester.sheetUrl, 1000);
 
     // Edit mode state
     const [editMode, setEditMode] = useState<string | null>(null);
@@ -56,6 +62,34 @@ export const AdminPage: React.FC = () => {
         fetchConfigs();
         fetchAdminWhitelist();
     }, []);
+
+    // ✅ Effect to auto-fetch tabs when URL changes
+    useEffect(() => {
+        if (debouncedUrl && debouncedUrl.includes('spreadsheets')) {
+            const fetchTabs = async () => {
+                try {
+                    setIsFetchingTabs(true);
+                    const tabs = await getTabNames(debouncedUrl);
+                    setAvailableTabs(tabs);
+                    
+                    // 🚀 Nếu chỉ có 1 sheet, tự động điền luôn
+                    if (tabs.length === 1) {
+                        setNewSemester(prev => ({ ...prev, tabName: tabs[0] }));
+                    } else if (tabs.length > 1 && !newSemester.tabName) {
+                        // Nếu có nhiều nhưng chưa chọn, để trống cho user chọn
+                        setNewSemester(prev => ({ ...prev, tabName: '' }));
+                    }
+                } catch (err) {
+                    console.error('Failed to fetch tabs:', err);
+                } finally {
+                    setIsFetchingTabs(false);
+                }
+            };
+            fetchTabs();
+        } else {
+            setAvailableTabs([]);
+        }
+    }, [debouncedUrl, editMode]); // ✅ Thêm editMode để re-fetch khi mở form sửa
 
     const fetchConfigs = async () => {
         try {
@@ -107,6 +141,12 @@ export const AdminPage: React.FC = () => {
 
             setToastMessage(editMode ? '✅ Cập nhật học kỳ thành công!' : '✅ Tạo học kỳ thành công!');
             setTimeout(() => setToastMessage(null), 5000);
+            
+            // Clean up state
+            setAvailableTabs([]);
+            setSheetHeaders([]);
+            setEditMode(null);
+            
             setNewSemester({ 
                 semester: '', 
                 sheetUrl: '', 
@@ -117,6 +157,8 @@ export const AdminPage: React.FC = () => {
                 tabName: '',
                 mapping: {}
             });
+
+            fetchConfigs();
             setSheetHeaders([]);
             setEditMode(null);
             fetchConfigs();
@@ -159,13 +201,14 @@ export const AdminPage: React.FC = () => {
         });
         setEditMode(semester.id);
         setSheetHeaders([]);
+        setAvailableTabs([]); // Reset tabs to trigger re-fetch
         window.scrollTo({ top: 0, behavior: 'smooth' });
 
         // Auto-fetch headers if URL is present to show Mapping Tool immediately
         if (semester.sheetUrl) {
             try {
                 const startRowNum = parseInt(semester.startRow || '1');
-                const response = await readSheet(semester.sheetUrl, startRowNum);
+                const response = await readSheet(semester.sheetUrl, startRowNum, semester.tabName);
                 if (response?.data && response.data.length > 0) {
                     const headers = response.data[0];
                     const headerOptions = generateHeaderOptions(
@@ -191,7 +234,7 @@ export const AdminPage: React.FC = () => {
         try {
             setLoading(true);
             const startRowNum = parseInt(newSemester.startRow);
-            const response = await readSheet(newSemester.sheetUrl, startRowNum);
+            const response = await readSheet(newSemester.sheetUrl, startRowNum, newSemester.tabName);
             if (!response?.data || response.data.length === 0) {
                 setToastMessage('❌ Không thể đọc dữ liệu từ Sheet.');
                 setTimeout(() => setToastMessage(null), 5000);
@@ -209,8 +252,26 @@ export const AdminPage: React.FC = () => {
             );
             setSheetHeaders(headerOptions);
 
-            setNewSemester({ ...newSemester, columns: columnNames });
-            setToastMessage(`✅ Đã tải ${headers.filter(h => h && String(h).trim()).length} cột tự động! Hãy kiểm tra ánh xạ bên dưới.`);
+            setSheetHeaders(headerOptions);
+
+            // ✅ Cập nhật danh sách Tab và điền Tên Tab
+            const allTabs = response.allTabs || [];
+            if (allTabs.length > 0) {
+                setAvailableTabs(allTabs);
+            }
+            
+            const detectedTabName = response.tabName || '';
+            setNewSemester(prev => {
+                const finalTabName = prev.tabName || detectedTabName;
+                console.log('Detected Tab:', detectedTabName, 'Final Tab Name:', finalTabName, 'All Tabs:', allTabs);
+                return { 
+                    ...prev, 
+                    columns: columnNames,
+                    tabName: finalTabName
+                };
+            });
+
+            setToastMessage(`✅ Đã tải ${headers.filter(h => h && String(h).trim()).length} cột từ tab "${detectedTabName}"!`);
             setTimeout(() => setToastMessage(null), 5000);
         } catch (err: any) {
             setToastMessage(`❌ Lỗi khi tải cột: ${err.message}`);
@@ -384,15 +445,75 @@ export const AdminPage: React.FC = () => {
                                 </div>
 
                                 <div>
-                                    <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-1.5 ml-1">Tên Tab (Sheet Name)</label>
-                                    <input
-                                        type="text"
-                                        placeholder="Ví dụ: Sheet1"
-                                        className="w-full px-4 py-3 bg-slate-50 border border-slate-100 rounded-2xl focus:ring-2 focus:ring-[#F27024] outline-none text-sm font-bold transition-all focus:bg-white"
-                                        value={newSemester.tabName}
-                                        onChange={(e) => setNewSemester({ ...newSemester, tabName: e.target.value })}
-                                        required
-                                    />
+                                    <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-1.5 ml-1 flex items-center justify-between">
+                                        <span>Tên Tab (Sheet Name)</span>
+                                        <div className="flex items-center gap-2">
+                                            {isFetchingTabs && <span className="animate-pulse text-orange-400 text-[9px]">Đang tìm...</span>}
+                                            <button 
+                                                type="button"
+                                                onClick={() => {
+                                                    if (newSemester.sheetUrl) {
+                                                        const fetchTabs = async () => {
+                                                            try {
+                                                                setIsFetchingTabs(true);
+                                                                const tabs = await getTabNames(newSemester.sheetUrl);
+                                                                setAvailableTabs(tabs);
+                                                            } catch (err) {
+                                                                setToastMessage('❌ Lỗi: ' + (err as any).message);
+                                                                setTimeout(() => setToastMessage(null), 3000);
+                                                            } finally {
+                                                                setIsFetchingTabs(false);
+                                                            }
+                                                        };
+                                                        fetchTabs();
+                                                    }
+                                                }}
+                                                className="hover:text-[#F27024] p-0.5 transition-colors"
+                                                title="Tải lại danh sách Tab"
+                                            >
+                                                <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                                                </svg>
+                                            </button>
+                                        </div>
+                                    </label>
+                                    
+                                    {availableTabs.length > 0 ? (
+                                        <div className="relative group">
+                                            <select
+                                                className="w-full px-4 py-3 bg-white border-2 border-orange-100 rounded-2xl focus:ring-2 focus:ring-[#F27024] outline-none text-sm font-bold transition-all shadow-sm appearance-none cursor-pointer hover:border-orange-300"
+                                                value={newSemester.tabName}
+                                                onChange={(e) => {
+                                                    const val = e.target.value;
+                                                    setNewSemester(prev => ({ ...prev, tabName: val }));
+                                                    // 🚀 Tự động fetch lại cột khi đổi tab
+                                                    if (val) {
+                                                        setTimeout(() => handleAutoFetchColumns(), 100);
+                                                    }
+                                                }}
+                                                required
+                                            >
+                                                <option value="">-- Chọn Sheet --</option>
+                                                {availableTabs.map(tab => (
+                                                    <option key={tab} value={tab}>{tab}</option>
+                                                ))}
+                                            </select>
+                                            <div className="absolute right-4 top-1/2 -translate-y-1/2 pointer-events-none text-orange-400 group-focus-within:rotate-180 transition-transform">
+                                                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M19 9l-7 7-7-7" />
+                                                </svg>
+                                            </div>
+                                        </div>
+                                    ) : (
+                                        <input
+                                            type="text"
+                                            placeholder="Ví dụ: Sheet1"
+                                            className="w-full px-4 py-3 bg-slate-50 border border-slate-100 rounded-2xl focus:ring-2 focus:ring-[#F27024] outline-none text-sm font-bold transition-all focus:bg-white"
+                                            value={newSemester.tabName}
+                                            onChange={(e) => setNewSemester({ ...newSemester, tabName: e.target.value })}
+                                            required
+                                        />
+                                    )}
                                 </div>
 
                                 <div className="md:col-span-2">

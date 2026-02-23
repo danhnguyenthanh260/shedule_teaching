@@ -66,11 +66,27 @@ export const useSheetParser = ({
     const secondaryHeaders = rowsData[idx] || [];
 
     const isReview = (meta as any)?.isDataMau || tabName.toLowerCase().includes('review') || (meta as any)?.sheetType?.type === 'review';
+    
+    // 🔒 Chỉ dùng primaryHeaders (row trên) làm group headers khi nó thực sự có repeating labels
+    // Tránh nhầm metadata row (VD: "Date", "3", "1/20/2026") làm group headers
+    const hasRepeatingLabels = (() => {
+      if (idx <= 0) return false;
+      const labels: Record<string, number> = {};
+      primaryHeaders.forEach(h => {
+        const lbl = (h || "").trim().toLowerCase();
+        if (lbl && lbl.length > 1) {
+          labels[lbl] = (labels[lbl] || 0) + 1;
+        }
+      });
+      return Object.values(labels).some(count => count >= 2);
+    })();
+    const useGroupHeaders = isReview && hasRepeatingLabels;
+    
     const merged = (idx > 0 && !isReview) ? mergeHeaderRows(primaryHeaders, secondaryHeaders) : secondaryHeaders;
     const filled = fillForwardHeaders(merged);
 
     setTitleRow(titleR);
-    setFullHeaders(idx > 0 && isReview ? fillForwardHeaders(primaryHeaders) : filled);
+    setFullHeaders(idx > 0 && useGroupHeaders ? fillForwardHeaders(primaryHeaders) : filled);
     setFullDetailHeaders(secondaryHeaders);
     setFullRows(rowsData.slice(idx + 1));
 

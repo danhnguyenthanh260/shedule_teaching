@@ -117,6 +117,19 @@ const GoogleCalendarAPI = {
     );
   },
 
+  deleteEvent: function (accessToken, calendarId, eventId) {
+    return this.fetch_(
+      accessToken,
+      "/calendars/" +
+        encodeURIComponent(calendarId) +
+        "/events/" +
+        encodeURIComponent(eventId),
+      {
+        method: "delete",
+      },
+    );
+  },
+
   /**
    * 🔍 Tìm ID của lịch theo tên (Dùng cho REST API)
    */
@@ -146,6 +159,7 @@ const CalendarService = {
     events,
     force = false,
     googleAccessToken = null,
+    conflictMode = null,
   ) {
     if (!Array.isArray(events) || events.length === 0)
       return { total: 0, success: 0 };
@@ -160,52 +174,74 @@ const CalendarService = {
       skipped: 0,
       failed: 0,
       errors: [],
+      conflicts: [],
     };
 
     try {
       if (useRestApi) {
-        // --- DECENTRALIZED mode: Find correct ID ---
         const calendarId = GoogleCalendarAPI.findCalendarIdByName(
           googleAccessToken,
           targetCalendarName,
         );
 
-        events.forEach((ev, i) => {
+        // 📅 Tìm min/max date từ tất cả events để query 1 lần
+        var globalMin = Infinity,
+          globalMax = -Infinity;
+        events.forEach(function (ev) {
+          var s = new Date(ev.start).getTime();
+          var e = new Date(ev.end).getTime();
+          if (s < globalMin) globalMin = s;
+          if (e > globalMax) globalMax = e;
+        });
+        var queryMin = new Date(globalMin - 24 * 60 * 60 * 1000).toISOString();
+        var queryMax = new Date(globalMax + 24 * 60 * 60 * 1000).toISOString();
+
+        // 🔍 Lấy tất cả event hiện có trên Calendar 1 lần (tránh N+1 queries)
+        var existingEvents = [];
+        var pageToken = null;
+        do {
+          var listPath =
+            "/calendars/" +
+            encodeURIComponent(calendarId) +
+            "/events?timeMin=" +
+            encodeURIComponent(queryMin) +
+            "&timeMax=" +
+            encodeURIComponent(queryMax) +
+            "&showDeleted=false&singleEvents=true&maxResults=250";
+          if (pageToken) listPath += "&pageToken=" + pageToken;
+          var listRes = GoogleCalendarAPI.fetch_(googleAccessToken, listPath);
+          if (listRes.items)
+            existingEvents = existingEvents.concat(listRes.items);
+          pageToken = listRes.nextPageToken;
+        } while (pageToken);
+
+        AppLogger.info(
+          "Fetched " +
+            existingEvents.length +
+            " existing events for overlap check",
+        );
+
+        events.forEach(function (ev, i) {
           try {
-            const start = new Date(ev.start);
-            const end = new Date(ev.end);
+            var newStart = new Date(ev.start).getTime();
+            var newEnd = new Date(ev.end).getTime();
 
-            let existing = null;
-            if (ev.signature && !force) {
-              const timeMin = new Date(
-                start.getTime() - 24 * 60 * 60 * 1000,
-              ).toISOString();
-              const timeMax = new Date(
-                end.getTime() + 24 * 60 * 60 * 1000,
-              ).toISOString();
-              const listResponse = GoogleCalendarAPI.listEvents(
-                googleAccessToken,
-                calendarId,
-                timeMin,
-                timeMax,
-              );
-              if (listResponse.items) {
-                existing = listResponse.items.find(
-                  (item) =>
-                    item.extendedProperties &&
-                    item.extendedProperties.private &&
-                    item.extendedProperties.private[CONSTANTS.SIGNATURE_TAG] ===
-                      ev.signature,
-                );
-              }
-            }
+            // 🕐 Tìm event cũ bị overlap thời gian
+            var overlapping = existingEvents.filter(function (old) {
+              var oldStart = new Date(
+                old.start.dateTime || old.start.date,
+              ).getTime();
+              var oldEnd = new Date(old.end.dateTime || old.end.date).getTime();
+              // Overlap = newStart < oldEnd AND newEnd > oldStart
+              return newStart < oldEnd && newEnd > oldStart;
+            });
 
-            const eventData = {
+            var eventData = {
               summary: ev.title,
               location: ev.location || "",
               description: ev.description || "",
-              start: { dateTime: start.toISOString() },
-              end: { dateTime: end.toISOString() },
+              start: { dateTime: new Date(ev.start).toISOString() },
+              end: { dateTime: new Date(ev.end).toISOString() },
               extendedProperties: {
                 private: {
                   [CONSTANTS.SOURCE_TAG]: "fpt_scheduler",
@@ -216,15 +252,58 @@ const CalendarService = {
             if (ev.colorId && String(ev.colorId).trim() !== "")
               eventData.colorId = String(ev.colorId);
 
-            if (existing) {
-              GoogleCalendarAPI.patchEvent(
-                googleAccessToken,
-                calendarId,
-                existing.id,
-                eventData,
-              );
-              results.updated++;
+            if (overlapping.length > 0) {
+              // === CÓ XUNG ĐỘT ===
+              if (!conflictMode) {
+                // Lần đầu sync → skip + báo conflict chi tiết
+                results.skipped++;
+                overlapping.forEach(function (old) {
+                  results.conflicts.push({
+                    newEvent: ev.title,
+                    newStart: ev.start,
+                    newEnd: ev.end,
+                    oldEvent: old.summary || "(Không có tiêu đề)",
+                    oldStart: old.start.dateTime || old.start.date,
+                    oldEnd: old.end.dateTime || old.end.date,
+                    oldEventId: old.id,
+                  });
+                });
+              } else if (conflictMode === "insert") {
+                // Option 1: Chèn vô chung (tạo mới, bỏ qua trùng)
+                GoogleCalendarAPI.createEvent(
+                  googleAccessToken,
+                  calendarId,
+                  eventData,
+                );
+                results.success++;
+              } else if (conflictMode === "keep_old") {
+                // Option 2: Giữ lịch cũ, bỏ event mới trùng
+                results.skipped++;
+              } else if (conflictMode === "replace") {
+                // Option 3: Xóa lịch cũ, thay bằng lịch mới
+                overlapping.forEach(function (old) {
+                  try {
+                    GoogleCalendarAPI.deleteEvent(
+                      googleAccessToken,
+                      calendarId,
+                      old.id,
+                    );
+                  } catch (delErr) {
+                    AppLogger.error(
+                      "Failed to delete old event " + old.id,
+                      delErr,
+                    );
+                  }
+                });
+                GoogleCalendarAPI.createEvent(
+                  googleAccessToken,
+                  calendarId,
+                  eventData,
+                );
+                results.updated++;
+              }
             } else {
+              // === KHÔNG XUNG ĐỘT → Tạo mới bình thường ===
               GoogleCalendarAPI.createEvent(
                 googleAccessToken,
                 calendarId,
@@ -243,12 +322,12 @@ const CalendarService = {
         });
       } else {
         // --- CENTRALIZED mode ---
-        const calendar = this.getCalendarInternal(targetCalendarName);
-        events.forEach((ev, i) => {
+        var calendar = this.getCalendarInternal(targetCalendarName);
+        events.forEach(function (ev, i) {
           try {
-            const start = new Date(ev.start);
-            const end = new Date(ev.end);
-            const created = calendar.createEvent(ev.title, start, end, {
+            var start = new Date(ev.start);
+            var end = new Date(ev.end);
+            var created = calendar.createEvent(ev.title, start, end, {
               location: ev.location || "",
               description: ev.description || "",
             });
@@ -402,6 +481,25 @@ function doPost(e) {
           data: data.slice(parseInt(payload.startRow || "1") - 1),
           rowCount: data.length,
           fetchTime: new Date().toISOString(),
+          tabName: sheet.getName(),
+          allTabs: ss.getSheets().map((s) => s.getName()), // Trả về danh sách tất cả các tab để UI dropdown
+        });
+      } catch (e) {
+        throw e;
+      }
+    }
+
+    if (action === "getTabNames") {
+      const sheetIdMatch = payload.url.match(/\/d\/([a-zA-Z0-9-_]+)/);
+      const sheetId = sheetIdMatch ? sheetIdMatch[1] : null;
+      if (!sheetId) throw new Error("Invalid Spreadsheet URL");
+
+      try {
+        const ss = SpreadsheetApp.openById(sheetId);
+        const tabs = ss.getSheets().map((s) => s.getName());
+        return jsonResponse_({
+          status: CONSTANTS.SUCCESS,
+          tabs: tabs,
         });
       } catch (e) {
         throw e;
@@ -426,6 +524,7 @@ function doPost(e) {
       payload.events || [],
       payload.force || false,
       payload.googleAccessToken || null,
+      payload.conflictMode || null,
     );
 
     return jsonResponse_({

@@ -12,8 +12,9 @@ export const useCalendarSync = ({ accessToken }: UseCalendarSyncProps) => {
   const [clearing, setClearing] = useState(false);
   const [syncResult, setSyncResult] = useState<SyncResult | null>(null);
   const [syncError, setSyncError] = useState<string | null>(null);
+  const [conflicts, setConflicts] = useState<any[]>([]);
 
-  const syncToCalendar = useCallback(async (rowsToSync: RowNormalized[], force: boolean = false) => {
+  const syncToCalendar = useCallback(async (rowsToSync: RowNormalized[], force: boolean = false, conflictMode?: 'insert' | 'keep_old' | 'replace') => {
     if (!accessToken) {
       setSyncError("Hết hạn truy cập (401): Phiên làm việc với Google đã kết thúc. Vui lòng bấm 'Cấp lại quyền'.");
       return null;
@@ -101,9 +102,8 @@ export const useCalendarSync = ({ accessToken }: UseCalendarSyncProps) => {
         if (r.isGrouped) {
            const names = r.reviewers && r.reviewers.length > 0 ? r.reviewers : [r.person];
            const timePart = r.timeRaw ? `(${r.timeRaw})` : '';
-           const locPart = r.location && r.location !== 'Chưa xác định' ? `- ${r.location}` : '';
            
-           eventTitle = `${names.join(' & ')} ${timePart} ${locPart}`.trim();
+           eventTitle = `${names.join(' & ')} ${timePart}`.trim();
         }
 
         return {
@@ -122,7 +122,7 @@ export const useCalendarSync = ({ accessToken }: UseCalendarSyncProps) => {
       if (events.length > 0) {
         console.log(`🕒 Event 1 details: Start=${events[0].start}, End=${events[0].end}`);
       }
-      const res = await syncEventsToCalendar(events, undefined, force, accessToken);
+      const res = await syncEventsToCalendar(events, undefined, force, accessToken, conflictMode);
       console.log("✅ API Response:", res);
       if (res.data?.availableCalendars) {
         console.log("📅 Available calendars in this GAS session:", res.data.availableCalendars);
@@ -136,16 +136,21 @@ export const useCalendarSync = ({ accessToken }: UseCalendarSyncProps) => {
 
       console.log(`📊 Sync Result Processed: Success=${successCount}, Skipped=${skippedCount}, Failed=${failedCount}`);
 
-      // 🚨 ATOMIC ESCALATION: Treat "Skipped" as "Conflict" if not forcing
-      if (skippedCount > 0 && !force && successCount === 0) {
-        const conflictMsg = `Xung đột: ${skippedCount} mục đã có sẵn. Bạn muốn ghi đè không?`;
+      // 🚨 CONFLICT DETECTION: Backend trả về conflicts khi có time overlap
+      const conflictsData = dataPayload.conflicts || [];
+      if (conflictsData.length > 0 && !conflictMode) {
+        setConflicts(conflictsData);
+        const conflictMsg = `Xung đột thời gian: ${skippedCount} mục bị trùng khung giờ với lịch hiện có.`;
         throw new Error(conflictMsg);
       }
+      setConflicts([]);
+
+      const updatedCount = Number(dataPayload.updated ?? 0);
 
       const result: SyncResult = {
         type: 'sync',
         created: successCount,
-        updated: 0,
+        updated: updatedCount,
         failed: failedCount,
         skipped: skippedCount,
         errors: dataPayload.errors || [],
@@ -202,7 +207,7 @@ export const useCalendarSync = ({ accessToken }: UseCalendarSyncProps) => {
     } finally {
       setClearing(false);
     }
-  }, []);
+  }, [accessToken]);
 
   return {
     syncing,
@@ -212,6 +217,8 @@ export const useCalendarSync = ({ accessToken }: UseCalendarSyncProps) => {
     syncError,
     setSyncError,
     syncToCalendar,
-    clearAppEvents
+    clearAppEvents,
+    conflicts,
+    setConflicts
   };
 };

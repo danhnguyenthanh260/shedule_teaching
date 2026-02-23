@@ -17,7 +17,7 @@ export const generateHeaderOptions = (
 
   // 1. Identify triplets in the Review Area (index >= 9)
   fullDetailHeaders.forEach((h, i) => {
-    let label = (h || "").trim();
+    let label = String(h || "").trim();
     if (!label || label.startsWith('Column_')) return;
 
     if (i >= 9) {
@@ -30,7 +30,7 @@ export const generateHeaderOptions = (
 
   // 2. Filter and build options
   fullDetailHeaders.forEach((h, i) => {
-    let label = (h || "").trim();
+    let label = String(h || "").trim();
     if (!label || label.startsWith('Column_')) return;
 
     const isStaticArea = i < 9;

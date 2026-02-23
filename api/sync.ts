@@ -207,8 +207,12 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           const commonResources = existing.resources.filter((r: string) => resources.includes(r));
           if (commonResources.length > 0) {
             conflicts.push({
-              title,
-              conflictWith: existing.title,
+              newEvent: title,
+              newStart: start,
+              newEnd: end,
+              oldEvent: existing.title,
+              oldStart: existing.startTime?.toDate().toISOString() || "",
+              oldEnd: existing.endTime?.toDate().toISOString() || "",
               resources: commonResources,
               message: `Xung đột tài nguyên: ${commonResources.join(", ")} với sự kiện "${existing.title}"`
             });
@@ -226,6 +230,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         return res.status(409).json({
           status: "conflict",
           message: "Phát hiện xung đột lịch trình",
+          skipped: conflicts.length,
           conflicts
         });
       }

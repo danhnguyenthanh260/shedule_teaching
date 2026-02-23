@@ -127,7 +127,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     }
 
     // 3. Process Events or Clear Action
-    const { events, calendarName, action, googleAccessToken, force } = req.body;
+    const { events, calendarName, action, googleAccessToken, force, conflictMode } = req.body;
 
     // Handle CLEAR action specifically
     if (action === 'clearCalendar') {
@@ -170,8 +170,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     const conflicts: any[] = [];
     const eventsToSync: any[] = [];
 
-    // ONLY check for conflicts if NOT forcing
-    if (!force) {
+    // ONLY check for conflicts if NOT forcing AND NOT resolving an existing conflict
+    if (!force && !conflictMode) {
       for (const event of normalizedEvents) {
         const { start, end, resources, title } = event;
         const startTime = new Date(start);
@@ -256,6 +256,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     return forwardToGAS(res, {
       calendarName: calendarName || "Schedule Teaching",
       force: !!force,
+      conflictMode: conflictMode || null,
       googleAccessToken: googleAccessToken,
       events: eventsToSync.map(ev => ({
         ...ev,

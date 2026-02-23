@@ -205,17 +205,14 @@ export const syncEventsToCalendar = async (
             throw new Error(`SyntaxError: Không thể parse JSON. Nội dung: ${bodyText.substring(0, 100)}...`);
         });
 
+        // HANDLE CONFLICTS (409) - Return data to let the hook handle the conflicts state
+        if (response.status === 409) {
+            return data;
+        }
+
         if (!response.ok) {
             logError(`Sync returned status ${response.status}: ${response.statusText}`);
             throw new Error(data.message || data.error || `Proxy error! status: ${response.status}`);
-        }
-
-        // HANDLE CONFLICTS (409)
-        if (response.status === 409) {
-            const conflictMsg = data.conflicts 
-              ? `Xung đột lịch trình: ${data.conflicts.map((c: any) => c.message).join(' | ')}`
-              : 'Phát hiện xung đột lịch trình với dữ liệu đã có trong hệ thống.';
-            throw new Error(conflictMsg);
         }
 
         if (!response.ok) {

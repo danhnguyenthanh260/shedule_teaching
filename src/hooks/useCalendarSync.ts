@@ -167,10 +167,11 @@ export const useCalendarSync = ({ accessToken }: UseCalendarSyncProps) => {
       console.error("❌ Sync error details:", err);
       let errorMsg = err.message || "Lỗi không xác định khi đồng bộ";
       
-      // Clarify conflict message
-      if (errorMsg.includes('xung đột') || errorMsg.includes('tồn tại')) {
-        errorMsg = "Xung đột: Dữ liệu đã có sẵn. Bạn muốn ghi đè không?";
-      }
+      // Clarify conflict message (Optional: you can keep it more generic or just use the original message)
+      // We remove the hardcoded overwrite to preserve detailed conflict info if available
+      // if (errorMsg.includes('xung đột') || errorMsg.includes('tồn tại')) {
+      //   errorMsg = "Xung đột: Dữ liệu đã có sẵn. Bạn muốn ghi đè không?";
+      // }
       
       // Don't add long prefix for conflicts/auth
       const prefix = (errorMsg.includes('xung đột') || errorMsg.includes('401')) ? "" : "Lỗi đồng bộ: ";

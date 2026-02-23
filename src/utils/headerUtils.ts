@@ -41,8 +41,9 @@ export const generateHeaderOptions = (
     if (isReviewMode) {
       if (isUserAdmin) {
         // 🏛️ ADMIN in Review Mode:
-        // Show static area OR first triplet OR mapped columns
-        if (isStaticArea || isFirstTriplet || isMapped) {
+        // Show static area OR first occurrence of ANY label OR mapped columns
+        const isFirstOccurrence = i === firstOccurrencesInReview.get(label);
+        if (isStaticArea || isFirstOccurrence || isMapped) {
           // Keep it
         } else {
           return;

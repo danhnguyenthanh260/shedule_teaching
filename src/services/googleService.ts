@@ -323,24 +323,26 @@ export class GoogleSyncService {
         labels[lbl].push(i);
       });
       
-      // Strategy 1: "Greedy" Code Search (Take the LAST 3 occurrences)
-      // This skips "Code" that might be in the project info area (columns A-I)
-      const codeIndices = (labels["code"] || []);
-      if (codeIndices.length >= 3) {
-        return codeIndices.slice(-3).sort((a, b) => a - b);
-      }
+      const J_INDEX = 9;
 
-      // Strategy 2: "Greedy" Reviewer Search
-      const rev1Indices = (labels["reviewer 1"] || labels["gv 1"] || []);
-      if (rev1Indices.length >= 3) {
-        return rev1Indices.slice(-3).sort((a, b) => a - b);
-      }
-
-      // Strategy 3: Any triple label that repeats exactly 3 times in the J+ range
-      const tripleLabels = Object.keys(labels).filter(l => labels[l].filter(idx => idx >= 9).length === 3);
+      // Strategy 1: Identical Triplets (e.g., "Code", "Code", "Code")
+      const tripleLabels = Object.keys(labels).filter(l => labels[l].filter(idx => idx >= J_INDEX).length === 3);
       if (tripleLabels.length > 0) {
-        const bestLabel = tripleLabels.find(l => l.includes('date') || l.includes('slot') || l.includes('room') || l.includes('reviewer')) || tripleLabels[0];
-        return labels[bestLabel].filter(idx => idx >= 9).sort((a, b) => a - b);
+        // Prioritize meaningful labels
+        const bestLabel = tripleLabels.find(l => l.includes('code') || l.includes('reviewer') || l.includes('gv') || l.includes('slot')) || tripleLabels[0];
+        return labels[bestLabel].filter(idx => idx >= J_INDEX).sort((a, b) => a - b);
+      }
+
+      // Strategy 2: Sequential Triplets (e.g., "Reviewer 1", "Reviewer 2", "Reviewer 3")
+      const sequentialBases = ['reviewer', 'gv', 'reviewer ', 'gv ', 'giảng viên ', 'giang vien '];
+      for (const base of sequentialBases) {
+        const anchor1 = headers.findIndex((h, i) => i >= J_INDEX && String(h || "").toLowerCase().includes(`${base}1`));
+        const anchor2 = headers.findIndex((h, i) => i >= J_INDEX && String(h || "").toLowerCase().includes(`${base}2`));
+        const anchor3 = headers.findIndex((h, i) => i >= J_INDEX && String(h || "").toLowerCase().includes(`${base}3`));
+        
+        if (anchor1 !== -1 && anchor2 !== -1 && anchor3 !== -1) {
+          return [anchor1, anchor2, anchor3].sort((a, b) => a - b);
+        }
       }
       
       return [];

@@ -167,77 +167,11 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       normalizedEvents.push(event);
     }
 
-    const conflicts: any[] = [];
-    const eventsToSync: any[] = [];
+    // 🚀 NEW: We REMOVED the internal Firestore conflict check.
+    // Why? Because Firestore can be "stale" (e.g., if you delete on Calendar manually).
+    // We let Google Apps Script (the source of truth) handle actual conflict detection.
+    const eventsToSync = normalizedEvents;
 
-    // ONLY check for conflicts if NOT forcing AND NOT resolving an existing conflict
-    if (!force && !conflictMode) {
-      for (const event of normalizedEvents) {
-        const { start, end, resources, title } = event;
-        const startTime = new Date(start);
-        const endTime = new Date(end);
-
-        if (isNaN(startTime.getTime()) || isNaN(endTime.getTime())) {
-          return res.status(400).json({ error: `Dữ liệu thời gian không hợp lệ cho sự kiện "${title}".` });
-        }
-
-        // Check conflict in Firestore
-        let overlapSnapshot;
-        try {
-          overlapSnapshot = await db.collection("slots")
-            .where("startTime", "<", endTime)
-            .where("endTime", ">", startTime)
-            .get();
-        } catch (dbErr: any) {
-          console.error("❌ Firestore Query Error:", dbErr);
-          if (dbErr.message?.includes("index")) {
-            const indexLink = dbErr.message.match(/https:\/\/console\.firebase\.google\.com[^\s]+/)?.[0];
-            return res.status(500).json({
-              error: "Thiếu Index trong Firestore. Vui lòng bấm vào link này để tạo: " + (indexLink || "Kiểm tra Vercel Logs"),
-              detail: "Bạn cần tạo Composite Index cho collection 'slots' (startTime và endTime). " + (indexLink ? `Link: ${indexLink}` : ""),
-              link: indexLink || null
-            });
-          }
-          throw dbErr;
-        }
-
-        let foundConflict = false;
-        for (const doc of overlapSnapshot.docs) {
-          const existing = doc.data();
-          const commonResources = existing.resources.filter((r: string) => resources.includes(r));
-          if (commonResources.length > 0) {
-            conflicts.push({
-              newEvent: title,
-              newStart: start,
-              newEnd: end,
-              oldEvent: existing.title,
-              oldStart: existing.startTime?.toDate().toISOString() || "",
-              oldEnd: existing.endTime?.toDate().toISOString() || "",
-              resources: commonResources,
-              message: `Xung đột tài nguyên: ${commonResources.join(", ")} với sự kiện "${existing.title}"`
-            });
-            foundConflict = true;
-            break;
-          }
-        }
-
-        if (!foundConflict) {
-          eventsToSync.push(event);
-        }
-      }
-
-      if (conflicts.length > 0) {
-        return res.status(409).json({
-          status: "conflict",
-          message: "Phát hiện xung đột lịch trình",
-          skipped: conflicts.length,
-          conflicts
-        });
-      }
-    } else {
-      // If force is true, all events are ready to sync
-      eventsToSync.push(...normalizedEvents);
-    }
 
     const batch = db.batch();
     const slotLogRefs: any[] = [];

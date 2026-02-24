@@ -273,7 +273,7 @@ export const ExcelImport: React.FC<ExcelImportProps> = ({
           <label className="block text-[10px] font-bold text-slate-400 mb-1.5 ml-1 uppercase tracking-widest">Chọn Học kỳ để lấy lịch</label>
           <div className="relative group">
             <select
-              className="w-full pl-4 pr-10 py-2.5 bg-white border border-slate-200 rounded-xl focus:ring-2 focus:ring-fpt-orange outline-none text-sm font-bold text-slate-700 h-12 appearance-none transition-all group-hover:border-slate-300 pointer-events-auto cursor-pointer relative z-10"
+              className="w-full pl-4 pr-10 py-2.5 bg-white border border-slate-300 rounded-xl focus:ring-2 focus:ring-fpt-orange outline-none text-sm font-bold text-slate-700 h-12 appearance-none transition-all group-hover:border-slate-400 pointer-events-auto cursor-pointer relative z-10"
               value={tempSemesterId}
               onChange={(e) => handleSemesterChange(e.target.value)}
             >
@@ -293,14 +293,12 @@ export const ExcelImport: React.FC<ExcelImportProps> = ({
           <button
             onClick={() => handleShowData(true)}
             disabled={isProcessing || !sheetUrl}
-            className="px-6 h-12 bg-[#F27024] text-white rounded-xl hover:bg-orange-600 active:scale-95 transition-all font-bold shadow-lg shadow-orange-200 flex items-center justify-center gap-2 disabled:bg-slate-100 disabled:text-slate-400 disabled:shadow-none min-w-[140px]"
+            className="px-6 h-11 bg-[#F27024] text-white rounded-xl hover:bg-orange-600 active:scale-95 transition-all font-bold shadow-lg shadow-orange-200 flex items-center justify-center gap-2 disabled:bg-slate-100 disabled:text-slate-400 disabled:shadow-none min-w-[140px] text-[11px] uppercase tracking-widest"
           >
             {isProcessing ? (
               <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
             ) : (
-              <>
-                <span className="text-[10px] uppercase tracking-wider">Tải lại</span>
-              </>
+              <>Tải lại</>
             )}
           </button>
 

@@ -37,7 +37,7 @@ interface FirebaseContextType {
   loginWithEmail: (email: string, password: string) => Promise<void>;
   signupWithEmail: (email: string, password: string) => Promise<void>;
   logout: () => Promise<void>;
-  reauthorizeGoogle: () => Promise<void>;
+  reauthorizeGoogle: () => Promise<string | null>;
   isWhitelistLoading: boolean;
   isAdmin: boolean;
 }
@@ -210,7 +210,7 @@ export const FirebaseProvider: React.FC<{ children: React.ReactNode }> = ({ chil
   };
   */
 
-  const loginWithGoogle = async () => {
+  const loginWithGoogle = async (): Promise<string | null> => {
     try {
       setError(null);
       console.log('Starting Google login with popup...');
@@ -220,10 +220,11 @@ export const FirebaseProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       provider.addScope('https://www.googleapis.com/auth/calendar.events');
       provider.addScope('https://www.googleapis.com/auth/calendar.readonly');
 
-      // FORCE Google to show the account picker and consent screen to avoid 403 session confusion
-      provider.setCustomParameters({
-        prompt: 'select_account'
-      });
+      /* 
+       * 🚀 OPTIMIZATION: Removed prompt: 'select_account'
+       * This allows the browser to auto-select if only one account exists, 
+       * making the re-auth popup close almost instantly.
+       */
 
       const result = await signInWithPopup(auth, provider);
       setUserUID(result.user.uid);
@@ -234,14 +235,14 @@ export const FirebaseProvider: React.FC<{ children: React.ReactNode }> = ({ chil
         setAccessToken(credential.accessToken);
 
         // Store token with expiry time (Google tokens expire in 1 hour)
-        const expiryTime = Date.now() + (3600 * 1000); // 1 hour from now
+        const expiryTime = Date.now() + (3600 * 1000); 
         await saveAuthTokens(credential.accessToken, '', 3600);
-
-        // Also store SECURELY (encrypted) for components that might use it
         await secureSetItem('google_access_token', credential.accessToken, result.user.uid);
 
         logSuccess('Google login successful');
+        return credential.accessToken;
       }
+      return null;
     } catch (err) {
       const errorMessage = err instanceof Error ? err.message : 'Failed to login with Google';
       setError(errorMessage);
@@ -251,9 +252,9 @@ export const FirebaseProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     }
   };
 
-  const reauthorizeGoogle = async () => {
+  const reauthorizeGoogle = async (): Promise<string | null> => {
     logInfo('Manual re-authorization triggered');
-    await loginWithGoogle();
+    return await loginWithGoogle();
   };
 
   const loginWithEmail = async (email: string, password: string) => {

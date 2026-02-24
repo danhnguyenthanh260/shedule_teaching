@@ -17,8 +17,8 @@ const Layout: React.FC<Props> = ({ children, user, userId, onLogout, syncHistory
   const [showHistoryModal, setShowHistoryModal] = useState(false);
 
   return (
-    <div className="h-screen flex flex-col bg-slate-50 overflow-hidden text-slate-900">
-      <nav className="flex-none bg-white border-b border-slate-200 px-6 py-2 flex items-center justify-between z-50 shadow-sm">
+    <div className="h-screen flex flex-col bg-slate-100 overflow-hidden text-slate-900">
+      <nav className="flex-none bg-white border-b border-slate-300 px-6 py-2 flex items-center justify-between z-50 shadow-sm">
         <div className="flex items-center gap-5">
           <div className="h-12 flex items-center justify-center transform transition-all duration-300 hover:scale-105">
             <img

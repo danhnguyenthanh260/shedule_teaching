@@ -5,19 +5,37 @@ import { RowNormalized, SyncResult } from '../types';
 
 interface UseCalendarSyncProps {
   accessToken: string | null;
+  reauthorizeGoogle: () => Promise<string | null>;
 }
 
-export const useCalendarSync = ({ accessToken }: UseCalendarSyncProps) => {
+export const useCalendarSync = ({ accessToken, reauthorizeGoogle }: UseCalendarSyncProps) => {
   const [syncing, setSyncing] = useState(false);
   const [clearing, setClearing] = useState(false);
   const [syncResult, setSyncResult] = useState<SyncResult | null>(null);
   const [syncError, setSyncError] = useState<string | null>(null);
   const [conflicts, setConflicts] = useState<any[]>([]);
 
-  const syncToCalendar = useCallback(async (rowsToSync: RowNormalized[], force: boolean = false, conflictMode?: 'insert' | 'keep_old' | 'replace') => {
-    if (!accessToken) {
-      setSyncError("Hết hạn truy cập (401): Phiên làm việc với Google đã kết thúc. Vui lòng bấm 'Cấp lại quyền'.");
-      return null;
+  const syncToCalendar = useCallback(async (
+    rowsToSync: RowNormalized[], 
+    force: boolean = false, 
+    conflictMode?: 'insert' | 'keep_old' | 'replace',
+    isRetry: boolean = false
+  ) => {
+    let currentToken = accessToken;
+
+    // 🚀 AUTO RE-AUTH: If token is missing, try to get it automatically
+    if (!currentToken) {
+      console.log("🔑 Token missing, triggering auto re-auth...");
+      try {
+        currentToken = await reauthorizeGoogle();
+        if (!currentToken) {
+          setSyncError("Hết hạn truy cập: Không thể lấy quyền Google Calendar. Vui lòng đăng nhập lại.");
+          return null;
+        }
+      } catch (err) {
+        setSyncError("Lỗi xác thực: Không thể kết nối với Google.");
+        return null;
+      }
     }
     
     if (rowsToSync.length === 0) {
@@ -126,7 +144,20 @@ export const useCalendarSync = ({ accessToken }: UseCalendarSyncProps) => {
       // 🔍 Detect sheetType from the first non-null row
       const detectedType = rowsToSync.find(r => r.sheetType)?.sheetType;
 
-      const res = await syncEventsToCalendar(events, undefined, force, accessToken, conflictMode, detectedType);
+      let res;
+      try {
+        res = await syncEventsToCalendar(events, undefined, force, currentToken || '', conflictMode, detectedType);
+      } catch (err: any) {
+        // 🔄 AUTO-RETRY ON 401: If first attempt fails with Auth error, try re-auth and retry ONCE
+        if ((err.message.includes('401') || err.message.toLowerCase().includes('unauthenticated')) && !isRetry) {
+          console.warn("⚠️ Sync failed with 401, trying auto re-auth retry...");
+          const newToken = await reauthorizeGoogle();
+          if (newToken) {
+            return syncToCalendar(rowsToSync, force, conflictMode, true); // Recursive retry
+          }
+        }
+        throw err;
+      }
       
       console.log("✅ API Response:", res);
       if (res.data?.availableCalendars) {
@@ -187,13 +218,24 @@ export const useCalendarSync = ({ accessToken }: UseCalendarSyncProps) => {
     }
   }, [accessToken]);
 
-  const clearAppEvents = useCallback(async (sheetType?: 'council' | 'review') => {
+  const clearAppEvents = useCallback(async (sheetType?: 'council' | 'review', isRetry: boolean = false) => {
     setClearing(true);
     setSyncError(null);
     setSyncResult(null);
 
+    let currentToken = accessToken;
+    if (!currentToken) {
+      console.log("🔑 Token missing for clear, triggering auto re-auth...");
+      currentToken = await reauthorizeGoogle();
+      if (!currentToken) {
+        setSyncError("Hết hạn truy cập: Không thể lấy quyền Google Calendar.");
+        setClearing(false);
+        return null;
+      }
+    }
+
     try {
-      const res: any = await clearCalendar(undefined, accessToken, sheetType);
+      const res: any = await clearCalendar(undefined, currentToken || '', sheetType);
       const deletedCount = res.data?.deletedCount ?? res.deletedCount ?? 0;
       
       const result: SyncResult = {
@@ -208,12 +250,20 @@ export const useCalendarSync = ({ accessToken }: UseCalendarSyncProps) => {
       return result;
     } catch (err: any) {
       console.error("Clear error:", err);
+      // 🔄 AUTO-RETRY ON 401
+      if ((err.message.includes('401') || err.message.toLowerCase().includes('unauthenticated')) && !isRetry) {
+        console.warn("⚠️ Clear failed with 401, trying auto re-auth retry...");
+        const newToken = await reauthorizeGoogle();
+        if (newToken) {
+          return clearAppEvents(sheetType, true);
+        }
+      }
       setSyncError("Lỗi xóa lịch: " + err.message);
       throw err;
     } finally {
       setClearing(false);
     }
-  }, [accessToken]);
+  }, [accessToken, reauthorizeGoogle]);
 
   return {
     syncing,

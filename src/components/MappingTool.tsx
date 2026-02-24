@@ -46,14 +46,12 @@ export const MappingTool: React.FC<MappingToolProps> = ({
             <button
               onClick={onApply}
               disabled={isLoading}
-              className="px-6 h-10 bg-slate-800 text-white font-bold rounded-xl hover:bg-slate-900 active:scale-95 transition-all shadow-lg shadow-slate-200 flex items-center justify-center gap-2 disabled:bg-slate-100 disabled:text-slate-400 disabled:shadow-none text-xs uppercase tracking-tight"
+              className="px-6 h-11 bg-slate-800 text-white font-bold rounded-xl hover:bg-slate-900 active:scale-95 transition-all shadow-lg shadow-slate-200 flex items-center justify-center gap-2 disabled:bg-slate-100 disabled:text-slate-400 disabled:shadow-none text-[11px] uppercase tracking-widest"
             >
               {isLoading ? (
                 <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
               ) : (
-                <>
-                  ÁP DỤNG
-                </>
+                <>ÁP DỤNG</>
               )}
             </button>
           )}
@@ -73,7 +71,7 @@ export const MappingTool: React.FC<MappingToolProps> = ({
               </label>
               <div className="relative group">
                 <select
-                  className="w-full px-3 py-2.5 bg-white border border-slate-200 rounded-xl focus:ring-2 focus:ring-[#F27024] outline-none text-[11px] font-semibold text-slate-600 appearance-none group-hover:border-slate-300 pointer-events-auto cursor-pointer relative z-10"
+                  className="w-full px-3 py-2.5 bg-white border border-slate-300 rounded-xl focus:ring-2 focus:ring-[#F27024] outline-none text-[11px] font-semibold text-slate-600 appearance-none group-hover:border-slate-400 pointer-events-auto cursor-pointer relative z-10"
                   value={columnMap[field.key as keyof ColumnMapping] ?? ''}
                   onChange={(e) => {
                     const val = e.target.value;

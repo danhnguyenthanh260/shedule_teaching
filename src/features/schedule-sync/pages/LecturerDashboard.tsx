@@ -705,7 +705,8 @@ export const LecturerDashboard: React.FC = () => {
                       onClick={async (e) => {
                         e.stopPropagation();
                         setIsConfirmingClear(false);
-                        await clearAppEvents();
+                        const currentType = effectiveIsReview ? 'review' : 'council';
+                        await clearAppEvents(currentType);
                       }}
                       className="px-4 py-2 bg-rose-500 text-white rounded-lg font-bold text-[10px] uppercase tracking-wider hover:bg-rose-600 active:scale-95 shadow-lg shadow-rose-200"
                     >

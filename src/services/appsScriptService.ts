@@ -18,7 +18,8 @@ export interface CalendarEvent {
     description?: string;
     guests?: string;
     signature?: string; 
-    resources?: string[]; // ✅ ADDED: For conflict detection
+    resources?: string[]; 
+    sheetType?: string; // 🚀 NEW: 'council' or 'review'
 }
 
 export interface SyncPayload {
@@ -27,9 +28,10 @@ export interface SyncPayload {
     events: CalendarEvent[];
     userEmail?: string;
     secret?: string; // Required for direct GAS calls (local proxy)
-    force?: boolean; // ✅ ADDED: Bypass duplicate check
-    googleAccessToken?: string; // ✅ ADDED: For decentralized sync
-    conflictMode?: 'insert' | 'keep_old' | 'replace'; // ✅ Xử lý xung đột thời gian
+    force?: boolean; 
+    googleAccessToken?: string; 
+    conflictMode?: 'insert' | 'keep_old' | 'replace'; 
+    sheetType?: 'council' | 'review'; // 🚀 NEW: For automated cleanup isolation
 }
 
 export interface ClearPayload {
@@ -37,7 +39,8 @@ export interface ClearPayload {
     action: 'clearCalendar';
     calendarName: string;
     secret?: string;
-    googleAccessToken?: string; // ✅ ADDED
+    googleAccessToken?: string; 
+    sheetType?: 'council' | 'review'; // 🚀 NEW
 }
 
 export interface SyncResponse {
@@ -152,7 +155,8 @@ export const syncEventsToCalendar = async (
     calendarName?: string,
     force: boolean = false,
     googleAccessToken?: string,
-    conflictMode?: 'insert' | 'keep_old' | 'replace'
+    conflictMode?: 'insert' | 'keep_old' | 'replace',
+    sheetType?: 'council' | 'review'
 ): Promise<SyncResponse> => {
     try {
         if (!Array.isArray(events) || events.length === 0) {
@@ -179,6 +183,7 @@ export const syncEventsToCalendar = async (
             force: force,
             googleAccessToken: googleAccessToken,
             conflictMode: conflictMode,
+            sheetType: sheetType,
             // 🔐 Tự động thêm secret ở môi trường Local để hỗ trợ Vite Proxy
             ...(import.meta.env.DEV ? { secret: import.meta.env.VITE_GAS_SECRET } : {})
         };
@@ -237,7 +242,8 @@ export const syncEventsToCalendar = async (
  */
 export const clearCalendar = async (
     calendarName?: string,
-    googleAccessToken?: string
+    googleAccessToken?: string,
+    sheetType?: 'council' | 'review'
 ): Promise<SyncResponse> => {
     try {
         const currentUser = auth.currentUser;
@@ -250,6 +256,7 @@ export const clearCalendar = async (
             action: 'clearCalendar',
             calendarName: targetCalendar,
             googleAccessToken: googleAccessToken,
+            sheetType: sheetType,
             // 🔐 Tự động thêm secret ở môi trường Local để hỗ trợ Vite Proxy
             ...(import.meta.env.DEV ? { secret: import.meta.env.VITE_GAS_SECRET } : {})
         };

@@ -140,6 +140,7 @@ export const useSheetParser = ({
           preferredFormat: dateFormat
         });
       }
+      
       setRows(normalized);
       
       console.log(`[Parser] applyMapping DONE: Generated ${normalized.length} events (Mode: ${isReviewMode ? 'Review' : 'Council'})`);

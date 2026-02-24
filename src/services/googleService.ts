@@ -277,6 +277,7 @@ export class GoogleSyncService {
           person: person,
           task: (mapping.task !== undefined && mapping.task < row.length ? (row[mapping.task] || "Nhiệm vụ") : "Nhiệm vụ").toString().trim(),
           location: lastLocation || "Chưa xác định",
+          sheetType: 'council',
           resources: [
             person ? `teacher:${person}` : null,
             lastLocation ? `room:${lastLocation}` : null
@@ -286,6 +287,7 @@ export class GoogleSyncService {
           personRaw: (mapping.person !== undefined && mapping.person < row.length ? row[mapping.person] : "").toString().trim(),
           locationRaw: lastLocation,
           status: 'pending',
+          isGrouped: false, // 🎨 Explicitly set for color coding
           rawRow: row
         };
       } catch (err) {
@@ -310,7 +312,7 @@ export class GoogleSyncService {
     isDataMau?: boolean;
     preferredFormat?: DateFormat;
   }): RowNormalized[] {
-    const { sheetId, tab, groupHeaders, detailHeaders, rawRows, mapping, headerRowIndex, isDataMau, preferredFormat } = params;
+    const { sheetId, tab, rawRows, mapping, headerRowIndex, isDataMau, preferredFormat, detailHeaders } = params;
     const allEvents: RowNormalized[] = [];
     const dataRows = rawRows.slice(headerRowIndex + 1);
 
@@ -328,7 +330,6 @@ export class GoogleSyncService {
       // Strategy 1: Identical Triplets (e.g., "Code", "Code", "Code")
       const tripleLabels = Object.keys(labels).filter(l => labels[l].filter(idx => idx >= J_INDEX).length === 3);
       if (tripleLabels.length > 0) {
-        // Prioritize meaningful labels
         const bestLabel = tripleLabels.find(l => l.includes('code') || l.includes('reviewer') || l.includes('gv') || l.includes('slot')) || tripleLabels[0];
         return labels[bestLabel].filter(idx => idx >= J_INDEX).sort((a, b) => a - b);
       }
@@ -350,95 +351,91 @@ export class GoogleSyncService {
 
     let blockStartIndices = findTripleAnchors(detailHeaders);
 
-    // 🚀 UNIFIED REVIEW MODE DETECTION:
+    // 🚀 UNIFIED REVIEW MODE DETECTION
     const hasReviewerHeaders = detailHeaders.some(h => {
       const low = String(h || "").toLowerCase();
       return low.includes('reviewer 1') || low.includes('gv 1') || (low.includes('reviewer') && low.includes('1'));
     });
-    
-    // It's Review Mode if: explicit flag OR (tab has "review" AND has specific headers).
     const suspectReview = !!isDataMau || ((tab || "").toLowerCase().includes("review") && hasReviewerHeaders);
-    
-    // 🚀 NEW LOGIC: Only use Triple Mode if we actually found 3 blocks on the CURRENT header row.
-    // We REMOVED the "search first 10 rows" logic because it caused false positives on simple review sheets (like Review1).
     const isTripleMode = suspectReview && blockStartIndices.length === 3;
     const finalBlockStarts = isTripleMode ? blockStartIndices : [0]; 
-    
-    if (suspectReview) {
-       console.log(`[Grouping] Sheet: ${tab}, TripleMode: ${isTripleMode}, Anchors:`, blockStartIndices);
+
+    // 🔍 SILENT CODE DETECTION: Find the column index for "Code/ID" automatically
+    const codeKeywords = ['mã', 'code', 'id', 'id đề tài', 'mã đề tài', 'mã số'];
+    const inferredCodeIdx = detailHeaders.findIndex(h => 
+      codeKeywords.some(k => String(h || "").toLowerCase().includes(k))
+    );
+
+    if (suspectReview && inferredCodeIdx !== -1) {
+       console.log(`[Grouping] Silent detection: Found Code column at index ${inferredCodeIdx} ("${detailHeaders[inferredCodeIdx]}")`);
     }
 
+    const getMappedValue = (field: keyof ColumnMapping, currentRow: string[], blockStartIdx: number = 0, blockEndIdx: number = detailHeaders.length - 1) => {
+      const originalIdx = (mapping as any)[field];
+      if (originalIdx === undefined) return "";
+      if (!isTripleMode) return (currentRow[originalIdx] || "").toString().trim();
+
+      const J_INDEX = 9;
+      const firstAnchor = Math.min(J_INDEX, blockStartIndices[0] || J_INDEX);
+      const targetHeader = String(detailHeaders[originalIdx] || "").trim().toLowerCase();
+
+      if (targetHeader && !targetHeader.startsWith('column_') && originalIdx >= firstAnchor) {
+        let occurrenceIndex = 0;
+        for (let i = firstAnchor; i < originalIdx; i++) {
+          if (String(detailHeaders[i] || "").trim().toLowerCase() === targetHeader) {
+            occurrenceIndex++;
+          }
+        }
+        let currentOccurrence = 0;
+        for (let i = blockStartIdx; i <= blockEndIdx; i++) {
+          if (String(detailHeaders[i] || "").trim().toLowerCase() === targetHeader) {
+            if (currentOccurrence === occurrenceIndex) return (currentRow[i] || "").toString().trim();
+            currentOccurrence++;
+          }
+        }
+      }
+
+      if (originalIdx >= firstAnchor) {
+         const offset = originalIdx - firstAnchor;
+         const relativeIdx = blockStartIdx + offset;
+         return (currentRow[relativeIdx] || "").toString().trim();
+      }
+      return (currentRow[originalIdx] || "").toString().trim();
+    };
+
+    let lastDate = "";
+    let lastLocation = "";
+
     dataRows.forEach((row, rowIndex) => {
-      // 🚨 1. CHẶN DÒNG TRỐNG (Mềm mỏng hơn để không mất dòng cuối)
       const joined = row.join('').trim();
       if (!joined || joined.length < 3) return; 
 
+      // 📝 STICKY LOGIC: Support merged cells
+      const rowDate = getMappedValue('date', row);
+      const rowLocation = getMappedValue('location', row);
+      if (rowDate) lastDate = rowDate;
+      if (rowLocation) lastLocation = rowLocation;
+
       const baseTask = (mapping.task !== undefined ? (row[mapping.task] || "Review") : "Review").toString().trim();
-      const basePerson = (mapping.person !== undefined ? (row[mapping.person] || "") : "").toString().trim();
+      const rCode = inferredCodeIdx !== -1 ? (row[inferredCodeIdx] || "").toString().trim() : "";
 
       finalBlockStarts.forEach((blockStart, blockIdx) => {
-        // Calculate block end dynamically based on next block start
         const blockEnd = isTripleMode 
           ? (blockIdx < 2 ? blockStartIndices[blockIdx + 1] - 1 : detailHeaders.length - 1)
           : detailHeaders.length - 1;
 
-        const getMappedValueInBlock = (field: keyof ColumnMapping) => {
-          const originalIdx = mapping[field];
-          if (originalIdx === undefined) return "";
-          
-          if (!isTripleMode) {
-            return (row[originalIdx] || "").toString().trim();
-          }
-
-          const J_INDEX = 9;
-          const firstAnchor = Math.min(J_INDEX, blockStartIndices[0] || J_INDEX);
-          const targetHeader = String(detailHeaders[originalIdx] || "").trim().toLowerCase();
-
-          // 🎯 Strategy 1: Occurrence-Aware Header Label Matching
-          if (targetHeader && !targetHeader.startsWith('column_') && originalIdx >= firstAnchor) {
-            let occurrenceIndex = 0;
-            for (let i = firstAnchor; i < originalIdx; i++) {
-              if (String(detailHeaders[i] || "").trim().toLowerCase() === targetHeader) {
-                occurrenceIndex++;
-              }
-            }
-
-            let currentOccurrence = 0;
-            for (let i = blockStart; i <= blockEnd; i++) {
-              if (String(detailHeaders[i] || "").trim().toLowerCase() === targetHeader) {
-                if (currentOccurrence === occurrenceIndex) {
-                  return (row[i] || "").toString().trim();
-                }
-                currentOccurrence++;
-              }
-            }
-          }
-
-          // 🎯 Strategy 2: Relative Offset (Fallback)
-          if (originalIdx >= firstAnchor) {
-             const offset = originalIdx - firstAnchor;
-             const relativeIdx = blockStart + offset;
-             if (relativeIdx < row.length) {
-               return (row[relativeIdx] || "").toString().trim();
-             }
-          } else {
-             return (row[originalIdx] || "").toString().trim();
-          }
-          return "";
-        };
-
-        let rDate = getMappedValueInBlock('date');
-        let rTime = getMappedValueInBlock('time');
-        let rLocation = getMappedValueInBlock('location');
-        let rPerson = getMappedValueInBlock('person');
-        let rTask = getMappedValueInBlock('task');
+        let rDate = getMappedValue('date', row, blockStart, blockEnd) || lastDate;
+        let rTime = getMappedValue('time', row, blockStart, blockEnd);
+        let rLocation = getMappedValue('location', row, blockStart, blockEnd) || lastLocation;
+        let rPerson = getMappedValue('person', row, blockStart, blockEnd);
+        let rTask = getMappedValue('task', row, blockStart, blockEnd);
         
         const fieldKeywords: Record<string, string[]> = {
           date: ['ngày', 'date'],
           time: ['slot', 'giờ', 'time'],
           location: ['phòng', 'room', 'location'],
           person: ['reviewer', 'giảng viên', 'cán bộ', 'họ tên'],
-          task: ['nhiệm vụ', 'đề tài', 'task', 'code', 'tiêu đề']
+          task: ['nhiệm vụ', 'đề tài', 'task', 'tiêu đề']
         };
 
         const autoInferList = (field: keyof ColumnMapping) => {
@@ -454,73 +451,72 @@ export class GoogleSyncService {
           return matches;
         };
 
-          if (!rDate) rDate = autoInferList('date')[0] || "";
-          if (!rTime) rTime = autoInferList('time')[0] || "";
-          if (!rLocation) rLocation = autoInferList('location')[0] || "";
-          if (!rTask) rTask = autoInferList('task')[0] || "";
-          
-          if (!rPerson) {
-             const persons = autoInferList('person');
-             rPerson = persons[0] || "";
-          }
+        if (!rDate) rDate = autoInferList('date')[0] || lastDate;
+        if (!rTime) rTime = autoInferList('time')[0] || "";
+        if (!rLocation) rLocation = autoInferList('location')[0] || lastLocation;
+        if (!rTask) rTask = autoInferList('task')[0] || "";
+        if (!rPerson) rPerson = autoInferList('person')[0] || "";
 
-          // 🚀 2. ROBUSTNESS FIX: Strictly skip any block that is actually empty.
-          // This now applies to ALL blocks (1, 2, and 3) to ensure total accuracy.
-          const hasAnyDataInBlock = rPerson || rDate || rTime || rLocation || (row[blockStart] && row[blockStart].trim().length > 0);
-          
-          if (!hasAnyDataInBlock) {
-             console.log(`[Grouping] Skipping Empty Block ${blockIdx} row ${rowIndex}`);
-             return;
-          }
+        // 🛡️ TRIPLE MODE FILTER: Chỉ tạo sự kiện nếu block có Giảng viên hoặc Giờ cụ thể
+        const hasBlockContent = rPerson || rTime;
+        const shouldCreate = isTripleMode ? hasBlockContent : (rPerson || rDate || rTime || rLocation);
+        
+        if (!shouldCreate) return;
 
-          try {
-            // Default values if dates/times are missing (to ensure it shows in Step 3 table)
-            const parsedD = parseDateTime(rDate, preferredFormat);
-            const finalDate = parsedD.date ? format(parsedD.date, 'dd/MM/yyyy') : (rDate || "Chưa chọn");
-            const finalTime = rTime || "---";
-            
-            const { start, end } = (parsedD.date && rTime) 
-              ? parseVNTime(rDate, rTime, preferredFormat)
-              : { start: "", end: "" };
-            
-            const reviewersFromInference = autoInferList('person');
-            const finalReviewers = reviewersFromInference.slice(0, 2); // 🎯 Only take Reviewer 1 & 2
-            
-            const eventId = `${generateRowId(sheetId, tab, rowIndex + headerRowIndex + 1)}-b${blockIdx}`;
-            console.log(`[Grouping] Row ${rowIndex} Block ${blockIdx} -> ID: ${eventId}, Date: ${finalDate}, Reviewers: ${finalReviewers.join(', ')}`);
+        try {
+          const parsedD = parseDateTime(rDate, preferredFormat);
+          const finalDate = parsedD.date ? format(parsedD.date, 'dd/MM/yyyy') : (rDate || "Chưa chọn");
+          const finalTime = rTime || "---";
+          const { start, end } = (parsedD.date && rTime) ? parseVNTime(rDate, rTime, preferredFormat) : { start: "", end: "" };
+          const finalReviewers = autoInferList('person').slice(0, 2);
+          const eventId = `${generateRowId(sheetId, tab, rowIndex + headerRowIndex + 1)}-b${blockIdx}`;
 
-            allEvents.push({
-              id: eventId,
-              groupName: `Review ${blockIdx + 1}`,
-              person: finalReviewers[0] || rPerson || rTask || baseTask,
-              reviewers: finalReviewers, // 🚀 PRECISE NAMES
-              date: finalDate,
-              startTime: start,
-              endTime: end,
-              task: rTask || baseTask,
-              location: rLocation || "Chưa xác định",
-              resources: [
-                ...finalReviewers.map(p => `teacher:${p}`),
-                rLocation ? `room:${rLocation}` : null
-              ].filter(Boolean) as string[],
-              dateRaw: finalDate,
-              timeRaw: finalTime,
-              personRaw: rPerson,
-              locationRaw: rLocation,
-              blockStart,
-              blockEnd,
-              reviewAreaStart: blockStartIndices[0],
-              status: 'pending',
-              isGrouped: true, 
-              rawRow: row
-            });
-          } catch (e) {
-            console.error(`[Grouping] Error Row ${rowIndex} Block ${blockIdx}:`, e);
-          }
-        });
+          allEvents.push({
+            id: eventId,
+            groupName: `Review ${blockIdx + 1}`,
+            person: finalReviewers[0] || rPerson || rTask || baseTask,
+            reviewers: finalReviewers,
+            date: finalDate,
+            startTime: start,
+            endTime: end,
+            task: rTask || baseTask,
+            location: rLocation || "Chưa xác định",
+            code: rCode,
+            sheetType: 'review',
+            resources: [
+              ...finalReviewers.map(p => `teacher:${p}`),
+              rLocation ? `room:${rLocation}` : null
+            ].filter(Boolean) as string[],
+            dateRaw: finalDate,
+            timeRaw: finalTime,
+            personRaw: rPerson,
+            locationRaw: rLocation,
+            blockStart,
+            blockEnd,
+            reviewAreaStart: blockStartIndices[0],
+            status: 'pending',
+            isGrouped: true, 
+            rawRow: row
+          });
+        } catch (e) {
+          console.error(`[Grouping] Error Row ${rowIndex} Block ${blockIdx}:`, e);
+        }
+      });
     });
 
-    return allEvents;
+    // 🚀 SMART DEDUPLICATION: Merge identical events (including Code)
+    const uniqueMap = new Map<string, RowNormalized>();
+    allEvents.forEach(ev => {
+      // Key includes time, person, location, and code to be safe
+      const key = `${ev.startTime}-${ev.endTime}-${ev.person}-${ev.location}-${ev.code || ''}`.toLowerCase();
+      if (!uniqueMap.has(key)) {
+        uniqueMap.set(key, ev);
+      }
+    });
+
+    const deduped = Array.from(uniqueMap.values());
+    console.log(`[GoogleService] normalizeRowsWithGrouping DONE: ${allEvents.length} -> ${deduped.length}`);
+    return deduped;
   }
 }
 

@@ -122,7 +122,12 @@ export const useCalendarSync = ({ accessToken }: UseCalendarSyncProps) => {
       if (events.length > 0) {
         console.log(`🕒 Event 1 details: Start=${events[0].start}, End=${events[0].end}`);
       }
-      const res = await syncEventsToCalendar(events, undefined, force, accessToken, conflictMode);
+
+      // 🔍 Detect sheetType from the first non-null row
+      const detectedType = rowsToSync.find(r => r.sheetType)?.sheetType;
+
+      const res = await syncEventsToCalendar(events, undefined, force, accessToken, conflictMode, detectedType);
+      
       console.log("✅ API Response:", res);
       if (res.data?.availableCalendars) {
         console.log("📅 Available calendars in this GAS session:", res.data.availableCalendars);
@@ -182,13 +187,13 @@ export const useCalendarSync = ({ accessToken }: UseCalendarSyncProps) => {
     }
   }, [accessToken]);
 
-  const clearAppEvents = useCallback(async () => {
+  const clearAppEvents = useCallback(async (sheetType?: 'council' | 'review') => {
     setClearing(true);
     setSyncError(null);
     setSyncResult(null);
 
     try {
-      const res: any = await clearCalendar(undefined, accessToken);
+      const res: any = await clearCalendar(undefined, accessToken, sheetType);
       const deletedCount = res.data?.deletedCount ?? res.deletedCount ?? 0;
       
       const result: SyncResult = {

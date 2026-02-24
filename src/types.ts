@@ -33,12 +33,14 @@ export interface RowNormalized {
   email?: string;
   task?: string;
   location?: string;
+  code?: string;
   raw?: Record<string, string>; // Lưu data gốc để làm description
   rawRow?: any[]; // ✅ NEW: Lưu data gốc dạng array (string[])
   status?: 'pending' | 'synced' | 'failed';
   error?: string;
   // ✅ For grouped events (from flattenRow)
   isGrouped?: boolean; // True if this event is from grouped structure (Data Mẫu/Review)
+  sheetType?: 'council' | 'review'; // 🚀 NEW: For sheet isolation
   reviewers?: string[]; // [reviewer1, reviewer2] for search filtering
   // ✅ Raw mapped values for preview consistency
   dateRaw?: string;

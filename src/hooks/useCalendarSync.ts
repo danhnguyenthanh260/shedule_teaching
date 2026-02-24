@@ -19,7 +19,8 @@ export const useCalendarSync = ({ accessToken, reauthorizeGoogle }: UseCalendarS
     rowsToSync: RowNormalized[], 
     force: boolean = false, 
     conflictMode?: 'insert' | 'keep_old' | 'replace',
-    isRetry: boolean = false
+    isRetry: boolean = false,
+    overrideSheetType?: 'council' | 'review'
   ) => {
     let currentToken = accessToken;
 
@@ -141,8 +142,10 @@ export const useCalendarSync = ({ accessToken, reauthorizeGoogle }: UseCalendarS
         console.log(`🕒 Event 1 details: Start=${events[0].start}, End=${events[0].end}`);
       }
 
-      // 🔍 Detect sheetType from the first non-null row
-      const detectedType = rowsToSync.find(r => r.sheetType)?.sheetType;
+      // 🔍 Detect sheetType from the first non-null row or use override
+      const rawType = overrideSheetType || rowsToSync.find(r => r.sheetType)?.sheetType || 'council';
+      const detectedType = (rawType === 'review' ? 'review' : 'council') as 'council' | 'review';
+      console.log(`📊 Syncing with sheetType: ${detectedType}`);
 
       let res;
       try {
@@ -153,7 +156,7 @@ export const useCalendarSync = ({ accessToken, reauthorizeGoogle }: UseCalendarS
           console.warn("⚠️ Sync failed with 401, trying auto re-auth retry...");
           const newToken = await reauthorizeGoogle();
           if (newToken) {
-            return syncToCalendar(rowsToSync, force, conflictMode, true); // Recursive retry
+            return syncToCalendar(rowsToSync, force, conflictMode, true, detectedType); // Recursive retry
           }
         }
         throw err;

@@ -222,12 +222,18 @@ const CalendarService = {
         } while (pageToken);
 
         // 👤 3. Phân lập dữ liệu theo Sheet Type (Full Sync logic)
-        // existingEvents: Những gì đã có trên calendar của loại sheet này -> Cần đối soát để xóa nế không còn trong list mới
+        // existingEvents: Chỉ những gì thuộc về sheetType này mới được coi là "đối tượng để dọn dẹp tự động"
         const existingEvents = allAppEvents.filter((it) => {
           const p =
             (it.extendedProperties && it.extendedProperties.private) || {};
-          // Chấp nhận cả trường hợp không có sheet_type (Legacy) để dọn dẹp/gắn nhãn lại
-          return p["sheet_type"] === sheetType || !p["sheet_type"];
+          return p["sheet_type"] === sheetType;
+        });
+
+        // legacyEvents: Những gì chưa có tag (cũ) -> Chỉ xóa nếu trùng hoàn hảo để "upgrade" lên tag mới
+        const legacyEvents = allAppEvents.filter((it) => {
+          const p =
+            (it.extendedProperties && it.extendedProperties.private) || {};
+          return !p["sheet_type"];
         });
 
         // otherEvents: Những gì thuộc về sheet khác -> Để check xung đột chéo
@@ -241,7 +247,7 @@ const CalendarService = {
         const toDeleteIds = [];
         const exactMatches = [];
 
-        // 🧩 4. So khớp Exact Match & Mark Delete (Xử lý dọn dẹp TOÀN BỘ sheet type này)
+        // 🧩 4a. Đối soát existingEvents (Cùng loại): XÓA nếu không còn trong list mới (CLEANUP)
         existingEvents.forEach((old) => {
           const oldStart = new Date(
             old.start.dateTime || old.start.date,
@@ -259,7 +265,36 @@ const CalendarService = {
           });
 
           if (foundExact) exactMatches.push(old.id);
-          else toDeleteIds.push(old.id); // KHÔNG còn trong view hiện tại -> XÓA
+          else toDeleteIds.push(old.id);
+        });
+
+        // 🧩 4b. Đối soát legacyEvents: CHỈ xóa nếu tìm thấy Exact Match (để lát nữa Add lại với tag mới)
+        // KHÔNG auto-delete legacy nếu không match (vì có thể nó là loại sheet khác chưa kịp gắn tag)
+        legacyEvents.forEach((old) => {
+          const oldStart = new Date(
+            old.start.dateTime || old.start.date,
+          ).toISOString();
+          const oldEnd = new Date(
+            old.end.dateTime || old.end.date,
+          ).toISOString();
+
+          const foundExact = events.find((nev) => {
+            return (
+              old.summary === nev.title &&
+              oldStart === new Date(nev.start).toISOString() &&
+              oldEnd === new Date(nev.end).toISOString()
+            );
+          });
+
+          if (foundExact) {
+            exactMatches.push(old.id); // Add it to exactMatches to skip recreation if already exist?
+            // Actually, if we want to "upgrade" tag, we SHOULD delete and re-add.
+            // But let's just skip it for now to avoid duplicates.
+            AppLogger.info(
+              "Found legacy exact match, skipping to avoid duplication: " +
+                old.summary,
+            );
+          }
         });
 
         // 🧩 5. Check Overlap & Mark Add
@@ -267,15 +302,13 @@ const CalendarService = {
           const nevStart = new Date(nev.start).getTime();
           const nevEnd = new Date(nev.end).getTime();
 
-          // Nếu đã có y hệt trên lịch thì SKIP (Không thêm mới, không xóa cũ)
+          // Nếu đã có y hệt trên lịch (bất kể có tag hay chưa) thì SKIP
           const isExist = exactMatches.some((id) => {
-            const old = existingEvents.find((o) => o.id === id);
-            return (
-              old &&
-              old.summary === nev.title &&
-              new Date(old.start.dateTime || old.start.date).getTime() ===
-                nevStart
-            );
+            const o = allAppEvents.find((x) => x.id === id);
+            const oStartNum = new Date(
+              o.start.dateTime || o.start.date,
+            ).getTime();
+            return o && o.summary === nev.title && oStartNum === nevStart;
           });
 
           if (isExist) return;

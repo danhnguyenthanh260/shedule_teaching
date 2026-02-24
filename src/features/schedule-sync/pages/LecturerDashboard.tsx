@@ -412,10 +412,10 @@ export const LecturerDashboard: React.FC = () => {
   }, [rows]);
 
   // 🔄 Hàm sync chính (có thể nhận rows đã filter sẵn)
-  const doSyncRows = async (rowsToSync: RowNormalized[], isForce: boolean = false, conflictMode?: 'insert' | 'keep_old' | 'replace') => {
+  const doSyncRows = async (rowsToSync: RowNormalized[], isForce: boolean = false, conflictMode?: 'insert' | 'keep_old' | 'replace', overrideSheetType?: 'council' | 'review') => {
     setLastSyncedRows(rowsToSync); // 💾 Lưu lại để dùng khi resolve conflict
     try {
-      const result = await syncToCalendar(rowsToSync, isForce, conflictMode);
+      const result = await syncToCalendar(rowsToSync, isForce, conflictMode, false, overrideSheetType);
       if (result) {
         if (firebaseUser && sheetMeta) {
           await saveSyncLog({
@@ -463,7 +463,7 @@ export const LecturerDashboard: React.FC = () => {
       return; // Dừng sync, đợi user chọn
     }
 
-    await doSyncRows(rowsToSync, isForce, conflictMode);
+    await doSyncRows(rowsToSync, isForce, conflictMode, effectiveIsReview ? 'review' : 'council');
   };
 
   if (!firebaseUser) return null;

@@ -127,7 +127,7 @@ export const InternalConflictModal: React.FC<InternalConflictModalProps> = ({
                     <div key={eIdx} className="flex items-center gap-2 py-1.5 border-t border-orange-50 first:border-0">
                       <div className="w-1.5 h-1.5 rounded-full bg-orange-300 shrink-0" />
                       <span className="text-[11px] font-semibold text-slate-700 flex-1 truncate">
-                        {ev.person}
+                        {ev.person} {ev.task ? `— ${ev.task}` : ''}
                       </span>
                       <span className="text-[10px] text-slate-400 shrink-0">
                         {ev.location || '—'}
@@ -177,7 +177,7 @@ export const InternalConflictModal: React.FC<InternalConflictModalProps> = ({
                     <option value="" disabled>— Chọn event muốn giữ —</option>
                     {group.events.map((ev, eIdx) => (
                       <option key={eIdx} value={eIdx}>
-                        {ev.person} — {ev.location || 'Không có phòng'}
+                        {ev.person} {ev.task ? `(${ev.task})` : ''} — {ev.location || 'Không có phòng'}
                       </option>
                     ))}
                   </select>
@@ -188,7 +188,7 @@ export const InternalConflictModal: React.FC<InternalConflictModalProps> = ({
         </div>
 
         {/* Footer */}
-        <div className="border-t border-slate-100 px-6 py-4 bg-slate-50/50 flex items-center gap-3">
+        <div className="border-t border-slate-100 px-6 py-4 bg-slate-50/50 flex flex-col sm:flex-row items-center gap-3">
           {step === 1 ? (
             <>
               <button
@@ -257,11 +257,12 @@ export function detectInternalOverlaps(rows: RowNormalized[]): {
     return { row: r, startMs, endMs };
   });
 
-  // Nhóm events theo khung giờ chính xác (startMs + endMs giống nhau)
+  // Nhóm events theo định danh duy nhất: Giờ + Tên + Tiêu đề
   const slotMap = new Map<string, RowNormalized[]>();
   parsed.forEach(({ row, startMs, endMs }) => {
     if (!startMs || !endMs) return;
-    const key = `${startMs}-${endMs}`;
+    // 🛡️ CHỈ COI LÀ TRÙNG NỘI BỘ NẾU: Giờ + Tên + Nhiệm vụ giống hệt (Nghi ngờ dòng rác/trùng)
+    const key = `${startMs}-${endMs}-${row.person}-${row.task || ''}`;
     if (!slotMap.has(key)) slotMap.set(key, []);
     slotMap.get(key)!.push(row);
   });

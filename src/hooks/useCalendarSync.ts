@@ -115,23 +115,26 @@ export const useCalendarSync = ({ accessToken, reauthorizeGoogle }: UseCalendarS
         const isoStart = r.startTime?.includes('T') ? r.startTime : formatToISO(r.date, r.startTime);
         const isoEnd = r.endTime?.includes('T') ? r.endTime : formatToISO(r.date, r.endTime);
 
-        // 🚀 CLEAN TITLE MERGE (Only for Calendar Sync)
+        // 🚀 CLEAN TITLE MERGE (Unified for Council and Review)
         let eventTitle = r.person;
         
         if (r.isGrouped) {
            const names = r.reviewers && r.reviewers.length > 0 ? r.reviewers : [r.person];
            const timePart = r.timeRaw ? `(${r.timeRaw})` : '';
-           
            eventTitle = `${names.join(' & ')} ${timePart}`.trim();
+        } else {
+           // For Council or simple rows: "Name - Task/Topic"
+           const taskPart = r.task && r.task !== 'Nhiệm vụ' && r.task !== 'Review' ? ` - ${r.task}` : '';
+           eventTitle = `${r.person}${taskPart}`;
         }
 
         return {
-          title: eventTitle,
-          start: isoStart,
-          end: isoEnd,
+          title: eventTitle || "Sự kiện không tên",
+          start: isoStart || new Date().toISOString(),
+          end: isoEnd || new Date().toISOString(),
           location: r.location || '',
-          resources: r.resources || [r.person, r.location].filter(Boolean),
-          description: `Đồng bộ từ FPT Scheduler\nGV: ${eventTitle}\nPhòng: ${r.location}\n[ID: ${r.id}]`,
+          resources: [r.person, r.location].filter(Boolean) as string[],
+          description: `Đồng bộ từ FPT Scheduler\nGV: ${r.person || 'N/A'}\nNhiệm vụ: ${r.task || 'N/A'}\nPhòng: ${r.location || 'N/A'}\n[ID: ${r.id}]`,
           signature: r.id,
           colorId: r.isGrouped ? '' : '11' // 🎨 Tomato (Red) for Councils, Default for Reviews
         };
@@ -179,7 +182,7 @@ export const useCalendarSync = ({ accessToken, reauthorizeGoogle }: UseCalendarS
       const conflictsData = dataPayload.conflicts || [];
       if (conflictsData.length > 0 && !conflictMode) {
         setConflicts(conflictsData);
-        const conflictMsg = `Xung đột thời gian: ${skippedCount} mục bị trùng khung giờ với lịch hiện có.`;
+        const conflictMsg = `Xung đột thời gian: ${conflictsData.length} mục bị trùng khung giờ với lịch hiện có.`;
         throw new Error(conflictMsg);
       }
       setConflicts([]);

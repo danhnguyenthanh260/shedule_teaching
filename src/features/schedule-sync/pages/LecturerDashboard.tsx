@@ -462,7 +462,7 @@ export const LecturerDashboard: React.FC = () => {
   if (!firebaseUser) return null;
 
   return (
-    <div className="h-full flex flex-col gap-4 relative overflow-visible text-slate-900 bg-slate-100">
+    <div className="h-full flex flex-col gap-4 relative overflow-visible text-slate-900 bg-[#F1F5F9]">
       {/* Header Section: Steps 1 & 2 side-by-side (Approx 1/4 of screen) */}
       <div className="flex-none flex flex-col lg:flex-row gap-3">
         {/* Step 1: Import */}
@@ -622,39 +622,45 @@ export const LecturerDashboard: React.FC = () => {
         )}
       </div>
 
-      {/* Step 3: Preview & Sync (Approx 3/4 of screen) */}
+      {/* 🚀 STEP 3: PREMIUM CONTROL CENTER (Mobile-First) */}
       {(rows.length > 0 || (allRows.length > 0 && isPreviewMode)) && (
-        <section className="flex-1 min-h-0 bg-white p-4 rounded-3xl border border-slate-200 flex flex-col shadow-sm border-b-4 border-b-slate-200/50">
-          <div className="flex-none flex flex-col sm:flex-row items-center justify-between gap-4 mb-4 pb-4 border-b border-slate-100">
-            <div className="flex items-center gap-2 shrink-0">
-              
-              <div>
-                <h2 className="text-base font-bold text-slate-900 tracking-tight leading-tight">Kiểm tra & Đồng bộ</h2>
-                <p className="text-[10px] text-slate-400 font-bold uppercase tracking-[0.1em]">
-                  {isPreviewMode ? 'Chế độ xem trước (Dữ liệu thô)' : `Sẵn sàng: ${filteredRows.length} mục`}
-                </p>
+        <section className="flex-1 min-h-0 bg-white/40 glass-panel p-4 sm:p-5 rounded-[2.5rem] flex flex-col shadow-2xl shadow-slate-200/40 mb-4 sm:mb-0 border-b-8 border-b-slate-200/10">
+            <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-5 mb-5 pb-5 border-b border-white/50">
+              <div className="flex items-center gap-4 shrink-0">
+                <div className="w-12 h-12 rounded-[1.25rem] fpt-gradient flex items-center justify-center text-white shadow-xl shadow-orange-200 lg:hidden transform hover:scale-105 transition-transform">
+                   <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10" /></svg>
+                </div>
+                <div>
+                  <h2 className="text-base sm:text-lg font-black text-slate-800 tracking-tight leading-tight">Kiểm tra & Đồng bộ</h2>
+                  <div className="flex items-center gap-2 mt-1">
+                    <div className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse shadow-[0_0_8px_rgba(16,185,129,0.4)]" />
+                    <p className="text-[10px] sm:text-[11px] text-slate-400 font-extrabold uppercase tracking-widest leading-none">
+                      {isPreviewMode ? 'Chế độ xem trước' : `${filteredRows.length} mục sẵn sàng`}
+                    </p>
+                  </div>
+                </div>
               </div>
-            </div>
-
-              <div className="flex-1 flex items-center justify-end gap-3 min-w-0 pr-2">
+ 
+              <div className="w-full sm:flex-1 flex flex-col sm:flex-row items-center justify-end gap-3 min-w-0">
                 {mappingLoading && (
                   <div className="hidden lg:flex items-center gap-2 px-3 py-1.5 bg-orange-50 text-orange-600 rounded-lg text-[10px] font-bold animate-pulse border border-orange-100 italic shrink-0">
                     Đang tải...
                   </div>
                 )}
                 
-                <div className="flex items-center gap-2 w-full max-w-sm min-w-0">
+                <div className="flex items-center gap-3 w-full max-w-sm min-w-0 group">
+                  {/* 🔍 Premium Glass Search Bar */}
                   <div className="relative flex-1 min-w-0">
-                  <div className="absolute left-3 top-2.5 text-slate-400 group-focus-within:text-[#F27024] transition-colors pointer-events-none">
-                    <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-                      <circle cx="11" cy="11" r="8"></circle>
-                      <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
-                    </svg>
-                  </div>
+                    <div className="absolute left-4 top-3 text-slate-300 group-focus-within:text-[#F27024] transition-colors pointer-events-none">
+                      <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
+                        <circle cx="11" cy="11" r="8"></circle>
+                        <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
+                      </svg>
+                    </div>
                     <input
                       type="text"
-                      placeholder="Lọc tên giảng viên..."
-                      className="w-full pl-9 pr-4 py-2 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:ring-2 focus:ring-orange-500 outline-none transition-all focus:bg-white font-bold text-slate-800 placeholder:text-slate-400 pointer-events-auto cursor-text"
+                      placeholder="Tìm tên giảng viên, phòng..."
+                      className="w-full pl-11 pr-4 py-3 bg-white border-2 border-slate-100 rounded-2xl text-[13px] font-black text-slate-700 placeholder:text-slate-300 focus:border-[#F27024]/30 focus:shadow-xl focus:shadow-orange-100/50 outline-none transition-all cursor-text"
                       value={personFilter}
                       onChange={(e) => {
                         setPersonFilter(e.target.value);
@@ -662,7 +668,7 @@ export const LecturerDashboard: React.FC = () => {
                       }}
                     />
                   </div>
-
+ 
                   <SearchColumnSelector
                     headers={searchHeaderOptions}
                     selectedIndices={searchColumnIndices}
@@ -670,82 +676,83 @@ export const LecturerDashboard: React.FC = () => {
                   />
                 </div>
               </div>
-
-              <div className="flex items-center gap-3 shrink-0">
-                 {/* 🚨 NÚT ĐỒNG BỘ CHÍNH */}
-                <div className="relative group">
-                  <button
-                    onClick={() => handleSync(false)}
-                    disabled={syncing || clearing || selectedIds.size === 0}
-                    className="h-11 px-6 bg-[#F27024] text-white rounded-2xl font-bold hover:bg-orange-600 disabled:bg-slate-50 disabled:text-slate-300 disabled:border-slate-100 border border-transparent transition-all shadow-xl shadow-orange-200/50 flex items-center gap-2 text-[11px] uppercase tracking-widest active:scale-95"
-                  >
-                    {syncing ? (
-                      <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
-                    ) : (
-                      <>Đồng bộ ({selectedIds.size})</>
-                    )}
-                  </button>
-
-                </div>
-
-                <div className="w-px h-8 bg-slate-100 mx-1" />
-
-              {/* 🗑️ NÚT XÓA LỊCH CŨ (Secondary Action) */}
-              <div className="relative group">
-                <button
-                  onClick={() => setIsConfirmingClear(!isConfirmingClear)}
-                  disabled={syncing || clearing}
-                  className={`h-11 px-4 rounded-2xl font-bold transition-all text-[11px] uppercase tracking-wider flex items-center gap-2 border shadow-sm active:scale-95 ${
-                    isConfirmingClear 
-                    ? 'bg-rose-50 text-rose-500 border-rose-200 ring-4 ring-rose-50' 
-                    : 'bg-white text-slate-400 border-slate-200 hover:bg-rose-50 hover:text-rose-500 hover:border-rose-100'
-                  }`}
-                  title="Xóa tất cả các sự kiện đã tạo bởi ứng dụng này"
-                >
-                  {clearing ? (
-                    <div className="w-3 h-3 border-2 border-rose-500/30 border-t-rose-500 rounded-full animate-spin" />
-                  ) : (
-                    <>
-                      <svg className="w-4 h-4 group-hover:scale-110 transition-transform" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
-                      </svg>
-                      Xóa lịch cũ
-                    </>
-                  )}
-                </button>
-
-                {/* Confirm Popover Overlay (Avoids Layout Shift) */}
-                {isConfirmingClear && (
-                  <div className="absolute top-full right-0 mt-3 w-64 bg-white border border-slate-100 p-4 rounded-3xl shadow-2xl z-[100] animate-in fade-in zoom-in-95 slide-in-from-top-2 duration-300 pointer-events-auto">
-                    <div className="text-center mb-3">
-                      <h4 className="text-[10px] font-bold text-rose-500 uppercase tracking-widest mb-1">Xác nhận dọn dẹp</h4>
-                      <p className="text-[9px] text-slate-500 font-medium leading-relaxed">Hành động này sẽ xóa sạh các sự kiện do App đã tạo trên Google Calendar của bạn.</p>
-                    </div>
-                    <div className="flex gap-2">
-                      <button
-                        onClick={async (e) => {
-                          e.stopPropagation();
-                          setIsConfirmingClear(false);
-                          const currentType = effectiveIsReview ? 'review' : 'council';
-                          await clearAppEvents(currentType);
-                        }}
-                        className="flex-1 py-2.5 bg-rose-500 text-white rounded-xl font-bold text-[10px] uppercase tracking-wider hover:bg-rose-600 active:scale-95 shadow-lg shadow-rose-100 transition-all"
-                      >
-                        Xóa ngay
-                      </button>
-                      <button
-                        onClick={() => setIsConfirmingClear(false)}
-                        className="flex-1 py-2.5 bg-slate-50 text-slate-500 border border-slate-100 rounded-xl font-bold text-[10px] uppercase tracking-wider hover:bg-white hover:border-slate-200 transition-all active:scale-95"
-                      >
-                        Hủy
-                      </button>
-                    </div>
-                    {/* Tiny arrow */}
-                    <div className="absolute -top-1 right-6 w-2 h-2 bg-white border-t border-l border-slate-100 rotate-45" />
+ 
+                <div className="flex items-center gap-3 w-full sm:w-auto shrink-0 border-t sm:border-t-0 pt-4 sm:pt-0 border-white/50">
+                  {/* 🚨 NÚT ĐỒNG BỘ CHÍNH - Premium Gradient Overlay */}
+                  <div className="relative group flex-1 sm:flex-initial">
+                    <button
+                      onClick={() => handleSync(false)}
+                      disabled={syncing || clearing || selectedIds.size === 0}
+                      className="w-full h-12 px-6 fpt-gradient text-white rounded-[1.25rem] font-black hover:brightness-110 disabled:bg-slate-100 disabled:text-slate-300 disabled:border-slate-100 border border-transparent transition-all shadow-2xl shadow-orange-200/60 flex items-center justify-center gap-2 text-[11px] uppercase tracking-widest active:scale-95"
+                    >
+                      {syncing ? (
+                        <div className="w-4 h-4 border-3 border-white/30 border-t-white rounded-full animate-spin" />
+                      ) : (
+                        <>Đồng bộ ({selectedIds.size})</>
+                      )}
+                    </button>
                   </div>
-                )}
-              </div>
-            </div>
+ 
+                  <div className="hidden sm:block w-px h-8 bg-slate-200/50 mx-1" />
+ 
+                  {/* 🗑️ NÚT XÓA LỊCH - Icon Focus */}
+                  <div className="relative group flex-1 sm:flex-initial">
+                    <button
+                      onClick={() => setIsConfirmingClear(!isConfirmingClear)}
+                      disabled={syncing || clearing}
+                      className={`w-full h-12 px-3 sm:px-4 rounded-[1.25rem] font-black transition-all text-[11px] uppercase tracking-wider flex items-center justify-center gap-2 border shadow-lg active:scale-95 ${
+                        isConfirmingClear 
+                        ? 'bg-rose-50 text-rose-500 border-rose-200 ring-4 ring-rose-50' 
+                        : 'bg-white text-slate-400 border-slate-100 hover:bg-rose-50 hover:text-rose-500 hover:border-rose-200'
+                      }`}
+                      title="Xóa dữ liệu cũ"
+                    >
+                      {clearing ? (
+                        <div className="w-4 h-4 border-2 border-rose-500/30 border-t-rose-500 rounded-full animate-spin" />
+                      ) : (
+                        <>
+                          <svg className="w-5 h-5 group-hover:rotate-12 transition-transform" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                          </svg>
+                          <span className="hidden sm:inline-block">Xóa lịch ({effectiveIsReview ? 'Review' : 'Hội đồng'})</span>
+                        </>
+                      )}
+                    </button>
+ 
+                    {/* Premium Popover Confirm */}
+                    {isConfirmingClear && (
+                      <div className="absolute top-full right-0 mt-4 w-72 bg-white border border-slate-100 p-6 rounded-[2.5rem] shadow-[0_25px_50px_-12px_rgba(0,0,0,0.15)] z-[100] animate-in fade-in zoom-in-95 slide-in-from-top-4 duration-300 pointer-events-auto">
+                        <div className="text-center mb-6">
+                          <div className="w-14 h-14 bg-rose-50 rounded-[1.25rem] flex items-center justify-center mx-auto mb-4 text-rose-500 shadow-inner">
+                             <svg className="w-7 h-7" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" /></svg>
+                          </div>
+                          <h4 className="text-[13px] font-black text-rose-500 uppercase tracking-widest mb-2">Xác nhận hành động</h4>
+                          <p className="text-[10px] text-slate-400 font-extrabold leading-relaxed px-2 uppercase tracking-tight">Xóa sạch lịch App đã tạo từ <br/><span className="text-slate-900">{effectiveIsReview ? 'Sheet Review' : 'Sheet Hội đồng'}</span></p>
+                        </div>
+                        <div className="flex gap-3">
+                          <button
+                            onClick={async (e) => {
+                              e.stopPropagation();
+                              setIsConfirmingClear(false);
+                              const currentType = effectiveIsReview ? 'review' : 'council';
+                              await clearAppEvents(currentType);
+                            }}
+                            className="flex-[1.5] py-4 bg-rose-600 text-white rounded-2xl font-black text-[11px] uppercase tracking-widest hover:brightness-110 active:scale-95 shadow-2xl shadow-rose-200 transition-all"
+                          >
+                            Xác nhận Xóa
+                          </button>
+                          <button
+                            onClick={() => setIsConfirmingClear(false)}
+                            className="flex-1 py-4 bg-slate-50 text-slate-400 border border-slate-100 rounded-2xl font-black text-[11px] uppercase tracking-widest hover:bg-white hover:border-slate-300 transition-all active:scale-95"
+                          >
+                            Hủy
+                          </button>
+                        </div>
+                        <div className="absolute -top-1.5 right-6 w-3 h-3 bg-white border-t border-l border-slate-100 rotate-45" />
+                      </div>
+                    )}
+                  </div>
+                </div>
           </div>
 
           <div className="flex-1 min-h-0 overflow-hidden rounded-xl border border-slate-50 bg-slate-100">

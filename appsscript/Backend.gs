@@ -236,84 +236,146 @@ const CalendarService = {
           const oldEvent = allAppEvents.find((o) => {
             const p =
               (o.extendedProperties && o.extendedProperties.private) || {};
-            // Ưu tiên trùng Signature, nếu không có signature (Legacy) thì tìm theo nội dung/thời gian
+            // 1. Ưu tiên trùng Signature (Row ID - Rất chính xác)
             if (nevSignature && p[CONSTANTS.SIGNATURE_TAG] === nevSignature)
               return true;
 
-            const oStart = new Date(o.start.dateTime || o.start.date).getTime();
-            const oEnd = new Date(o.end.dateTime || o.end.date).getTime();
-            return (
-              !p[CONSTANTS.SIGNATURE_TAG] &&
-              o.summary === nev.title &&
-              oStart === nevStart &&
-              oEnd === nevEnd
-            );
+            // 🛡️ BƯỚC 4: NHẬN DIỆN DANH TÍNH (Identity Check)
+            const oStartNum = new Date(
+              o.start.dateTime || o.start.date,
+            ).getTime();
+            const oEndNum = new Date(o.end.dateTime || o.end.date).getTime();
+
+            // Chuẩn hóa cực mạnh
+            const norm = (s) => (s || "").toLowerCase().normalize("NFC").trim();
+            const oldTitle = norm(o.summary);
+            const newTitle = norm(nev.title);
+            const personPart = norm(nev.title.split("-")[0]);
+
+            const isTimeMatch =
+              Math.abs(oStartNum - nevStart) < 300000 &&
+              Math.abs(oEndNum - nevEnd) < 300000;
+
+            if (isTimeMatch) {
+              if (nevSignature && p[CONSTANTS.SIGNATURE_TAG] === nevSignature)
+                return true;
+              if (oldTitle === newTitle) return true;
+              if (
+                sheetType === "council" &&
+                (oldTitle.includes(personPart) || newTitle.includes(oldTitle))
+              )
+                return true;
+            }
+            return false;
           });
 
           if (oldEvent) {
-            const oStart = new Date(
+            const oStartNum = new Date(
               oldEvent.start.dateTime || oldEvent.start.date,
             ).getTime();
-            const oEnd = new Date(
-              oldEvent.end.dateTime || oldEvent.end.date,
-            ).getTime();
+            const norm = (s) => (s || "").toLowerCase().normalize("NFC").trim();
 
-            // Kiểm tra xem dữ liệu có THAY ĐỔI không (Dựa trên title, thời gian, địa điểm)
+            // Kiểm tra thay đổi thực sự
             const isChanged =
-              oldEvent.summary !== nev.title ||
-              oldEvent.location !== (nev.location || "") ||
-              oStart !== nevStart ||
-              oEnd !== nevEnd;
+              norm(oldEvent.summary) !== norm(nev.title) ||
+              norm(oldEvent.location) !== norm(nev.location) ||
+              Math.abs(oStartNum - nevStart) > 120000;
 
             if (!isChanged) {
-              // Y HỆT -> SKIP (Không làm gì cả)
               exactMatches.push(oldEvent.id);
-              return;
+              results.skipped++;
+              return; // SKIP
             } else {
-              // CÓ THAY ĐỔI -> Đánh dấu XÓA cũ để lát nữa THÊM mới
               toDeleteIds.push(oldEvent.id);
-              // (Sẽ rơi xuống phần overlap check bên dưới để Add sau)
             }
           }
 
-          // 🧩 5. Check Overlap (Xung đột thời gian với KHÁC loại)
+          // 🛡️ BƯỚC 5: KIỂM TRA XUNG ĐỘT (Overlap Check)
           const overlap = allAppEvents.find((other) => {
-            // Changed from otherEvents to allAppEvents
             const p =
               (other.extendedProperties && other.extendedProperties.private) ||
               {};
-            // Only check overlap with events from OTHER sheet types or events without sheet_type (legacy)
-            if (p["sheet_type"] === sheetType) return false;
 
-            const oStart = new Date(
+            // 🛑 1. Không bao giờ xung đột với chính mình
+            if (
+              exactMatches.includes(other.id) ||
+              toDeleteIds.includes(other.id)
+            )
+              return false;
+
+            // 🛑 2. Nhận diện loại Board (Ưu tiên Council cho các lịch cũ ko nhãn)
+            let otherType = p["sheet_type"];
+            if (!otherType && p[CONSTANTS.SOURCE_TAG] === "fpt_scheduler") {
+              otherType = "council"; // Legacy mặc định là Council
+            }
+
+            // 🛑 3. Tab Hội đồng / Review KHÔNG BAO GIỜ xung đột với cùng loại mình
+            if (otherType === sheetType) return false;
+
+            const oStartNum = new Date(
               other.start.dateTime || other.start.date,
             ).getTime();
-            const oEnd = new Date(
+            const oEndNum = new Date(
               other.end.dateTime || other.end.date,
             ).getTime();
-            return (
-              nevStart < oEnd &&
-              nevEnd > oStart &&
-              other.location === nev.location
-            );
+
+            // 🛑 4. Xung đột nếu: Trùng giờ VÀ Trùng địa điểm VÀ KHÁC loại bảng
+            const isOverlap = nevStart < oEndNum && nevEnd > oStartNum;
+            return isOverlap && other.location === nev.location;
           });
 
           if (overlap && !force) {
             results.conflicts.push({
               index: events.indexOf(nev),
-              newEvent: nev.title,
-              newStart: nev.start,
-              newEnd: nev.end,
-              oldEvent: overlap.summary,
-              oldStart: overlap.start.dateTime || overlap.start.date,
-              oldEnd: overlap.end.dateTime || overlap.end.date,
+              newEvent: String(nev.title || "Events mới"),
+              newStart: String(nev.start || ""),
+              newEnd: String(nev.end || ""),
+              oldEvent: String(
+                overlap.summary || overlap.description || "Lịch hiện có",
+              ),
+              oldStart: String(
+                (overlap.start &&
+                  (overlap.start.dateTime || overlap.start.date)) ||
+                  "",
+              ),
+              oldEnd: String(
+                (overlap.end && (overlap.end.dateTime || overlap.end.date)) ||
+                  "",
+              ),
             });
           } else {
             toAdd.push(nev);
           }
         });
 
-        // 🚀 6. Execute (Delete old, Create new)
+        // 🛡️ BƯỚC 6: DỌN DẸP "LỊCH THỪA" (Mirror Cleanup)
+        // Nếu trên Calendar có lịch thuộc bảng này nhưng trong Sheet không thấy đâu -> XÓA.
+        // Điều này đảm bảo Calendar luôn là bản sao khớp 100% với Sheet.
+        allAppEvents.forEach((other) => {
+          const p =
+            (other.extendedProperties && other.extendedProperties.private) ||
+            {};
+          const otherType =
+            p["sheet_type"] ||
+            (p[CONSTANTS.SOURCE_TAG] === "fpt_scheduler"
+              ? "council"
+              : "unknown");
+
+          // Chỉ dọn dẹp nếu:
+          // 1. Cùng loại Board (Council dọn Council, Review dọn Review)
+          // 2. Không nằm trong danh sách được Giữ lại (exactMatches)
+          // 3. Không nằm trong danh sách được Update (toDeleteIds đã có sẵn)
+          if (
+            otherType === sheetType &&
+            !exactMatches.includes(other.id) &&
+            !toDeleteIds.includes(other.id)
+          ) {
+            toDeleteIds.push(other.id);
+          }
+        });
+
+        // 🚀 THỰC THI (Execution)
+        // -------------------------------------------------------------
         toDeleteIds.forEach((id) => {
           try {
             GoogleCalendarAPI.deleteEvent(googleAccessToken, calendarId, id);

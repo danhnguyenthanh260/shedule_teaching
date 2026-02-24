@@ -29,7 +29,6 @@ export const LecturerDashboard: React.FC = () => {
   // Semesters & Local state
   const [semesters, setSemesters] = useState<Record<string, SemesterConfig>>({});
   const [isPreviewMode, setIsPreviewMode] = useState(false);
-  const [toastMessage, setToastMessage] = useState<string | null>(null);
 
   // Persistence (localStorage)
   const persistence = useAppPersistence();
@@ -136,10 +135,6 @@ export const LecturerDashboard: React.FC = () => {
 
   // Confirmation State
   const [isConfirmingClear, setIsConfirmingClear] = useState(false);
-  const showToast = useCallback((msg: string) => {
-    setToastMessage(msg);
-    setTimeout(() => setToastMessage(null), 3000);
-  }, []);
 
   const [appliedColumnMap, setAppliedColumnMap] = useState<ColumnMapping>({});
 
@@ -201,8 +196,7 @@ export const LecturerDashboard: React.FC = () => {
 
     const timeStr = data.fetchTime ? ` (Lúc ${data.fetchTime})` : '';
     const cacheStatus = data.isCached ? ' [Dữ liệu từ máy]' : ' [Dữ liệu mới]';
-    showToast(`Đã tải ${data.rawRows.length} dòng dữ liệu${timeStr}${cacheStatus}`);
-  }, [semesters, selectedSemesterId, setSheetMeta, setSheetType, applyHeaderRow, showToast]);
+  }, [semesters, selectedSemesterId, setSheetMeta, setSheetType, applyHeaderRow]);
 
   // ✅ Unified filtering logic to ensure display and selection are always in sync
   const rowMatchesFilter = useCallback((row: RowNormalized, filterText: string) => {
@@ -426,7 +420,6 @@ export const LecturerDashboard: React.FC = () => {
             syncResult: result
           });
           setRefreshHistory(prev => prev + 1);
-          showToast(`Đã đồng bộ ${rowsToSync.length} mục lên Calendar!`);
         }
       }
     } catch (err: any) {
@@ -545,11 +538,10 @@ export const LecturerDashboard: React.FC = () => {
                           columns: columnsConfig,
                           mapping: columnMap // 🏛️ Save this as global mapping for all users
                         });
-                        showToast('Đã lưu cấu hình ánh xạ mặc định cho học kỳ');
                       }
                     }
                   } catch (err: any) {
-                    showToast('Lỗi khi lưu cấu hình');
+                    // Fail silently or handle error differently
                   }
                 }}
                 isLoading={loading}
@@ -845,12 +837,6 @@ export const LecturerDashboard: React.FC = () => {
         }}
       />
 
-      {toastMessage && (
-        <div className="fixed bottom-6 right-6 bg-slate-900 border border-slate-800 text-white px-5 py-3 rounded-2xl shadow-2xl animate-in fade-in slide-in-from-bottom-6 duration-500 flex items-center gap-3 z-[100]">
-          <div className="w-2 h-2 bg-green-400 rounded-full animate-pulse shadow-[0_0_8px_rgba(74,222,128,0.5)]" />
-          <span className="text-xs font-bold tracking-tight">{toastMessage}</span>
-        </div>
-      )}
 
       <SyncHistoryModal
         isOpen={isHistoryOpen}

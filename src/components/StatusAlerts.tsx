@@ -46,14 +46,18 @@ export const StatusAlerts: React.FC<StatusAlertsProps> = ({ error, result, onClo
 
   // Format time helper
   const fmtTime = (iso: string) => {
+    if (!iso) return '';
     try {
       const d = new Date(iso);
+      if (isNaN(d.getTime())) return iso;
       return d.toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit' });
     } catch { return iso; }
   };
   const fmtDate = (iso: string) => {
+    if (!iso) return '';
     try {
       const d = new Date(iso);
+      if (isNaN(d.getTime())) return iso;
       return d.toLocaleDateString('vi-VN', { day: '2-digit', month: '2-digit' });
     } catch { return ''; }
   };

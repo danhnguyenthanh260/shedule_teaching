@@ -221,100 +221,70 @@ const CalendarService = {
           pageToken = listRes.nextPageToken;
         } while (pageToken);
 
-        // 👤 3. Phân lập dữ liệu theo Sheet Type (Full Sync logic)
-        // existingEvents: Chỉ những gì thuộc về sheetType này mới được coi là "đối tượng để dọn dẹp tự động"
-        const existingEvents = allAppEvents.filter((it) => {
-          const p =
-            (it.extendedProperties && it.extendedProperties.private) || {};
-          return p["sheet_type"] === sheetType;
-        });
-
-        // legacyEvents: Những gì chưa có tag (cũ) -> Chỉ xóa nếu trùng hoàn hảo để "upgrade" lên tag mới
-        const legacyEvents = allAppEvents.filter((it) => {
-          const p =
-            (it.extendedProperties && it.extendedProperties.private) || {};
-          return !p["sheet_type"];
-        });
-
-        // otherEvents: Những gì thuộc về sheet khác -> Để check xung đột chéo
-        const otherEvents = allAppEvents.filter((it) => {
-          const p =
-            (it.extendedProperties && it.extendedProperties.private) || {};
-          return p["sheet_type"] && p["sheet_type"] !== sheetType;
-        });
-
         const toAdd = [];
         const toDeleteIds = [];
         const exactMatches = [];
 
-        // 🧩 4a. Đối soát existingEvents (Cùng loại): XÓA nếu không còn trong list mới (CLEANUP)
-        existingEvents.forEach((old) => {
-          const oldStart = new Date(
-            old.start.dateTime || old.start.date,
-          ).toISOString();
-          const oldEnd = new Date(
-            old.end.dateTime || old.end.date,
-          ).toISOString();
-
-          const foundExact = events.find((nev) => {
-            return (
-              old.summary === nev.title &&
-              oldStart === new Date(nev.start).toISOString() &&
-              oldEnd === new Date(nev.end).toISOString()
-            );
-          });
-
-          if (foundExact) exactMatches.push(old.id);
-          else toDeleteIds.push(old.id);
-        });
-
-        // 🧩 4b. Đối soát legacyEvents: CHỈ xóa nếu tìm thấy Exact Match (để lát nữa Add lại với tag mới)
-        // KHÔNG auto-delete legacy nếu không match (vì có thể nó là loại sheet khác chưa kịp gắn tag)
-        legacyEvents.forEach((old) => {
-          const oldStart = new Date(
-            old.start.dateTime || old.start.date,
-          ).toISOString();
-          const oldEnd = new Date(
-            old.end.dateTime || old.end.date,
-          ).toISOString();
-
-          const foundExact = events.find((nev) => {
-            return (
-              old.summary === nev.title &&
-              oldStart === new Date(nev.start).toISOString() &&
-              oldEnd === new Date(nev.end).toISOString()
-            );
-          });
-
-          if (foundExact) {
-            exactMatches.push(old.id); // Add it to exactMatches to skip recreation if already exist?
-            // Actually, if we want to "upgrade" tag, we SHOULD delete and re-add.
-            // But let's just skip it for now to avoid duplicates.
-            AppLogger.info(
-              "Found legacy exact match, skipping to avoid duplication: " +
-                old.summary,
-            );
-          }
-        });
-
-        // 🧩 5. Check Overlap & Mark Add
+        // 🧩 4. Chiến lược "Đồng bộ Vi sai" (Differential Sync)
+        // Duyệt qua danh sách MỚI (events) để quyết định Add, Update hay Skip
         events.forEach((nev) => {
           const nevStart = new Date(nev.start).getTime();
           const nevEnd = new Date(nev.end).getTime();
+          const nevSignature = nev.signature || "";
 
-          // Nếu đã có y hệt trên lịch (bất kể có tag hay chưa) thì SKIP
-          const isExist = exactMatches.some((id) => {
-            const o = allAppEvents.find((x) => x.id === id);
-            const oStartNum = new Date(
-              o.start.dateTime || o.start.date,
-            ).getTime();
-            return o && o.summary === nev.title && oStartNum === nevStart;
+          // Tìm sự kiện cũ CÙNG LOẠI (sheetType) và CÙNG ID (signature)
+          const oldEvent = allAppEvents.find((o) => {
+            const p =
+              (o.extendedProperties && o.extendedProperties.private) || {};
+            // Ưu tiên trùng Signature, nếu không có signature (Legacy) thì tìm theo nội dung/thời gian
+            if (nevSignature && p[CONSTANTS.SIGNATURE_TAG] === nevSignature)
+              return true;
+
+            const oStart = new Date(o.start.dateTime || o.start.date).getTime();
+            const oEnd = new Date(o.end.dateTime || o.end.date).getTime();
+            return (
+              !p[CONSTANTS.SIGNATURE_TAG] &&
+              o.summary === nev.title &&
+              oStart === nevStart &&
+              oEnd === nevEnd
+            );
           });
 
-          if (isExist) return;
+          if (oldEvent) {
+            const oStart = new Date(
+              oldEvent.start.dateTime || oldEvent.start.date,
+            ).getTime();
+            const oEnd = new Date(
+              oldEvent.end.dateTime || oldEvent.end.date,
+            ).getTime();
 
-          // Check overlap với "Sheet khác" (Chỉ báo lỗi nếu trùng với loại lịch khác)
-          const overlap = otherEvents.find((other) => {
+            // Kiểm tra xem dữ liệu có THAY ĐỔI không (Dựa trên title, thời gian, địa điểm)
+            const isChanged =
+              oldEvent.summary !== nev.title ||
+              oldEvent.location !== (nev.location || "") ||
+              oStart !== nevStart ||
+              oEnd !== nevEnd;
+
+            if (!isChanged) {
+              // Y HỆT -> SKIP (Không làm gì cả)
+              exactMatches.push(oldEvent.id);
+              return;
+            } else {
+              // CÓ THAY ĐỔI -> Đánh dấu XÓA cũ để lát nữa THÊM mới
+              toDeleteIds.push(oldEvent.id);
+              // (Sẽ rơi xuống phần overlap check bên dưới để Add sau)
+            }
+          }
+
+          // 🧩 5. Check Overlap (Xung đột thời gian với KHÁC loại)
+          const overlap = allAppEvents.find((other) => {
+            // Changed from otherEvents to allAppEvents
+            const p =
+              (other.extendedProperties && other.extendedProperties.private) ||
+              {};
+            // Only check overlap with events from OTHER sheet types or events without sheet_type (legacy)
+            if (p["sheet_type"] === sheetType) return false;
+
             const oStart = new Date(
               other.start.dateTime || other.start.date,
             ).getTime();
@@ -331,9 +301,12 @@ const CalendarService = {
           if (overlap && !force) {
             results.conflicts.push({
               index: events.indexOf(nev),
-              title: nev.title,
-              time: nev.start,
-              with: overlap.summary,
+              newEvent: nev.title,
+              newStart: nev.start,
+              newEnd: nev.end,
+              oldEvent: overlap.summary,
+              oldStart: overlap.start.dateTime || overlap.start.date,
+              oldEnd: overlap.end.dateTime || overlap.end.date,
             });
           } else {
             toAdd.push(nev);

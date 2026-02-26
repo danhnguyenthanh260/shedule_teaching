@@ -98,7 +98,9 @@ export const readSheet = async (
             tabName: tabName,
             startRow: startRow.toString(),
             idToken: idToken,
-            t: Date.now() // 🚀 Cache-buster: Force fresh data from proxy/GAS
+            t: Date.now(), // 🚀 Cache-buster: Force fresh data from proxy/GAS
+            // 🔐 Tự động thêm secret ở môi trường Local để hỗ trợ Vite Proxy
+            ...(import.meta.env.DEV ? { secret: import.meta.env.VITE_GAS_SECRET } : {})
         };
 
         const fetchUrl = `${API_BASE_URL}/api/readSheet?t=${Date.now()}`;
@@ -317,6 +319,100 @@ export const invalidateAdminCache = async (): Promise<void> => {
         logSuccess('Admin cache invalidated on server');
     } catch (error) {
         logError('Failed to invalidate admin cache');
+    }
+};
+
+export const setupNotifications = async (url: string, tabName?: string): Promise<{ status: string; message: string }> => {
+    try {
+        if (!url || !url.includes('spreadsheets')) {
+            throw new Error('URL Google Sheet không hợp lệ');
+        }
+
+        const currentUser = auth.currentUser;
+        const idToken = currentUser ? await currentUser.getIdToken() : undefined;
+
+        const payload = {
+            action: 'setupNotifications',
+            url: url,
+            tabName: tabName,
+            idToken: idToken,
+            // 🔐 Tự động thêm secret ở môi trường Local để hỗ trợ Vite Proxy
+            ...(import.meta.env.DEV ? { secret: import.meta.env.VITE_GAS_SECRET } : {})
+        };
+
+        const syncUrl = `${API_BASE_URL}/api/sync`;
+        logInfo(`Setting up notifications via proxy: ${syncUrl}`);
+
+        const response = await fetch(syncUrl, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify(payload)
+        });
+
+        if (!response.ok) {
+            throw new Error(`Lỗi Proxy API ${response.status}`);
+        }
+
+        const data = await response.json();
+        if (data.status === 'error') {
+            throw new Error(data.message || 'Lỗi từ Backend');
+        }
+
+        logSuccess('Notification setup successful');
+        return data;
+    } catch (error) {
+        const errorMessage = error instanceof Error ? error.message : 'Không thể thiết lập thông báo';
+        logError('Setup notifications error:', errorMessage);
+        throw new Error(errorMessage);
+    }
+};
+
+export const disableNotifications = async (url: string, tabName?: string): Promise<{ status: string; message: string }> => {
+    try {
+        if (!url || !url.includes('spreadsheets')) {
+            throw new Error('URL Google Sheet không hợp lệ');
+        }
+
+        const currentUser = auth.currentUser;
+        const idToken = currentUser ? await currentUser.getIdToken() : undefined;
+
+        const payload = {
+            action: 'disableNotifications',
+            url: url,
+            tabName: tabName,
+            idToken: idToken,
+            // 🔐 Tự động thêm secret ở môi trường Local để hỗ trợ Vite Proxy
+            ...(import.meta.env.DEV ? { secret: import.meta.env.VITE_GAS_SECRET } : {})
+        };
+
+        const syncUrl = `${API_BASE_URL}/api/sync`;
+        logInfo(`Disabling notifications via proxy: ${syncUrl}`);
+
+        const response = await fetch(syncUrl, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify(payload)
+        });
+
+        if (!response.ok) {
+            throw new Error(`Lỗi Proxy API ${response.status}`);
+        }
+
+        const data = await response.json();
+        if (data.status === 'error') {
+            throw new Error(data.message || 'Lỗi từ Backend');
+        }
+
+        logSuccess('Notification disable successful');
+        return data;
+    } catch (error) {
+        const errorMessage = error instanceof Error ? error.message : 'Không thể tắt thông báo';
+        logError('Disable notifications error:', errorMessage);
+        throw new Error(errorMessage);
     }
 };
 

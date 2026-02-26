@@ -64,6 +64,7 @@ export const LecturerDashboard: React.FC = () => {
   const [isFetchingData, setIsFetchingData] = useState(false);
   const [isMappingSettled, setIsMappingSettled] = useState(false);
   const [isSemestersLoading, setIsSemestersLoading] = useState(true);
+  const [isConfigExpanded, setIsConfigExpanded] = useState(false); // 📱 Mobile config visibility
 
   // Internal conflict modal state
   const [internalConflictOpen, setInternalConflictOpen] = useState(false);
@@ -464,7 +465,7 @@ export const LecturerDashboard: React.FC = () => {
   return (
     <div className="h-full flex flex-col gap-4 relative overflow-visible text-slate-900 bg-[#F1F5F9]">
       {/* Header Section: Steps 1 & 2 side-by-side (Approx 1/4 of screen) */}
-      <div className="flex-none flex flex-col lg:flex-row gap-3">
+      <div className={`flex-none flex flex-col lg:flex-row gap-3 overflow-hidden transition-all duration-500 ease-in-out ${!isConfigExpanded ? 'max-h-0 lg:max-h-[1000px] opacity-0 lg:opacity-100' : 'max-h-[1500px] opacity-100'}`}>
         {/* Step 1: Import */}
         <section className="lg:w-[42%] bg-white p-4 rounded-3xl border border-slate-200 flex flex-col relative z-[50] border-b-4 border-b-slate-200/50">
           <h2 className="text-[10px] font-bold text-[#F27024] mb-1.5 flex items-center gap-2 uppercase tracking-[0.2em] flex-none">
@@ -563,7 +564,7 @@ export const LecturerDashboard: React.FC = () => {
               <div className="bg-slate-50/50 rounded-2xl p-3 border border-slate-100 hover:border-orange-200 transition-colors">
                 <div className="flex items-center gap-2 mb-2">
                   <span className="w-5 h-5 bg-[#F27024] text-white text-[10px] font-bold rounded-lg flex items-center justify-center shadow-sm">1</span>
-                  <h4 className="text-[11px] font-bold text-slate-800 uppercase tracking-tight">Đồng bộ lịch</h4>
+                  <h4 className="text-[11px] font-bold text-slate-800 uppercase tracking-tight">Đồng bộ lên Google Calendar</h4>
                 </div>
                 <ul className="space-y-1.5 ml-1">
                   <li className="flex gap-2 text-[9px] text-slate-500 font-medium">
@@ -624,18 +625,38 @@ export const LecturerDashboard: React.FC = () => {
 
       {/* 🚀 STEP 3: PREMIUM CONTROL CENTER (Mobile-First) */}
       {(rows.length > 0 || (allRows.length > 0 && isPreviewMode)) && (
-        <section className="flex-1 min-h-0 bg-white/40 glass-panel p-4 sm:p-5 rounded-[2.5rem] flex flex-col shadow-2xl shadow-slate-200/40 mb-4 sm:mb-0 border-b-8 border-b-slate-200/10">
-            <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-5 mb-5 pb-5 border-b border-white/50">
-              <div className="flex items-center gap-4 shrink-0">
-                <div className="w-12 h-12 rounded-[1.25rem] fpt-gradient flex items-center justify-center text-white shadow-xl shadow-orange-200 lg:hidden transform hover:scale-105 transition-transform">
-                   <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10" /></svg>
+        <section className="flex-1 min-h-0 bg-white/40 glass-panel p-3 sm:p-5 rounded-2xl sm:rounded-[2.5rem] flex flex-col shadow-2xl shadow-slate-200/40 mb-2 sm:mb-0 border-b-4 sm:border-b-8 border-b-slate-200/10 transition-all duration-300">
+          {/* Mobile Config Toggle & Status */}
+          <div className="lg:hidden flex items-center justify-between mb-2 px-1">
+            <button
+              onClick={() => setIsConfigExpanded(!isConfigExpanded)}
+              className={`flex items-center gap-2 px-2.5 py-1.5 rounded-lg border transition-all font-bold text-[9px] uppercase tracking-wider ${isConfigExpanded ? 'bg-orange-50 text-[#F27024] border-orange-200' : 'bg-white text-slate-500 border-slate-200 shadow-sm'}`}
+            >
+              <svg className={`w-3 h-3 transition-transform duration-300 ${isConfigExpanded ? 'rotate-180' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M19 9l-7 7-7-7" />
+              </svg>
+              {isConfigExpanded ? 'Thu gọn' : 'Thiết lập & Cấu hình'}
+            </button>
+            
+            <div className="flex items-center gap-2 bg-white/50 px-2 py-1 rounded-lg border border-white/50">
+              <div className="w-1 h-1 rounded-full bg-emerald-500 animate-pulse" />
+              <span className="text-[8px] font-extrabold text-slate-400 uppercase tracking-widest leading-none">
+                {rows.length} mục
+              </span>
+            </div>
+          </div>
+
+          <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-2 sm:gap-5 mb-2 sm:mb-5 pb-2 sm:pb-5 border-b border-white/50">
+            <div className="flex items-center gap-3 shrink-0">
+                <div className="w-10 h-10 rounded-xl fpt-gradient flex items-center justify-center text-white shadow-lg shadow-orange-200 lg:hidden transform hover:scale-105 transition-transform">
+                   <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10" /></svg>
                 </div>
                 <div>
-                  <h2 className="text-base sm:text-lg font-black text-slate-800 tracking-tight leading-tight">Kiểm tra & Đồng bộ</h2>
-                  <div className="flex items-center gap-2 mt-1">
-                    <div className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse shadow-[0_0_8px_rgba(16,185,129,0.4)]" />
-                    <p className="text-[10px] sm:text-[11px] text-slate-400 font-extrabold uppercase tracking-widest leading-none">
-                      {isPreviewMode ? 'Chế độ xem trước' : `${filteredRows.length} mục sẵn sàng`}
+                  <h2 className="text-sm sm:text-lg font-black text-slate-800 tracking-tight leading-tight">Kiểm tra & Đồng bộ</h2>
+                  <div className="flex items-center gap-2 mt-0.5">
+                    <div className="w-1 h-1 rounded-full bg-emerald-500 animate-pulse" />
+                    <p className="text-[9px] sm:text-[11px] text-slate-400 font-extrabold uppercase tracking-widest leading-none">
+                      {isPreviewMode ? 'Xem trước' : `${filteredRows.length} mục sẵn sàng`}
                     </p>
                   </div>
                 </div>
@@ -648,19 +669,19 @@ export const LecturerDashboard: React.FC = () => {
                   </div>
                 )}
                 
-                <div className="flex items-center gap-3 w-full max-w-sm min-w-0 group">
+                <div className="flex items-center gap-2 w-full max-w-sm min-w-0 group">
                   {/* 🔍 Premium Glass Search Bar */}
                   <div className="relative flex-1 min-w-0">
-                    <div className="absolute left-4 top-3 text-slate-300 group-focus-within:text-[#F27024] transition-colors pointer-events-none">
-                      <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
+                    <div className="absolute left-3 top-2.5 text-slate-300 group-focus-within:text-[#F27024] transition-colors pointer-events-none">
+                      <svg className="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
                         <circle cx="11" cy="11" r="8"></circle>
                         <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
                       </svg>
                     </div>
                     <input
                       type="text"
-                      placeholder="Tìm tên giảng viên, phòng..."
-                      className="w-full pl-11 pr-4 py-3 bg-white border-2 border-slate-100 rounded-2xl text-[13px] font-black text-slate-700 placeholder:text-slate-300 focus:border-[#F27024]/30 focus:shadow-xl focus:shadow-orange-100/50 outline-none transition-all cursor-text"
+                      placeholder="Tìm kiếm..."
+                      className="w-full pl-9 pr-3 py-2 bg-white border-2 border-slate-100 rounded-xl text-[12px] font-black text-slate-700 placeholder:text-slate-300 focus:border-[#F27024]/30 focus:shadow-xl focus:shadow-orange-100/50 outline-none transition-all cursor-text"
                       value={personFilter}
                       onChange={(e) => {
                         setPersonFilter(e.target.value);
@@ -676,19 +697,20 @@ export const LecturerDashboard: React.FC = () => {
                   />
                 </div>
               </div>
+            </div>
  
-                <div className="flex items-center gap-3 w-full sm:w-auto shrink-0 border-t sm:border-t-0 pt-4 sm:pt-0 border-white/50">
+                <div className="flex items-center gap-2 w-full sm:w-auto shrink-0 border-t sm:border-t-0 pt-3 sm:pt-0 mb-4 sm:mb-0 border-white/50">
                   {/* 🚨 NÚT ĐỒNG BỘ CHÍNH - Premium Gradient Overlay */}
-                  <div className="relative group flex-1 sm:flex-initial">
+                  <div className="relative group flex-[2] sm:flex-initial">
                     <button
                       onClick={() => handleSync(false)}
                       disabled={syncing || clearing || selectedIds.size === 0}
-                      className="w-full h-12 px-6 fpt-gradient text-white rounded-[1.25rem] font-black hover:brightness-110 disabled:bg-slate-100 disabled:text-slate-300 disabled:border-slate-100 border border-transparent transition-all shadow-2xl shadow-orange-200/60 flex items-center justify-center gap-2 text-[11px] uppercase tracking-widest active:scale-95"
+                      className="w-full h-10 sm:h-12 px-4 sm:px-6 fpt-gradient text-white rounded-xl sm:rounded-[1.25rem] font-black hover:brightness-110 disabled:bg-slate-100 disabled:text-slate-300 disabled:border-slate-100 border border-transparent transition-all shadow-xl shadow-orange-200/40 flex items-center justify-center gap-2 text-[10px] sm:text-[11px] uppercase tracking-widest active:scale-95"
                     >
                       {syncing ? (
-                        <div className="w-4 h-4 border-3 border-white/30 border-t-white rounded-full animate-spin" />
+                        <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
                       ) : (
-                        <>Đồng bộ ({selectedIds.size})</>
+                        <>Đồng bộ lên Google Calendar ({selectedIds.size})</>
                       )}
                     </button>
                   </div>
@@ -700,10 +722,10 @@ export const LecturerDashboard: React.FC = () => {
                     <button
                       onClick={() => setIsConfirmingClear(!isConfirmingClear)}
                       disabled={syncing || clearing}
-                      className={`w-full h-12 px-3 sm:px-4 rounded-[1.25rem] font-black transition-all text-[11px] uppercase tracking-wider flex items-center justify-center gap-2 border shadow-lg active:scale-95 ${
+                      className={`w-full h-10 sm:h-12 px-2 sm:px-4 rounded-xl sm:rounded-[1.25rem] font-black transition-all text-[10px] uppercase tracking-wider flex items-center justify-center gap-2 border shadow-lg active:scale-95 ${
                         isConfirmingClear 
                         ? 'bg-rose-50 text-rose-500 border-rose-200 ring-4 ring-rose-50' 
-                        : 'bg-white text-slate-400 border-slate-100 hover:bg-rose-50 hover:text-rose-500 hover:border-rose-200'
+                        : 'bg-white text-slate-400 border-slate-100 hover:bg-rose-50 hover:text-rose-500 hover:border-rose-200 shadow-sm'
                       }`}
                       title="Xóa dữ liệu cũ"
                     >
@@ -711,10 +733,10 @@ export const LecturerDashboard: React.FC = () => {
                         <div className="w-4 h-4 border-2 border-rose-500/30 border-t-rose-500 rounded-full animate-spin" />
                       ) : (
                         <>
-                          <svg className="w-5 h-5 group-hover:rotate-12 transition-transform" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <svg className="w-4 h-4 sm:w-5 sm:h-5 group-hover:rotate-12 transition-transform" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
                           </svg>
-                          <span className="hidden sm:inline-block">Xóa lịch ({effectiveIsReview ? 'Review' : 'Hội đồng'})</span>
+                          <span className="hidden sm:inline-block">Xóa lịch</span>
                         </>
                       )}
                     </button>
@@ -753,7 +775,6 @@ export const LecturerDashboard: React.FC = () => {
                     )}
                   </div>
                 </div>
-          </div>
 
           <div className="flex-1 min-h-0 overflow-hidden rounded-xl border border-slate-50 bg-slate-100">
             {(!isRestored || loading || mappingLoading || isFetchingData || !isMappingSettled || isSemestersLoading) ? (

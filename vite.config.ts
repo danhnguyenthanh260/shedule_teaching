@@ -15,12 +15,22 @@ export default defineConfig(({ mode }) => {
           target: env.GAS_EXEC_URL || env.VITE_BACKEND_URL || 'https://script.google.com',
           changeOrigin: true,
           followRedirects: true,
+          secure: true,
           rewrite: (path) => {
-            const newPath = path.replace(/^\/api\/[^/?]+/, '');
-            console.log(`🔄 Proxy: ${path} -> ${newPath}`);
+            // 🚀 Rewrite /api/readSheet?t=123 to ?t=123
+            const newPath = path.replace(/^\/api\/[^/?]+/, '') || '/';
             return newPath;
           },
-          secure: true,
+          // 🛡️ Monitor proxy errors
+          configure: (proxy, _options) => {
+            proxy.on('error', (err, _req, res) => {
+              console.error('❌ Proxy error:', err);
+              if (!res.headersSent) {
+                res.writeHead(500, { 'Content-Type': 'application/json' });
+              }
+              res.end(JSON.stringify({ error: 'Proxy failed', message: err.message }));
+            });
+          },
         },
       },
     },

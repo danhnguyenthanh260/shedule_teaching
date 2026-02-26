@@ -3,14 +3,23 @@ import { useNavigate } from 'react-router-dom';
 import { useFirebase } from '../context/FirebaseContext';
 import { configService, SemesterConfig } from '../services/configService';
 import { database } from '../config/firebase';
-import { SUPER_ADMIN_EMAIL, isSuperAdmin, isAdmin } from '../config/admin';
-import { ref, set, push, onValue, remove } from 'firebase/database';
-import { readSheet, invalidateAdminCache, getTabNames } from '../services/appsScriptService';
-import Layout from '../components/Layout';
+import { SUPER_ADMIN_EMAIL, isSuperAdmin } from '../config/admin';
+import { ref, set, push, onValue, remove, update } from 'firebase/database';
+import * as XLSX from 'xlsx';
+import { readSheet, invalidateAdminCache, getTabNames, setupNotifications, disableNotifications } from '../services/appsScriptService';
 import { MappingTool } from '../components/MappingTool';
 import { ColumnMapping } from '../types';
 import { generateHeaderOptions } from '../utils/headerUtils';
 import useDebounce from '../hooks/useDebounce';
+
+// New Modular Components
+import { AdminLayout } from '../components/admin/AdminLayout';
+import { SemesterForm } from '../components/admin/SemesterForm';
+import { SemesterList } from '../components/admin/SemesterList';
+import { AdminWhitelistManager } from '../components/admin/AdminWhitelistManager';
+import { LecturerWhitelistManager } from '../components/admin/LecturerWhitelistManager';
+
+type AdminTab = 'semesters' | 'admins' | 'lecturers';
 
 export const AdminPage: React.FC = () => {
     const { user, logout } = useFirebase();
@@ -19,7 +28,12 @@ export const AdminPage: React.FC = () => {
     const [adminWhitelist, setAdminWhitelist] = useState<Record<string, string>>({});
     const [newAdminEmail, setNewAdminEmail] = useState('');
     const [loading, setLoading] = useState(false);
+    const [lecturerWhitelist, setLecturerWhitelist] = useState<Record<string, { name: string; code: string; email: string }>>({});
+    const [newLecturer, setNewLecturer] = useState({ name: '', code: '', email: '' });
+    const [editingLecturerKey, setEditingLecturerKey] = useState<string | null>(null);
+    const [confirmingDeleteLecturerKey, setConfirmingDeleteLecturerKey] = useState<string | null>(null);
     const [toastMessage, setToastMessage] = useState<string | null>(null);
+    const lecturerFileInputRef = React.useRef<HTMLInputElement>(null);
 
     // Inline Confirmation state
     const [confirmingDeleteSemesterId, setConfirmingDeleteSemesterId] = useState<string | null>(null);
@@ -33,7 +47,8 @@ export const AdminPage: React.FC = () => {
         dateFormat: 'dd/MM/yyyy' as import('../types').DateFormat,
         sheetType: 'council' as 'review' | 'council',
         tabName: '',
-        mapping: {} as ColumnMapping
+        mapping: {} as ColumnMapping,
+        notifEnabled: false
     });
 
     const [sheetHeaders, setSheetHeaders] = useState<{ label: string; value: number }[]>([]);
@@ -61,6 +76,7 @@ export const AdminPage: React.FC = () => {
     useEffect(() => {
         fetchConfigs();
         fetchAdminWhitelist();
+        fetchLecturerWhitelist();
     }, []);
 
     // ✅ Effect to auto-fetch tabs when URL changes
@@ -136,7 +152,8 @@ export const AdminPage: React.FC = () => {
                 sheetType: newSemester.sheetType,
                 tabName: newSemester.tabName,
                 mapping: newSemester.mapping || {},
-                createdAt: existingSemester?.createdAt || Date.now()
+                createdAt: existingSemester?.createdAt || Date.now(),
+                notifEnabled: newSemester.notifEnabled || false
             });
 
             setToastMessage(editMode ? '✅ Cập nhật học kỳ thành công!' : '✅ Tạo học kỳ thành công!');
@@ -155,7 +172,8 @@ export const AdminPage: React.FC = () => {
                 dateFormat: 'dd/MM/yyyy', 
                 sheetType: 'council',
                 tabName: '',
-                mapping: {}
+                mapping: {},
+                notifEnabled: false
             });
 
             fetchConfigs();
@@ -197,7 +215,8 @@ export const AdminPage: React.FC = () => {
             dateFormat: semester.dateFormat || 'dd/MM/yyyy',
             sheetType: semester.sheetType || 'council',
             tabName: semester.tabName || '',
-            mapping: semester.mapping || {}
+            mapping: semester.mapping || {},
+            notifEnabled: semester.notifEnabled || false
         });
         setEditMode(semester.id);
         setSheetHeaders([]);
@@ -334,390 +353,298 @@ export const AdminPage: React.FC = () => {
         }
     };
 
-    const userProfile = useMemo(() => ({
-        name: user?.displayName || 'Admin',
-        email: user?.email || '',
-        image: user?.photoURL || `https://ui-avatars.com/api/?name=${user?.displayName || 'A'}&background=random`
-    }), [user]);
+    const fetchLecturerWhitelist = () => {
+        const lecturerRef = ref(database, 'lecturer_whitelist');
+        onValue(lecturerRef, (snapshot) => {
+            const data = snapshot.val();
+            setLecturerWhitelist(data || {});
+        });
+    };
+
+    const handleAddLecturer = async (e: React.FormEvent) => {
+        e.preventDefault();
+        if (!newLecturer.name || !newLecturer.code) {
+            setToastMessage('❌ Vui lòng điền Họ tên và Mã giảng viên');
+            setTimeout(() => setToastMessage(null), 3000);
+            return;
+        }
+
+        const generatedEmail = `${newLecturer.code.trim()}@fe.edu.vn`.toLowerCase();
+        
+        try {
+            setLoading(true);
+            if (editingLecturerKey) {
+                const lecturerRef = ref(database, `lecturer_whitelist/${editingLecturerKey}`);
+                await update(lecturerRef, {
+                    ...newLecturer,
+                    email: generatedEmail
+                });
+                setToastMessage('✅ Đã cập nhật thông tin giảng viên');
+            } else {
+                const lecturerRef = ref(database, 'lecturer_whitelist');
+                const newRef = push(lecturerRef);
+                await set(newRef, {
+                    ...newLecturer,
+                    email: generatedEmail
+                });
+                setToastMessage('✅ Đã thêm giảng viên mới');
+            }
+            
+            setNewLecturer({ name: '', code: '', email: '' });
+            setEditingLecturerKey(null);
+            setTimeout(() => setToastMessage(null), 3000);
+        } catch (err: any) {
+            setToastMessage('❌ Lỗi: ' + err.message);
+            setTimeout(() => setToastMessage(null), 5000);
+        } finally {
+            setLoading(false);
+        }
+    };
+
+    const handleDeleteLecturer = async (key: string) => {
+        try {
+            const lecturerRef = ref(database, `lecturer_whitelist/${key}`);
+            await remove(lecturerRef);
+            setToastMessage('✅ Đã xóa giảng viên');
+            setTimeout(() => setToastMessage(null), 3000);
+        } catch (err: any) {
+            setToastMessage('❌ Lỗi khi xóa: ' + err.message);
+            setTimeout(() => setToastMessage(null), 5000);
+        } finally {
+            setConfirmingDeleteLecturerKey(null);
+        }
+    };
+
+    const handleLecturerExcelImport = (e: React.ChangeEvent<HTMLInputElement>) => {
+        const file = e.target.files?.[0];
+        if (!file) return;
+
+        const reader = new FileReader();
+        reader.onload = async (evt) => {
+            try {
+                setLoading(true);
+                const bstr = evt.target?.result;
+                const wb = XLSX.read(bstr, { type: 'binary' });
+                const wsname = wb.SheetNames[0];
+                const ws = wb.Sheets[wsname];
+                const data = XLSX.utils.sheet_to_json(ws, { header: 1 }) as any[][];
+
+                if (data.length < 2) throw new Error('File Excel trống hoặc thiếu dữ liệu');
+
+                const headers = data[0].map(h => String(h || "").toLowerCase().trim());
+                
+                // Map columns
+                const nameIdx = headers.findIndex(h => h.includes('họ tên') || h.includes('name') || h.includes('giảng viên'));
+                const codeIdx = headers.findIndex(h => h.includes('mã gv') || h.includes('mã giảng viên') || h.includes('code') || h.includes('mã nv'));
+                const emailIdx = headers.findIndex(h => h.includes('email') || h.includes('gmail') || h.includes('thư điện tử') || h.includes('mail edu'));
+
+                if (nameIdx === -1 || codeIdx === -1) {
+                    throw new Error('Không nhận diện được các cột bắt buộc: Họ tên, Mã GV. Vui lòng kiểm tra tiêu đề file.');
+                }
+
+                const lecturersToAdd: any[] = [];
+                for (let i = 1; i < data.length; i++) {
+                    const row = data[i];
+                    const name = String(row[nameIdx] || "").trim();
+                    const code = String(row[codeIdx] || "").trim();
+                    
+                    // Email logic: Use Excel email if exists, otherwise generate from code
+                    let email = "";
+                    if (emailIdx !== -1 && row[emailIdx]) {
+                        email = String(row[emailIdx]).trim().toLowerCase();
+                    } else if (code) {
+                        email = `${code}@fe.edu.vn`.toLowerCase();
+                    }
+
+                    if (name && code && email) {
+                        lecturersToAdd.push({ name, code, email });
+                    }
+                }
+
+                if (lecturersToAdd.length === 0) throw new Error('Không tìm thấy dữ liệu giảng viên hợp lệ trong file');
+
+                const updates: any = {};
+                lecturersToAdd.forEach(lec => {
+                    const newKey = push(ref(database, 'lecturer_whitelist')).key;
+                    if (newKey) updates[`lecturer_whitelist/${newKey}`] = lec;
+                });
+
+                await update(ref(database), updates);
+                setToastMessage(`✅ Đã import thành công ${lecturersToAdd.length} giảng viên!`);
+                setTimeout(() => setToastMessage(null), 5000);
+            } catch (err: any) {
+                setToastMessage('❌ Lỗi Import: ' + err.message);
+                setTimeout(() => setToastMessage(null), 5000);
+            } finally {
+                setLoading(false);
+                if (lecturerFileInputRef.current) lecturerFileInputRef.current.value = '';
+            }
+        };
+        reader.readAsBinaryString(file);
+    };
+
+    const [activeTab, setActiveTab] = useState<AdminTab>('semesters');
+
+
+    const getPageTitle = () => {
+        switch (activeTab) {
+            case 'semesters': return 'Quản lý học kỳ';
+            case 'admins': return 'Quản trị viên';
+            case 'lecturers': return 'Quản lý Giảng viên';
+            default: return 'Admin Dashboard';
+        }
+    };
+
+    const getPageDescription = () => {
+        switch (activeTab) {
+            case 'semesters': return 'Cấu hình Google Sheet và ánh xạ cột';
+            case 'admins': return 'Danh sách email có quyền quản trị';
+            case 'lecturers': return 'Danh sách giảng viên được phép truy cập';
+            default: return 'Cấu hình hệ thống';
+        }
+    };
+
+    const handleSetupNotifications = async (url: string, tabName?: string, semesterId?: string, currentStatus?: boolean) => {
+        try {
+            setLoading(true);
+            
+            if (currentStatus) {
+                const res = await disableNotifications(url, tabName);
+                if (semesterId) {
+                    const configRef = ref(database, `configs/${semesterId}`);
+                    await update(configRef, { notifEnabled: false });
+                }
+                setToastMessage(`✅ ${res.message}`);
+            } else {
+                const res = await setupNotifications(url, tabName);
+                if (semesterId) {
+                    const configRef = ref(database, `configs/${semesterId}`);
+                    await update(configRef, { notifEnabled: true });
+                }
+                setToastMessage(`✅ ${res.message}`);
+            }
+            
+            fetchConfigs(); // Refresh UI
+            setTimeout(() => setToastMessage(null), 5000);
+        } catch (err: any) {
+            setToastMessage(`❌ ${err.message}`);
+            setTimeout(() => setToastMessage(null), 5000);
+        } finally {
+            setLoading(false);
+        }
+    };
 
     if (!user) return null;
 
     return (
-        <Layout user={userProfile} userId={user.uid} onLogout={logout}>
-            <div className="flex flex-col gap-6 max-w-7xl mx-auto pb-10">
-                {/* Admin Header */}
-                <div className="flex items-center justify-between">
-                    <div className="flex items-center gap-4">
-                        <button 
-                            onClick={() => navigate('/')}
-                            className="p-2 bg-white hover:bg-slate-50 rounded-xl transition-all text-slate-400 hover:text-[#F27024] shadow-sm border border-slate-100"
-                            title="Quay lại Dashboard"
-                        >
-                            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M10 19l-7-7m0 0l7-7m-7 7h18" />
-                            </svg>
-                        </button>
-                        <div>
-                            <h2 className="text-xl font-bold text-slate-800 leading-none">Admin Dashboard</h2>
-                            <p className="text-xs font-bold text-slate-400 uppercase tracking-widest mt-1">Cấu hình hệ thống</p>
+        <AdminLayout 
+            activeTab={activeTab} 
+            onTabChange={setActiveTab}
+            title={getPageTitle()}
+            description={getPageDescription()}
+        >
+            <div className="h-full space-y-10 pb-20">
+
+                {activeTab === 'semesters' && (
+                    <div className="flex flex-col lg:flex-row gap-8 items-start h-full min-h-0">
+                        {/* Left Column: Form (Expanded) */}
+                        <div className="flex-1 w-full h-full overflow-y-auto pr-2 scrollbar-thin scrollbar-thumb-slate-200">
+                            <SemesterForm 
+                                formData={newSemester}
+                                onFormChange={(data) => setNewSemester({ ...newSemester, ...data })}
+                                onSubmit={handleCreateSemester}
+                                onAutoFetch={handleAutoFetchColumns}
+                                onTabRefresh={() => {
+                                    if (newSemester.sheetUrl) {
+                                        getTabNames(newSemester.sheetUrl).then(setAvailableTabs);
+                                    }
+                                }}
+                                isFetchingTabs={isFetchingTabs}
+                                availableTabs={availableTabs}
+                                sheetHeaders={sheetHeaders}
+                                loading={loading}
+                                editMode={editMode}
+                                onCancelEdit={() => {
+                                    setEditMode(null);
+                                    setNewSemester({ 
+                                        semester: '', sheetUrl: '', startRow: '1', columns: '', 
+                                        dateFormat: 'dd/MM/yyyy', sheetType: 'council', tabName: '', mapping: {} 
+                                    });
+                                }}
+                            />
+                        </div>
+                        
+                        {/* Right Column: List (Narrowed & Height Limited) */}
+                        <div className="w-full lg:w-[350px] xl:w-[400px] shrink-0 flex flex-col h-[650px] bg-white rounded-2xl border border-slate-100 shadow-sm overflow-hidden min-h-0">
+                            <div className="p-4 border-b border-slate-50 flex items-center justify-between bg-slate-50/30 shrink-0">
+                                <h3 className="text-[10px] font-bold text-slate-500 uppercase tracking-widest flex items-center gap-2">
+                                    <span className="w-2 h-2 rounded-full bg-orange-400"></span>
+                                    Danh sách ({sortedSemesters.length})
+                                </h3>
+                                <div className="text-[9px] text-slate-400 font-medium italic">
+                                    Cuộn ({Math.max(0, sortedSemesters.length - 4)}+)
+                                </div>
+                            </div>
+                            
+                            <div className="flex-1 overflow-y-auto p-4 scrollbar-thin scrollbar-thumb-slate-200 hover:scrollbar-thumb-orange-200">
+                                <SemesterList 
+                                    semesters={sortedSemesters}
+                                    onEdit={handleEditSemester}
+                                    onDelete={handleDeleteSemester}
+                                    confirmingDeleteId={confirmingDeleteSemesterId}
+                                    setConfirmingDeleteId={setConfirmingDeleteSemesterId}
+                                    onSetupNotifications={handleSetupNotifications}
+                                />
+                            </div>
                         </div>
                     </div>
-                </div>
+                )}
 
-                {/* Global Status Banner (Only for persistent errors) */}
+                {activeTab === 'admins' && isSuperAdmin(user.email) && (
+                    <AdminWhitelistManager 
+                        adminEmails={adminWhitelist}
+                        newAdminEmail={newAdminEmail}
+                        onNewAdminEmailChange={setNewAdminEmail}
+                        onAddAdmin={handleAddAdmin}
+                        onDeleteAdmin={handleDeleteAdmin}
+                        confirmingDeleteKey={confirmingDeleteAdminKey}
+                        setConfirmingDeleteKey={setConfirmingDeleteAdminKey}
+                    />
+                )}
 
-
-                <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
-                    {/* Column 1: Config Form */}
-                    <div className="lg:col-span-12 xl:col-span-7 space-y-6">
-                        <section className="bg-white p-6 rounded-3xl border border-slate-100 shadow-sm">
-                            <h2 className="text-[10px] font-bold text-[#F27024] mb-4 flex items-center gap-2 uppercase tracking-[0.2em]">
-                                <span className="w-4 h-4 bg-[#F27024] text-white rounded-md flex items-center justify-center text-[10px] shadow-sm font-bold">A</span>
-                                {editMode ? 'Sửa học kỳ' : 'Tạo học kỳ mới'}
-                            </h2>
-
-                            <form onSubmit={handleCreateSemester} className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                                <div className="md:col-span-2">
-                                    <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-1.5 ml-1">Tên học kỳ</label>
-                                    <input
-                                        type="text"
-                                        placeholder="Ví dụ: Spring 2026"
-                                        className="w-full px-4 py-3 bg-slate-50 border border-slate-100 rounded-2xl focus:ring-2 focus:ring-[#F27024] outline-none text-sm font-bold transition-all focus:bg-white"
-                                        value={newSemester.semester}
-                                        onChange={(e) => setNewSemester({ ...newSemester, semester: e.target.value })}
-                                        required
-                                    />
-                                </div>
-
-                                <div className="md:col-span-2">
-                                    <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-1.5 ml-1">Google Sheet URL</label>
-                                    <input
-                                        type="url"
-                                        placeholder="https://docs.google.com/spreadsheets/d/..."
-                                        className="w-full px-4 py-3 bg-slate-50 border border-slate-100 rounded-2xl focus:ring-2 focus:ring-[#F27024] outline-none text-sm font-bold transition-all focus:bg-white"
-                                        value={newSemester.sheetUrl}
-                                        onChange={(e) => setNewSemester({ ...newSemester, sheetUrl: e.target.value })}
-                                        required
-                                    />
-                                </div>
-
-                                <div>
-                                    <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-1.5 ml-1">Dòng bắt đầu</label>
-                                    <input
-                                        type="number"
-                                        min="1"
-                                        className="w-full px-4 py-3 bg-slate-50 border border-slate-100 rounded-2xl focus:ring-2 focus:ring-[#F27024] outline-none text-sm font-bold transition-all focus:bg-white"
-                                        value={newSemester.startRow}
-                                        onChange={(e) => setNewSemester({ ...newSemester, startRow: e.target.value })}
-                                        required
-                                    />
-                                </div>
-
-                                <div>
-                                    <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-1.5 ml-1">Định dạng Ngày mẫu</label>
-                                    <select
-                                        className="w-full px-4 py-3 bg-slate-50 border border-slate-100 rounded-2xl focus:ring-2 focus:ring-[#F27024] outline-none text-sm font-bold transition-all focus:bg-white"
-                                        value={newSemester.dateFormat}
-                                        onChange={(e) => setNewSemester({ ...newSemester, dateFormat: e.target.value as any })}
-                                    >
-                                        <option value="dd/MM/yyyy">VN (27/01/2026)</option>
-                                        <option value="MM/dd/yyyy">US (01/27/2026)</option>
-                                        <option value="yyyy-MM-dd">ISO (2026-01-27)</option>
-                                        <option value="dd-MM-yyyy">VN2 (27-01-2026)</option>
-                                    </select>
-                                </div>
-
-                                <div>
-                                    <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-1.5 ml-1">Loại hình chấm thi</label>
-                                    <select
-                                        className="w-full px-4 py-3 bg-slate-50 border border-slate-100 rounded-2xl focus:ring-2 focus:ring-[#F27024] outline-none text-sm font-bold transition-all focus:bg-white"
-                                        value={newSemester.sheetType}
-                                        onChange={(e) => setNewSemester({ ...newSemester, sheetType: e.target.value as any })}
-                                    >
-                                        <option value="council">Chế độ chấm hội đồng</option>
-                                        <option value="review">Chế độ chấm review</option>
-                                    </select>
-                                </div>
-
-                                <div>
-                                    <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-1.5 ml-1 flex items-center justify-between">
-                                        <span>Tên Tab (Sheet Name)</span>
-                                        <div className="flex items-center gap-2">
-                                            {isFetchingTabs && <span className="animate-pulse text-orange-400 text-[9px]">Đang tìm...</span>}
-                                            <button 
-                                                type="button"
-                                                onClick={() => {
-                                                    if (newSemester.sheetUrl) {
-                                                        const fetchTabs = async () => {
-                                                            try {
-                                                                setIsFetchingTabs(true);
-                                                                const tabs = await getTabNames(newSemester.sheetUrl);
-                                                                setAvailableTabs(tabs);
-                                                            } catch (err) {
-                                                                setToastMessage('❌ Lỗi: ' + (err as any).message);
-                                                                setTimeout(() => setToastMessage(null), 3000);
-                                                            } finally {
-                                                                setIsFetchingTabs(false);
-                                                            }
-                                                        };
-                                                        fetchTabs();
-                                                    }
-                                                }}
-                                                className="hover:text-[#F27024] p-0.5 transition-colors"
-                                                title="Tải lại danh sách Tab"
-                                            >
-                                                <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
-                                                </svg>
-                                            </button>
-                                        </div>
-                                    </label>
-                                    
-                                    {availableTabs.length > 0 ? (
-                                        <div className="relative group">
-                                            <select
-                                                className="w-full px-4 py-3 bg-white border-2 border-orange-100 rounded-2xl focus:ring-2 focus:ring-[#F27024] outline-none text-sm font-bold transition-all shadow-sm appearance-none cursor-pointer hover:border-orange-300"
-                                                value={newSemester.tabName}
-                                                onChange={(e) => {
-                                                    const val = e.target.value;
-                                                    setNewSemester(prev => ({ ...prev, tabName: val }));
-                                                    // 🚀 Tự động fetch lại cột khi đổi tab
-                                                    if (val) {
-                                                        setTimeout(() => handleAutoFetchColumns(), 100);
-                                                    }
-                                                }}
-                                                required
-                                            >
-                                                <option value="">-- Chọn Sheet --</option>
-                                                {availableTabs.map(tab => (
-                                                    <option key={tab} value={tab}>{tab}</option>
-                                                ))}
-                                            </select>
-                                            <div className="absolute right-4 top-1/2 -translate-y-1/2 pointer-events-none text-orange-400 group-focus-within:rotate-180 transition-transform">
-                                                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M19 9l-7 7-7-7" />
-                                                </svg>
-                                            </div>
-                                        </div>
-                                    ) : (
-                                        <input
-                                            type="text"
-                                            placeholder="Ví dụ: Sheet1"
-                                            className="w-full px-4 py-3 bg-slate-50 border border-slate-100 rounded-2xl focus:ring-2 focus:ring-[#F27024] outline-none text-sm font-bold transition-all focus:bg-white"
-                                            value={newSemester.tabName}
-                                            onChange={(e) => setNewSemester({ ...newSemester, tabName: e.target.value })}
-                                            required
-                                        />
-                                    )}
-                                </div>
-
-                                <div className="md:col-span-2">
-                                    <div className="flex items-center justify-between mb-1.5 ml-1">
-                                        <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Danh sách cột</label>
-                                        <button
-                                            type="button"
-                                            onClick={handleAutoFetchColumns}
-                                            disabled={loading || !newSemester.sheetUrl}
-                                            className="text-[10px] font-bold text-[#F27024] hover:underline flex items-center gap-1 uppercase tracking-widest"
-                                        >
-                                            <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" /></svg>
-                                            Tải tự động
-                                        </button>
-                                    </div>
-                                    <textarea
-                                        placeholder="Mã đề tài, Tên đề tài, GVHD, Ngày, Giờ, Địa điểm..."
-                                        className="w-full px-4 py-3 bg-slate-50 border border-slate-100 rounded-2xl focus:ring-2 focus:ring-[#F27024] outline-none text-sm font-bold transition-all focus:bg-white resize-none"
-                                        rows={3}
-                                        value={newSemester.columns}
-                                        onChange={(e) => setNewSemester({ ...newSemester, columns: e.target.value })}
-                                        required
-                                    />
-                                </div>
-
-                                {sheetHeaders.length > 0 ? (
-                                    <div className="md:col-span-2 p-5 bg-orange-50/50 rounded-[2rem] border border-orange-100 mb-4 shadow-sm shadow-orange-50 animate-in fade-in slide-in-from-top-4 duration-500">
-                                        <MappingTool 
-                                            headers={sheetHeaders}
-                                            headerRowOptions={[]}
-                                            headerRowIndex={0}
-                                            onHeaderRowChange={() => {}}
-                                            columnMap={newSemester.mapping}
-                                            setColumnMap={(map) => setNewSemester({ ...newSemester, mapping: map })}
-                                        />
-                                        <p className="text-[9px] text-[#F27024] font-bold mt-3 uppercase tracking-widest ml-1 flex items-center gap-2">
-                                            <span className="w-1.5 h-1.5 bg-[#F27024] rounded-full animate-pulse" />
-                                            Admin: Thiết lập các cột này để Giảng viên không cần phải làm nữa.
-                                        </p>
-                                    </div>
-                                ) : (
-                                    newSemester.sheetUrl && (
-                                        <div className="md:col-span-2 p-4 bg-slate-50 border border-dashed border-slate-200 rounded-2xl flex flex-col items-center justify-center gap-2 opacity-80">
-                                            <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Nhấn "Tải tự động" để cấu hình cột</p>
-                                        </div>
-                                    )
-                                )}
-
-                                <div className="md:col-span-2 flex gap-3 pt-2">
-                                    <button
-                                        type="submit"
-                                        disabled={loading}
-                                        className="flex-1 py-4 bg-[#F27024] text-white rounded-2xl font-bold hover:bg-orange-600 transition-all shadow-lg shadow-orange-100 disabled:bg-slate-100 disabled:text-slate-400 disabled:shadow-none uppercase tracking-widest text-xs"
-                                    >
-                                        {loading ? 'Đang xử lý...' : (editMode ? 'Cập nhật học kỳ' : 'Lưu học kỳ mới')}
-                                    </button>
-                                    {editMode && (
-                                        <button
-                                            type="button"
-                                            onClick={() => {
-                                                setEditMode(null);
-                                                setNewSemester({ semester: '', sheetUrl: '', startRow: '1', columns: '', dateFormat: 'dd/MM/yyyy', sheetType: 'council' });
-                                            }}
-                                            className="px-6 py-4 bg-slate-100 text-slate-600 rounded-2xl font-bold hover:bg-slate-200 transition-all uppercase tracking-widest text-xs"
-                                        >
-                                            Hủy
-                                        </button>
-                                    )}
-                                </div>
-                            </form>
-                        </section>
-                    </div>
-
-                    {/* Column 2: Whitelist & List */}
-                    <div className="lg:col-span-12 xl:col-span-5 space-y-6">
-                        {/* Whitelist (Super Admin Only) */}
-                        {isSuperAdmin(user.email) && (
-                            <section className="bg-white p-6 rounded-3xl border border-slate-100 shadow-sm">
-                                <h2 className="text-[10px] font-bold text-[#F27024] mb-4 flex items-center gap-2 uppercase tracking-[0.2em]">
-                                    <span className="w-4 h-4 bg-[#F27024] text-white rounded-md flex items-center justify-center text-[10px] shadow-sm font-bold">B</span>
-                                    Quản lý Admin
-                                </h2>
-                                <form onSubmit={handleAddAdmin} className="flex gap-2 mb-4">
-                                    <input
-                                        type="email"
-                                        placeholder="Email admin mới..."
-                                        className="flex-1 px-4 py-2.5 bg-slate-50 border border-slate-100 rounded-2xl focus:ring-2 focus:ring-[#F27024] outline-none text-sm font-bold transition-all focus:bg-white"
-                                        value={newAdminEmail}
-                                        onChange={(e) => setNewAdminEmail(e.target.value)}
-                                        required
-                                    />
-                                    <button
-                                        type="submit"
-                                        className="px-4 py-2.5 bg-[#F27024] text-white rounded-2xl font-bold hover:bg-orange-600 transition-all shadow-md shadow-orange-50 text-[10px] uppercase tracking-widest"
-                                    >
-                                        Thêm
-                                    </button>
-                                </form>
-                                <div className="space-y-2 max-h-40 overflow-y-auto scrollbar-thin">
-                                    {Object.entries(adminWhitelist).map(([key, email]) => (
-                                        <div key={key} className="flex items-center justify-between p-3 bg-slate-50/50 rounded-xl border border-slate-100 group">
-                                            <span className="text-xs font-bold text-slate-700">{email}</span>
-                                            {confirmingDeleteAdminKey === key ? (
-                                                <div className="flex items-center gap-1 animate-in fade-in slide-in-from-right-2 duration-300">
-                                                    <button
-                                                        onClick={() => handleDeleteAdmin(key)}
-                                                        className="px-2.5 py-1 bg-rose-500 text-white rounded-lg text-[9px] font-bold uppercase tracking-wider hover:bg-rose-600 transition-all active:scale-95 shadow-sm"
-                                                    >
-                                                        Xóa
-                                                    </button>
-                                                    <button
-                                                        onClick={() => setConfirmingDeleteAdminKey(null)}
-                                                        className="px-2.5 py-1 bg-white text-slate-400 border border-slate-100 rounded-lg text-[9px] font-bold uppercase tracking-wider hover:text-slate-600 transition-all"
-                                                    >
-                                                        Hủy
-                                                    </button>
-                                                </div>
-                                            ) : (
-                                                <button
-                                                    onClick={() => setConfirmingDeleteAdminKey(key)}
-                                                    className="p-1.5 text-slate-300 hover:text-rose-500 hover:bg-rose-50 rounded-lg transition-all"
-                                                >
-                                                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg>
-                                                </button>
-                                            )}
-                                        </div>
-                                    ))}
-                                    {Object.keys(adminWhitelist).length === 0 && (
-                                        <div className="text-center py-4 bg-slate-50/50 rounded-2xl border border-dashed border-slate-200">
-                                            <p className="text-[10px] font-bold text-slate-400 m-0 uppercase tracking-widest">Chưa có admin phụ</p>
-                                        </div>
-                                    )}
-                                </div>
-                            </section>
-                        )}
-
-                        {/* List Semesters */}
-                        <section className="bg-white p-6 rounded-3xl border border-slate-100 shadow-sm flex flex-col min-h-0">
-                            <h2 className="text-[10px] font-bold text-[#F27024] mb-4 flex items-center gap-2 uppercase tracking-[0.2em]">
-                                <span className="w-4 h-4 bg-[#F27024] text-white rounded-md flex items-center justify-center text-[10px] shadow-sm font-bold">C</span>
-                                Danh sách học kỳ ({Object.keys(semesters).length})
-                            </h2>
-                            <div className="space-y-3 overflow-y-auto max-h-[400px] scrollbar-thin pr-1 pb-4">
-                                {sortedSemesters.map((sem) => (
-                                    <div key={sem.id} className="p-4 border border-slate-100 bg-slate-50/30 rounded-2xl hover:border-orange-200 transition-all group">
-                                        <div className="flex items-start justify-between mb-2">
-                                            <h3 className="text-sm font-bold text-slate-900 group-hover:text-[#F27024] transition-colors">{sem.semester}</h3>
-                                                {confirmingDeleteSemesterId === sem.id ? (
-                                                    <div className="flex items-center gap-1 animate-in fade-in slide-in-from-right-2 duration-300">
-                                                        <button
-                                                            onClick={() => handleDeleteSemester(sem.id)}
-                                                            className="px-3 py-1 bg-rose-500 text-white rounded-lg text-[9px] font-bold uppercase tracking-wider hover:bg-rose-600 transition-all active:scale-95 shadow-sm"
-                                                        >
-                                                            Xác nhận xóa
-                                                        </button>
-                                                        <button
-                                                            onClick={() => setConfirmingDeleteSemesterId(null)}
-                                                            className="px-3 py-1 bg-white text-slate-400 border border-slate-100 rounded-lg text-[9px] font-bold uppercase tracking-wider hover:text-slate-600 transition-all"
-                                                        >
-                                                            Hủy
-                                                        </button>
-                                                    </div>
-                                                ) : (
-                                                    <div className="flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-                                                        <button
-                                                            onClick={() => handleEditSemester(sem)}
-                                                            className="p-1.5 text-slate-400 hover:text-blue-500 hover:bg-blue-50 rounded-lg"
-                                                        >
-                                                            <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" /></svg>
-                                                        </button>
-                                                        <button
-                                                            onClick={() => setConfirmingDeleteSemesterId(sem.id)}
-                                                            className="p-1.5 text-slate-400 hover:text-rose-500 hover:bg-rose-50 rounded-lg"
-                                                        >
-                                                            <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg>
-                                                        </button>
-                                                    </div>
-                                                )}
-                                        </div>
-                                        <div className="space-y-1 mt-1 border-t border-slate-100 pt-3">
-                                            <div className="flex items-center gap-2 text-[10px] text-slate-500 font-bold uppercase tracking-wider">
-                                                <span className="text-[#F27024]">➔</span> Dòng bắt đầu: {sem.startRow}
-                                            </div>
-                                            <div className="flex items-start gap-2 text-[10px] text-slate-500 font-bold uppercase tracking-wider leading-relaxed">
-                                                <span className="text-blue-500">➔</span> Cột: <span className="normal-case text-slate-600 line-clamp-2">{sem.columns}</span>
-                                            </div>
-                                            <div className="flex items-center gap-2 text-[10px] text-slate-500 font-bold uppercase tracking-wider truncate">
-                                                <span className="text-emerald-500">➔</span> Tab: <span className="normal-case text-slate-600 font-bold">{sem.tabName || 'Sheet mặc định'}</span>
-                                            </div>
-                                            <div className="flex items-center gap-2 text-[10px] text-slate-500 font-bold uppercase tracking-wider truncate">
-                                                <span className="text-emerald-500">➔</span> Sheet ID: <span className="normal-case text-slate-400 italic">...{sem.sheetUrl.slice(-15)}</span>
-                                            </div>
-                                        </div>
-                                    </div>
-                                ))}
-                            </div>
-                        </section>
-                    </div>
-                </div>
+                {activeTab === 'lecturers' && (
+                    <LecturerWhitelistManager 
+                        lecturers={lecturerWhitelist}
+                        newLecturer={newLecturer}
+                        onNewLecturerChange={(data) => setNewLecturer({ ...newLecturer, ...data })}
+                        onAddLecturer={handleAddLecturer}
+                        onDeleteLecturer={handleDeleteLecturer}
+                        onEditLecturer={(key, data) => {
+                            setNewLecturer(data);
+                            setEditingLecturerKey(key);
+                            window.scrollTo({ top: 0, behavior: 'smooth' });
+                        }}
+                        onImportExcel={handleLecturerExcelImport}
+                        confirmingDeleteKey={confirmingDeleteLecturerKey}
+                        setConfirmingDeleteKey={setConfirmingDeleteLecturerKey}
+                        editingKey={editingLecturerKey}
+                        onCancelEdit={() => {
+                            setEditingLecturerKey(null);
+                            setNewLecturer({ name: '', code: '', email: '' });
+                        }}
+                        fileInputRef={lecturerFileInputRef}
+                        loading={loading}
+                    />
+                )}
             </div>
-
 
             {/* Global Toast */}
             {toastMessage && (
-                <div className={`fixed bottom-6 right-6 ${toastMessage.startsWith('❌') ? 'bg-rose-950 border-rose-800' : 'bg-slate-900 border-slate-800'} border text-white px-5 py-3 rounded-2xl shadow-2xl animate-in fade-in slide-in-from-bottom-6 duration-500 flex items-center gap-3 z-[1000]`}>
-                    <div className={`w-2 h-2 ${toastMessage.startsWith('❌') ? 'bg-rose-500 shadow-[0_0_8px_rgba(244,63,94,0.5)]' : 'bg-emerald-400 shadow-[0_0_8px_rgba(52,211,153,0.5)]'} rounded-full animate-pulse`} />
-                    <span className="text-xs font-bold tracking-tight">{toastMessage}</span>
+                <div className={`fixed bottom-10 right-10 ${toastMessage.startsWith('❌') ? 'bg-rose-950 border-rose-800' : 'bg-slate-900 border-slate-800'} border text-white px-8 py-5 rounded-[2rem] shadow-2xl animate-in fade-in slide-in-from-bottom-10 duration-700 flex items-center gap-4 z-[1000] backdrop-blur-xl bg-opacity-90`}>
+                    <div className={`w-3 h-3 ${toastMessage.startsWith('❌') ? 'bg-rose-500 shadow-[0_0_15px_rgba(244,63,94,0.6)]' : 'bg-emerald-400 shadow-[0_0_15px_rgba(52,211,153,0.6)]'} rounded-full animate-pulse`} />
+                    <span className="text-sm font-black tracking-tight">{toastMessage}</span>
                 </div>
             )}
-        </Layout>
+        </AdminLayout>
     );
 };

@@ -123,7 +123,7 @@ export class GoogleSyncService {
   }
 
   extractSheetId(url: string): string | null {
-    const match = url.match(/\/spreadsheets\/d\/([a-zA-Z0-9-_]+)/);
+    const match = url.match(/\/d\/([a-zA-Z0-9-_]+)/);
     return match ? match[1] : null;
   }
 
@@ -327,8 +327,8 @@ export class GoogleSyncService {
       
       const J_INDEX = 9;
 
-      // Strategy 1: Identical Triplets (e.g., "Code", "Code", "Code")
-      const tripleLabels = Object.keys(labels).filter(l => labels[l].filter(idx => idx >= J_INDEX).length === 3);
+      // Strategy 1: Identical Sets (e.g., "Code" appearing 3+ times)
+      const tripleLabels = Object.keys(labels).filter(l => labels[l].filter(idx => idx >= J_INDEX).length >= 3);
       if (tripleLabels.length > 0) {
         const bestLabel = tripleLabels.find(l => l.includes('code') || l.includes('reviewer') || l.includes('gv') || l.includes('slot')) || tripleLabels[0];
         return labels[bestLabel].filter(idx => idx >= J_INDEX).sort((a, b) => a - b);
@@ -357,7 +357,7 @@ export class GoogleSyncService {
       return low.includes('reviewer 1') || low.includes('gv 1') || (low.includes('reviewer') && low.includes('1'));
     });
     const suspectReview = !!isDataMau || ((tab || "").toLowerCase().includes("review") && hasReviewerHeaders);
-    const isTripleMode = suspectReview && blockStartIndices.length === 3;
+    const isTripleMode = suspectReview && blockStartIndices.length >= 3;
     const finalBlockStarts = isTripleMode ? blockStartIndices : [0]; 
 
     // 🔍 SILENT CODE DETECTION: Find the column index for "Code/ID" automatically

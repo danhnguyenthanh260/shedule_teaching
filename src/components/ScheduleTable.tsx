@@ -79,28 +79,28 @@ export const ScheduleTable: React.FC<ScheduleTableProps> = ({
 
   return (
     <div className="h-full overflow-auto scrollbar-thin scrollbar-thumb-slate-200 scrollbar-track-transparent rounded-t-3xl border-t border-slate-100 bg-[#F8FAFC]">
-      {/* 📱 MOBILE VIEW: PREMIUM CARDS */}
-      <div className="block lg:hidden p-4 space-y-4">
-        {/* Glassmorphism Mobile Header */}
-        <div className="sticky top-0 z-30 -mt-4 -mx-4 mb-4 px-6 py-4 glass-panel flex items-center justify-between shadow-sm">
+      {/* 📱 MOBILE VIEW: PREMIUM CARDS (Compact) */}
+      <div className="block lg:hidden p-3 space-y-3">
+        {/* Solid Mobile Header (Sticky) - prevents content bleed through */}
+        <div className="sticky top-0 z-30 -mt-3 -mx-3 mb-4 px-5 py-3.5 bg-white/98 backdrop-blur-md border-b border-slate-200/60 flex items-center justify-between shadow-[0_4px_12px_-4px_rgba(0,0,0,0.08)]">
            <div className="flex items-center gap-3">
              <div className="relative flex items-center justify-center">
                 <input
                     ref={headerCheckboxRef}
                     type="checkbox"
-                    className="w-6 h-6 rounded-lg border-slate-300 text-[#F27024] focus:ring-[#F27024] cursor-pointer transition-all"
+                    className="w-5 h-5 rounded border-slate-300 text-[#F27024] focus:ring-[#F27024] cursor-pointer transition-all"
                     checked={selectedIds.size === displayRows.length && displayRows.length > 0}
                     onChange={onToggleAll}
                 />
              </div>
              <div className="flex flex-col">
                 <span className="text-[10px] font-black text-slate-800 uppercase tracking-widest leading-none">Chọn tất cả</span>
-                <span className="text-[10px] font-bold text-slate-400 uppercase tracking-tighter mt-1">{displayRows.length} sự kiện</span>
+                <span className="text-[9px] font-bold text-slate-400 uppercase tracking-tighter mt-0.5">{displayRows.length} sự kiện</span>
              </div>
            </div>
-           <div className="flex items-center gap-2 bg-orange-50 px-3 py-1.5 rounded-2xl border border-orange-100/50">
-              <div className="w-1.5 h-1.5 rounded-full bg-[#F27024] animate-pulse" />
-              <span className="text-[10px] font-black text-[#F27024] uppercase tracking-tighter">Đã chọn: {selectedIds.size}</span>
+           <div className="flex items-center gap-2 bg-orange-50 px-2.5 py-1 rounded-xl border border-orange-100/50">
+              <div className="w-1 h-1 rounded-full bg-[#F27024] animate-pulse" />
+              <span className="text-[9px] font-black text-[#F27024] uppercase tracking-tighter">Đã chọn: {selectedIds.size}</span>
            </div>
         </div>
 
@@ -108,61 +108,61 @@ export const ScheduleTable: React.FC<ScheduleTableProps> = ({
           <div 
             key={row.id}
             onClick={() => onToggleSelect(row.id)}
-            className={`premium-card relative p-5 rounded-[2rem] border transition-all active:scale-[0.97] cursor-pointer ${
+            className={`premium-card relative p-2.5 rounded-2xl border transition-all active:scale-[0.98] cursor-pointer ${
               selectedIds.has(row.id)
-                ? 'premium-card-selected border-orange-200 ring-2 ring-orange-100/50'
+                ? 'premium-card-selected border-orange-200 ring-1 ring-orange-100/50'
                 : 'border-white shadow-sm hover:shadow-md'
             }`}
           >
-            {/* Quick Select Checkbox (Top-Right Gradient) */}
-            <div className={`absolute top-0 right-0 p-4 transition-opacity ${selectedIds.has(row.id) ? 'opacity-100' : 'opacity-40'}`}>
-               <div className={`w-6 h-6 rounded-full flex items-center justify-center border-2 ${selectedIds.has(row.id) ? 'bg-[#F27024] border-[#F27024]' : 'border-slate-200'}`}>
+            {/* Quick Select Checkbox (Compact) - Adjusted position to avoid room overlap */}
+            <div className={`absolute -top-1.5 -right-1.5 p-1 transition-opacity z-10 ${selectedIds.has(row.id) ? 'opacity-100 scale-100' : 'opacity-0 scale-50'}`}>
+               <div className={`w-5 h-5 rounded-full flex items-center justify-center border shadow-sm ${selectedIds.has(row.id) ? 'bg-[#F27024] border-white' : 'border-slate-200 bg-white'}`}>
                   {selectedIds.has(row.id) && (
-                    <svg className="w-4 h-4 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M5 13l4 4L19 7" /></svg>
+                    <svg className="w-3.5 h-3.5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="4" d="M5 13l4 4L19 7" /></svg>
                   )}
                </div>
             </div>
 
-            <div className="flex flex-col gap-4">
-              {/* Card Meta: Date & Room */}
-              <div className="flex items-center gap-4">
-                <div className="flex items-center gap-2.5 bg-slate-50 px-3 py-2 rounded-2xl border border-slate-100/50">
-                   <div className="w-6 h-6 rounded-lg fpt-gradient flex items-center justify-center text-white shadow-sm">
-                      <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" /></svg>
+            <div className="flex flex-col gap-2">
+              {/* Card Meta: Date & Room (Compact) */}
+              <div className="flex items-center gap-2 pr-4">
+                <div className="flex items-center gap-1.5 bg-slate-50 px-1.5 py-1 rounded-lg border border-slate-100/50">
+                   <div className="w-4 h-4 rounded-md fpt-gradient flex items-center justify-center text-white shadow-sm">
+                      <svg className="w-2.5 h-2.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" /></svg>
                    </div>
-                   <span className="text-[11px] font-black text-slate-700 uppercase tracking-tight">{row.dateRaw || row.date}</span>
+                   <span className="text-[9px] font-black text-slate-700 uppercase tracking-tight">{row.dateRaw || row.date}</span>
                 </div>
 
-                <div className="flex items-center gap-2 px-3 py-2 bg-blue-50/50 rounded-2xl border border-blue-100/30">
-                   <svg className="w-3.5 h-3.5 text-blue-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M17.657 16.657L13.414 20.9a1.998 1.998 0 01-2.827 0l-4.244-4.243a8 8 0 1111.314 0z" /><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M15 11a3 3 0 11-6 0 3 3 0 016 0z" /></svg>
-                   <span className="text-[10px] font-black text-blue-600/80 uppercase tracking-widest">{row.locationRaw || row.location || 'PHÒNG TRỐNG'}</span>
+                <div className="flex items-center gap-1.5 px-1.5 py-1 bg-blue-50/50 rounded-lg border border-blue-100/30">
+                   <svg className="w-2.5 h-2.5 text-blue-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M17.657 16.657L13.414 20.9a1.998 1.998 0 01-2.827 0l-4.244-4.243a8 8 0 1111.314 0z" /><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M15 11a3 3 0 11-6 0 3 3 0 016 0z" /></svg>
+                   <span className="text-[8px] font-black text-blue-600/80 uppercase tracking-widest">{row.locationRaw || row.location || 'PHÒNG TRỐNG'}</span>
                 </div>
               </div>
 
-              {/* Main Info Section */}
-              <div className="space-y-1.5 py-1">
-                 <h4 className="text-[17px] font-black text-slate-800 leading-tight tracking-tight">
+              {/* Main Info Section (Compact) */}
+              <div className="space-y-0.5">
+                 <h4 className="text-[13px] font-black text-slate-800 leading-tight tracking-tight">
                    {row.personRaw || row.person}
                  </h4>
                  <div className="flex items-center gap-2 overflow-hidden">
-                    <p className="text-xs text-slate-400 font-bold uppercase tracking-wide truncate">
+                    <p className="text-[9px] text-slate-400 font-bold uppercase tracking-wide truncate">
                       {row.task || 'Nhiệm vụ chưa xác định'}
                     </p>
                     {row.groupName && row.groupName !== row.person && (
-                       <span className="shrink-0 px-2 py-0.5 bg-orange-100 text-[#F27024] text-[8px] font-black rounded-lg uppercase tracking-tighter">
+                       <span className="shrink-0 px-1 py-0.5 bg-orange-100 text-[#F27024] text-[7px] font-extrabold rounded-md uppercase tracking-tighter">
                          {row.groupName}
                        </span>
                     )}
                  </div>
               </div>
 
-              {/* Footer Divider & Time */}
-              <div className="pt-4 border-t border-slate-100 flex items-center justify-between">
-                 <div className="flex items-center gap-2">
-                    <div className="w-2 h-2 rounded-full bg-emerald-500 shadow-[0_0_8px_rgba(16,185,129,0.5)]" />
-                    <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Thời gian dự kiến</span>
+              {/* Footer Divider & Time (Compact) */}
+              <div className="pt-2 border-t border-slate-100 flex items-center justify-between">
+                 <div className="flex items-center gap-1.5">
+                    <div className="w-1 h-1 rounded-full bg-emerald-500" />
+                    <span className="text-[8px] font-bold text-slate-400 uppercase tracking-widest">Dự kiến</span>
                  </div>
-                 <div className="px-4 py-2 bg-slate-900 text-white rounded-[1.25rem] text-[12px] font-black shadow-lg shadow-slate-200">
+                 <div className="px-2 py-1 bg-slate-900 text-white rounded-lg text-[9px] font-black shadow-md shadow-slate-200">
                     {row.timeRaw || (row.startTime?.includes('T') ? (row.startTime.split('T')[1].substring(0, 5) + ' - ' + row.endTime.split('T')[1].substring(0, 5)) : 'N/A')}
                  </div>
               </div>
@@ -170,7 +170,7 @@ export const ScheduleTable: React.FC<ScheduleTableProps> = ({
           </div>
         ))}
         {/* Bottom padding for better scroll feel */}
-        <div className="h-10" />
+        <div className="h-6" />
       </div>
 
       {/* 🖥️ DESKTOP VIEW: TABLE */}

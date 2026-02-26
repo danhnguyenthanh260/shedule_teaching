@@ -110,9 +110,8 @@ export const useSheetParser = ({
         return low.includes('reviewer 1') || low.includes('gv 1') || (low.includes('reviewer') && low.includes('1'));
       }).length >= 1;
 
-      const looksLikeReview = (tabName || "").toLowerCase().includes('review') || hasReviewerHeaders;
-      
-      const isReviewMode = !!isDataMauParam || looksLikeReview; 
+      // 🎯 PRIORITY: 1. Explicit Parameter, 2. Tab Name, 3. Header Detection
+      const isReviewMode = !!isDataMauParam || (tabName || "").toLowerCase().includes('review') || hasReviewerHeaders; 
 
       let normalized: RowNormalized[] = [];
       if (isReviewMode) {

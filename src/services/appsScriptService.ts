@@ -28,10 +28,11 @@ export interface SyncPayload {
     events: CalendarEvent[];
     userEmail?: string;
     secret?: string; // Required for direct GAS calls (local proxy)
-    force?: boolean; 
     googleAccessToken?: string; 
+    force?: boolean; 
     conflictMode?: 'insert' | 'keep_old' | 'replace'; 
-    sheetType?: 'council' | 'review'; // 🚀 NEW: For automated cleanup isolation
+    sheetType?: 'council' | 'review'; 
+    skipCleanup?: boolean; // 🚀 NEW: For chunked sync
 }
 
 export interface ClearPayload {
@@ -40,7 +41,8 @@ export interface ClearPayload {
     calendarName: string;
     secret?: string;
     googleAccessToken?: string; 
-    sheetType?: 'council' | 'review'; // 🚀 NEW
+    sheetType?: 'council' | 'review'; 
+    sendUpdates?: boolean; // 📧 NEW: Gửi mail thông báo thu hồi
 }
 
 export interface SyncResponse {
@@ -120,13 +122,16 @@ export const readSheet = async (
             throw new Error(`Lỗi Proxy API ${response.status}: ${response.statusText}`);
         }
 
-        const data = await response.json().catch(async () => {
-            const text = await response.text();
-            if (text.includes('<!DOCTYPE') || text.includes('<html')) {
+        const responseText = await response.text();
+        let data;
+        try {
+            data = JSON.parse(responseText);
+        } catch (parseErr) {
+            if (responseText.includes('<!DOCTYPE') || responseText.includes('<html')) {
                 throw new Error('Google Apps Script trả về trang HTML (có thể là yêu cầu đăng nhập hoặc lỗi 404). Vui lòng đảm bảo bạn đã triển khai (Deploy) script ở chế độ "Anyone" và dùng URL "exec".');
             }
-            throw new Error(`Không thể parse JSON từ Apps Script. Nội dung: ${text.substring(0, 50)}...`);
-        });
+            throw new Error(`Không thể parse JSON từ Apps Script. Nội dung: ${responseText.substring(0, 50)}...`);
+        }
 
         if (data.status === 'error') {
             throw new Error(`${data.message || 'Lỗi không xác định từ Apps Script'}`);
@@ -166,74 +171,96 @@ export const syncEventsToCalendar = async (
         }
 
         const currentUser = auth.currentUser;
-        if (!currentUser) {
-            throw new Error('User not authenticated. Please login first.');
-        }
+        if (!currentUser) throw new Error('User not authenticated. Please login first.');
 
         const idToken = await currentUser.getIdToken();
-        if (!idToken) {
-            throw new Error('Failed to get authentication token');
-        }
-
         const targetCalendar = calendarName || getCalendarName();
 
-        const payload: SyncPayload = {
-            idToken,
-            calendarName: targetCalendar,
-            events,
-            userEmail: currentUser.email || undefined,
-            force: force,
-            googleAccessToken: googleAccessToken,
-            conflictMode: conflictMode,
-            sheetType: sheetType,
-            // 🔐 Tự động thêm secret ở môi trường Local để hỗ trợ Vite Proxy
-            ...(import.meta.env.DEV ? { secret: import.meta.env.VITE_GAS_SECRET } : {})
+        // 🚀 CHUNKING LOGIC: Chia thành các đợt 30 mục để tránh Vercel/Proxy Timeout (10s)
+        const CHUNK_SIZE = 30;
+        const totalChunks = Math.ceil(events.length / CHUNK_SIZE);
+        
+        let combinedResult: SyncResponse = {
+            status: 'success',
+            message: 'Đang xử lý...',
+            data: { total: events.length, success: 0, failed: 0, skipped: 0, errors: [] },
+            timestamp: new Date().toISOString(),
+            executionTime: '0ms'
         };
 
-        const syncUrl = `${API_BASE_URL}/api/sync`;
-        logInfo(`Syncing events via proxy: ${syncUrl}`);
-        const response = await fetch(syncUrl, {
-            method: 'POST',
-            headers: addCSRFTokenToHeaders({
-                'Content-Type': 'application/json',
-                'Authorization': `Bearer ${idToken}`
-            }),
-            body: JSON.stringify(payload),
-        });
+        logInfo(`🚀 Bắt đầu đồng bộ ${events.length} mục (Chia làm ${totalChunks} đợt)`);
 
-        const data = await response.json().catch(async () => {
-            const bodyText = await response.text().catch(() => '');
-            if (bodyText.includes('<!DOCTYPE') || bodyText.includes('<html')) {
-                throw new Error('Google Apps Script trả về trang HTML (có thể do lỗi Deploy hoặc Script bị treo). Vui lòng kiểm tra Apps Script Dashboard.');
+        for (let i = 0; i < totalChunks; i++) {
+            const chunk = events.slice(i * CHUNK_SIZE, (i + 1) * CHUNK_SIZE);
+            const isFirstChunk = i === 0;
+            const isLastChunk = i === totalChunks - 1;
+            
+            // 💡 Quan trọng: Chỉ đợt ĐẦU TIÊN là được phép Cleanup (xóa lịch thừa).
+            // Các đợt sau phải skipCleanup=true để không xóa dữ liệu của đợt trước.
+            const skipCleanup = !isFirstChunk;
+
+            logInfo(`📦 Gửi đợt ${i + 1}/${totalChunks} (${chunk.length} mục)...`);
+
+            const payload: SyncPayload = {
+                idToken,
+                calendarName: targetCalendar,
+                events: chunk,
+                userEmail: currentUser.email || undefined,
+                force: force,
+                googleAccessToken: googleAccessToken,
+                conflictMode: conflictMode,
+                sheetType: sheetType,
+                skipCleanup: skipCleanup,
+                ...(import.meta.env.DEV ? { secret: import.meta.env.VITE_GAS_SECRET } : {})
+            };
+
+            const response = await fetch(`${API_BASE_URL}/api/sync`, {
+                method: 'POST',
+                headers: addCSRFTokenToHeaders({
+                    'Content-Type': 'application/json',
+                    'Authorization': `Bearer ${idToken}`
+                }),
+                body: JSON.stringify(payload),
+            });
+
+            const responseText = await response.text();
+            let data;
+            try {
+                data = JSON.parse(responseText);
+            } catch (parseErr) {
+                if (responseText.includes('<!DOCTYPE') || responseText.includes('<html')) {
+                    throw new Error('Google Apps Script trả về trang HTML (có thể do lỗi Deploy hoặc Script bị treo). Vui lòng kiểm tra Apps Script Dashboard.');
+                }
+                if (!responseText.trim()) {
+                    throw new Error('Apps Script trả về phản hồi rỗng (Empty Response). Điều này có thể do Script bị Crash hoặc hết thời gian thực thi.');
+                }
+                throw new Error(`SyntaxError: Không thể parse JSON. Nội dung: ${responseText.substring(0, 100)}...`);
             }
-            if (!bodyText.trim()) {
-                throw new Error('Apps Script trả về phản hồi rỗng (Empty Response). Điều này có thể do Script bị Crash hoặc hết thời gian thực thi.');
+
+            if (response.status === 409) return data; // Conflicts
+
+            if (!response.ok || data.status === 'error') {
+                throw new Error(data.message || data.error || `Lỗi ở đợt ${i+1}`);
             }
-            throw new Error(`SyntaxError: Không thể parse JSON. Nội dung: ${bodyText.substring(0, 100)}...`);
-        });
 
-        // HANDLE CONFLICTS (409) - Return data to let the hook handle the conflicts state
-        if (response.status === 409) {
-            return data;
-        }
-
-        if (!response.ok) {
-            logError(`Sync returned status ${response.status}: ${response.statusText}`);
-            throw new Error(data.message || data.error || `Proxy error! status: ${response.status}`);
-        }
-
-        if (!response.ok) {
-            throw new Error(data.message || data.error || `Proxy error! status: ${response.status}`);
-        }
-
-        if (data.status === 'error') {
-            throw new Error(data.message || 'Unknown error from backend');
+            // Cộng dồn kết quả
+            const d = data.data || {};
+            combinedResult.data!.success += (d.success || 0);
+            combinedResult.data!.failed += (d.failed || 0);
+            combinedResult.data!.skipped += (d.skipped || 0);
+            if (d.errors) combinedResult.data!.errors = [...(combinedResult.data!.errors || []), ...d.errors];
+            if (d.conflicts) combinedResult.data!.conflicts = [...(combinedResult.data!.conflicts || []), ...d.conflicts];
+            
+            if (isLastChunk) {
+                combinedResult.message = `Đã đồng bộ xong ${events.length} mục. Thành công: ${combinedResult.data!.success}`;
+                combinedResult.data!.calendarName = d.calendarName;
+            }
         }
 
         logSuccess('Sync successful');
-        return data;
+        return combinedResult;
     } catch (error) {
-        const errorMessage = error instanceof Error ? error.message : 'Failed to sync events';
+        const errorMessage = error instanceof Error ? error.message : 'Failed to sync';
         logError('Sync error:', errorMessage);
         throw new Error(errorMessage);
     }
@@ -245,7 +272,8 @@ export const syncEventsToCalendar = async (
 export const clearCalendar = async (
     calendarName?: string,
     googleAccessToken?: string,
-    sheetType?: 'council' | 'review'
+    sheetType?: 'council' | 'review',
+    sendUpdates: boolean = false
 ): Promise<SyncResponse> => {
     try {
         const currentUser = auth.currentUser;
@@ -259,6 +287,7 @@ export const clearCalendar = async (
             calendarName: targetCalendar,
             googleAccessToken: googleAccessToken,
             sheetType: sheetType,
+            sendUpdates: sendUpdates,
             // 🔐 Tự động thêm secret ở môi trường Local để hỗ trợ Vite Proxy
             ...(import.meta.env.DEV ? { secret: import.meta.env.VITE_GAS_SECRET } : {})
         };
@@ -275,16 +304,19 @@ export const clearCalendar = async (
             body: JSON.stringify(payload),
         });
 
-        const data = await response.json().catch(async () => {
-            const bodyText = await response.text().catch(() => '');
-            if (bodyText.includes('<!DOCTYPE') || bodyText.includes('<html')) {
+        const responseText = await response.text();
+        let data;
+        try {
+            data = JSON.parse(responseText);
+        } catch (parseErr) {
+            if (responseText.includes('<!DOCTYPE') || responseText.includes('<html')) {
                 throw new Error('Google Apps Script trả về trang HTML khi Xóa lịch. Vui lòng kiểm tra lại Deploy của Script.');
             }
-            if (!bodyText.trim()) {
-                throw new Error('Dữ liệu trả về rỗng khi Xóa lịch. Có thể do Apps Script bị lỗi hoặc trả về 204 No Content không hợp lệ.');
+            if (!responseText.trim()) {
+                throw new Error('Dữ kết quả trả về rỗng khi Xóa lịch. Có thể do Apps Script bị lỗi hoặc trả về 204 No Content không hợp lệ.');
             }
-            throw new Error(`SyntaxError (Clear): Không thể parse JSON. Nội dung: ${bodyText.substring(0, 100)}...`);
-        });
+            throw new Error(`SyntaxError (Clear): Không thể parse JSON. Nội dung: ${responseText.substring(0, 100)}...`);
+        }
 
         if (!response.ok) {
             throw new Error(data.message || data.error || `Proxy error! status: ${response.status}`);
@@ -466,11 +498,13 @@ export const convertRowsToEvents = (rows: Array<{
     startTime: string;
     endTime: string;
     location?: string;
+    resources?: string[];
 }>): CalendarEvent[] => {
     return rows.map((row) => ({
         title: row.task,
         start: row.startTime,
         end: row.endTime,
         location: row.location || '',
+        resources: row.resources || [],
     }));
 };

@@ -133,10 +133,12 @@ export const useCalendarSync = ({ accessToken, reauthorizeGoogle }: UseCalendarS
           start: isoStart || new Date().toISOString(),
           end: isoEnd || new Date().toISOString(),
           location: r.location || '',
+          guests: r.email || '', // 📧 NEW: Hỗ trợ truyền email khách mời
           resources: [r.person, r.location].filter(Boolean) as string[],
-          description: `Đồng bộ từ FPT Scheduler\nGV: ${r.person || 'N/A'}\nNhiệm vụ: ${r.task || 'N/A'}\nPhòng: ${r.location || 'N/A'}\n[ID: ${r.id}]`,
+          description: r.raw?.description || `Đồng bộ từ FPT Scheduler\nGV: ${r.person || 'N/A'}\nNhiệm vụ: ${r.task || 'N/A'}\nPhòng: ${r.location || 'N/A'}\n[ID: ${r.id}]`,
           signature: r.id,
-          colorId: r.isGrouped ? '' : '11' // 🎨 Tomato (Red) for Councils, Default for Reviews
+          colorId: r.isGrouped ? '' : '11', // 🎨 Tomato (Red) for Councils, Default for Reviews
+          subEvents: r.subEvents // 📧 NEW: Truyền danh sách các buổi lẻ
         };
       });
 
@@ -224,7 +226,7 @@ export const useCalendarSync = ({ accessToken, reauthorizeGoogle }: UseCalendarS
     }
   }, [accessToken]);
 
-  const clearAppEvents = useCallback(async (sheetType?: 'council' | 'review', isRetry: boolean = false) => {
+  const clearAppEvents = useCallback(async (sheetType?: 'council' | 'review', sendUpdates: boolean = false, isRetry: boolean = false) => {
     setClearing(true);
     setSyncError(null);
     setSyncResult(null);
@@ -241,7 +243,7 @@ export const useCalendarSync = ({ accessToken, reauthorizeGoogle }: UseCalendarS
     }
 
     try {
-      const res: any = await clearCalendar(undefined, currentToken || '', sheetType);
+      const res: any = await clearCalendar(undefined, currentToken || '', sheetType, sendUpdates);
       const deletedCount = res.data?.deletedCount ?? res.deletedCount ?? 0;
       
       const result: SyncResult = {

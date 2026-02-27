@@ -133,23 +133,39 @@ export const FirebaseProvider: React.FC<{ children: React.ReactNode }> = ({ chil
 
   // Handle Admin Whitelist
   useEffect(() => {
+    logInfo('Initializing Whitelist Watcher...');
+    
+    // 🛡️ FAIL-SAFE: If Firebase doesn't respond in 5 seconds, unblock the UI
+    const timeoutId = setTimeout(() => {
+      if (isWhitelistLoading) {
+        console.warn('⚠️ Whitelist loading timed out after 5s. Unblocking UI as fall-safe.');
+        setIsWhitelistLoading(false);
+      }
+    }, 5000);
+
     const adminWhitelistRef = ref(database, 'admin_whitelist');
     const unsubscribe = onValue(adminWhitelistRef, (snapshot) => {
+      console.log('📡 Whitelist data received:', snapshot.val());
       const data = snapshot.val();
       let list: string[] = [];
       if (data && typeof data === 'object') {
         list = Object.values(data).map((v: any) => String(v).trim().toLowerCase());
       }
       setAdminList(list);
-      setDynamicAdmins(list); // 🔄 Sync with static helper for Legacy/Layout components
+      setDynamicAdmins(list);
       setIsWhitelistLoading(false);
-      logInfo('Admin Whitelist Synced in Context');
+      clearTimeout(timeoutId);
+      logInfo('Admin Whitelist Synced');
     }, (error) => {
-      console.error('Whitelist fetch error:', error);
-      setIsWhitelistLoading(false); // Unblock UI even if fetch fails
+      console.error('❌ Whitelist fetch error:', error);
+      setIsWhitelistLoading(false);
+      clearTimeout(timeoutId);
     });
 
-    return () => unsubscribe();
+    return () => {
+      unsubscribe();
+      clearTimeout(timeoutId);
+    };
   }, []);
 
   // Handle Lecturer Whitelist

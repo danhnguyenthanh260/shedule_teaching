@@ -460,6 +460,102 @@ export const LecturerDashboard: React.FC = () => {
     await doSyncRows(rowsToSync, isForce, conflictMode, effectiveIsReview ? 'review' : 'council');
   };
 
+  // 🚀 NEW: Đồng bộ cho tất cả giảng viên (Gửi mail mời)
+  const handleSyncAllLecturers = async () => {
+    setSyncError(null);
+    
+    // 1. Lấy tất cả dòng đang filter (hoặc tất cả đang chọn)
+    const targetRows = selectedIds.size > 0 
+      ? filteredRows.filter(r => selectedIds.has(r.id))
+      : filteredRows;
+
+    if (targetRows.length === 0) {
+      setSyncError("Không có dữ liệu giảng viên để đồng bộ. Vui lòng chọn hoặc lọc dữ liệu trước.");
+      return;
+    }
+
+    // 2. Gom nhóm theo Email: Một giảng viên chỉ nhận 1 lời mời duy nhất
+    const emailGroups: Record<string, RowNormalized[]> = {};
+    
+    targetRows.forEach(r => {
+      let emails: string[] = [];
+      if (r.reviewers && r.reviewers.length > 0) {
+        emails = r.reviewers
+          .filter(name => name && name.trim())
+          .map(name => {
+             const cleanHandle = name.trim().split(' ')[0].toLowerCase().replace(/[^a-z0-9]/g, '');
+             // 💡 DYNAMIC DOMAIN: Nếu là giảng viên FPT thường dùng @fpt.edu.vn, còn lại dùng @gmail.com
+             // Đây là một giả định, lý tưởng nhất là lấy từ cột Email nếu có
+             return r.email ? r.email.toLowerCase() : `${cleanHandle}@fpt.edu.vn`;
+          });
+      } else if (r.person) {
+        const names = r.person.split('&').map(n => n.trim());
+        emails = names
+          .filter(n => n.length > 0)
+          .map(n => {
+            if (n.includes('@')) return n.toLowerCase();
+            const cleanHandle = n.split(' ')[0].toLowerCase().replace(/[^a-z0-9]/g, ''); 
+            return r.email ? r.email.toLowerCase() : `${cleanHandle}@fpt.edu.vn`;
+          });
+      } else if (r.email) {
+        emails = [r.email.toLowerCase()];
+      }
+
+      emails.forEach(email => {
+        if (!emailGroups[email]) emailGroups[email] = [];
+        emailGroups[email].push(r);
+      });
+    });
+
+    const groupedRows: RowNormalized[] = Object.entries(emailGroups).map(([email, rows], groupIdx) => {
+      // 🚀 NEW: Gom nhóm bằng SubEvents thay vì 1 block dài
+      const subEvents = rows.map(r => ({
+        start: r.startTime,
+        end: r.endTime,
+        location: r.location || '',
+        description: `Buổi chấm: Slot ${r.timeRaw || 'N/A'}`
+      }));
+
+      // Sắp xếp các buổi theo thời gian
+      subEvents.sort((a, b) => new Date(a.start).getTime() - new Date(b.start).getTime());
+
+      // Thông tin chi tiết cho mô tả email
+      const detailInfo = subEvents.map((s, i) => {
+        const d = new Date(s.start);
+        const dateStr = `${d.getDate().toString().padStart(2, '0')}/${(d.getMonth() + 1).toString().padStart(2, '0')}/${d.getFullYear()}`;
+        return `${i+1}. ${dateStr} | ${s.description} | Phòng: ${s.location}`
+      }).join('\n');
+
+      const firstRow = rows[0];
+      return {
+        ...firstRow,
+        id: `group-${email.split('@')[0]}`,
+        email: email,
+        task: `Lịch chấm ${effectiveIsReview ? 'Review' : 'Hội đồng'} - ${rows.length} buổi`,
+        // Start/End của base event lấy theo buổi đầu tiên (để không bị kéo dài 6 ngày)
+        startTime: subEvents[0].start,
+        endTime: subEvents[0].end,
+        subEvents: subEvents, // 📧 CHUYỂN DANH SÁCH SANG BACKEND
+        raw: {
+          ...firstRow.raw,
+          description: `Đồng bộ từ FPT Scheduler\n\nChào Giảng viên,\n\nBạn có lịch chấm ${effectiveIsReview ? 'Review' : 'Hội đồng'} tổng cộng ${rows.length} buổi như sau:\n\n${detailInfo}\n\nTrân trọng,\nFPT Scheduler`
+        },
+        status: 'pending'
+      } as RowNormalized;
+    });
+
+    if (groupedRows.length === 0) {
+      setSyncError("Không thể xác định được email giảng viên từ dữ liệu này.");
+      return;
+    }
+
+    if (!window.confirm(`Xác nhận gửi 01 EMAIL TỔNG HỢP cho mỗi giảng viên (Tổng cộng ${groupedRows.length} giảng viên, ${targetRows.length} sự kiện)?`)) {
+      return;
+    }
+
+    await doSyncRows(groupedRows, true, 'replace', effectiveIsReview ? 'review' : 'council');
+  };
+
   if (!firebaseUser) return null;
 
   return (
@@ -714,6 +810,62 @@ export const LecturerDashboard: React.FC = () => {
                       )}
                     </button>
                   </div>
+
+                  {/* 🏛️ Admin Only: Sync for All Lecturers & Recall All */}
+                  {isAdmin(firebaseUser?.email) && (
+                    <div className="flex items-center gap-2 flex-wrap sm:flex-nowrap">
+                      {/* Sync All Button */}
+                      <div className="relative group">
+                        <button
+                          onClick={handleSyncAllLecturers}
+                          disabled={syncing || clearing}
+                          className="h-10 sm:h-12 px-4 sm:px-6 bg-slate-900 text-white rounded-xl sm:rounded-[1.25rem] font-black hover:bg-slate-800 disabled:bg-slate-100 disabled:text-slate-300 border border-transparent transition-all shadow-xl shadow-slate-200/40 flex items-center justify-center gap-2 text-[10px] sm:text-[11px] uppercase tracking-widest active:scale-95 whitespace-nowrap"
+                          title="Đồng bộ và gửi mail mời cho toàn bộ giảng viên trong danh sách"
+                        >
+                          {syncing ? (
+                             <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                          ) : (
+                            <>
+                              <svg className="w-4 h-4 text-orange-400" fill="currentColor" viewBox="0 0 20 20">
+                                <path d="M2.003 5.884L10 9.882l7.997-3.998A2 2 0 0016 4H4a2 2 0 00-1.997 1.884z" />
+                                <path d="M18 8.118l-8 4-8-4V14a2 2 0 002 2h12a2 2 0 002-2V8.118z" />
+                              </svg>
+                              Đồng bộ cho tất cả GV
+                            </>
+                          )}
+                        </button>
+                      </div>
+
+                      {/* 🚀 NEW: Admin Recall All Button (Thu hồi tất cả) */}
+                      <div className="relative group">
+                        <button
+                          onClick={async () => {
+                            if (window.confirm(`⚠️ CẢNH BÁO QUAN TRỌNG:
+Hành động này sẽ THU HỒI (Xóa) toàn bộ lịch đã gửi cho TẤT CẢ giảng viên của học kỳ này.
+Các giảng viên sẽ nhận được email thông báo hủy lịch.
+Bạn có chắc chắn muốn tiếp tục?`)) {
+                              const currentType = effectiveIsReview ? 'review' : 'council';
+                              await clearAppEvents(currentType, true); // sendUpdates = true
+                            }
+                          }}
+                          disabled={syncing || clearing}
+                          className="h-10 sm:h-12 px-4 bg-rose-600 text-white rounded-xl sm:rounded-[1.25rem] font-black hover:bg-rose-700 disabled:bg-slate-100 disabled:text-slate-300 transition-all shadow-xl shadow-rose-200/40 flex items-center justify-center gap-2 text-[10px] sm:text-[11px] uppercase tracking-widest active:scale-95 whitespace-nowrap"
+                          title="Thu hồi toàn bộ sự kiện đã gửi (Xóa trên lịch GV)"
+                        >
+                          {clearing ? (
+                            <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                          ) : (
+                            <>
+                               <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M3 10h10a8 8 0 018 8v2M3 10l6 6m-6-6l6-6" />
+                               </svg>
+                               Thu hồi tất cả
+                            </>
+                          )}
+                        </button>
+                      </div>
+                    </div>
+                  )}
  
                   <div className="hidden sm:block w-px h-8 bg-slate-200/50 mx-1" />
  
@@ -748,8 +900,8 @@ export const LecturerDashboard: React.FC = () => {
                           <div className="w-14 h-14 bg-rose-50 rounded-[1.25rem] flex items-center justify-center mx-auto mb-4 text-rose-500 shadow-inner">
                              <svg className="w-7 h-7" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" /></svg>
                           </div>
-                          <h4 className="text-[13px] font-black text-rose-500 uppercase tracking-widest mb-2">Xác nhận hành động</h4>
-                          <p className="text-[10px] text-slate-400 font-extrabold leading-relaxed px-2 uppercase tracking-tight">Xóa sạch lịch App đã tạo từ <br/><span className="text-slate-900">{effectiveIsReview ? 'Sheet Review' : 'Sheet Hội đồng'}</span></p>
+                          <h4 className="text-[13px] font-black text-rose-500 uppercase tracking-widest mb-2">Dọn dẹp lịch cá nhân</h4>
+                          <p className="text-[10px] text-slate-400 font-extrabold leading-relaxed px-2 uppercase tracking-tight">Xóa sạch các sự kiện app đã tạo trên LỊCH CỦA BẠN <br/><span className="text-slate-900">(Không ảnh hưởng đến người khác)</span></p>
                         </div>
                         <div className="flex gap-3">
                           <button

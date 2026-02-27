@@ -51,6 +51,12 @@ export interface RowNormalized {
   blockStart?: number;
   blockEnd?: number;
   reviewAreaStart?: number; // Boundary index (A-I vs J+)
+  subEvents?: { 
+    start: string; 
+    end: string; 
+    location: string;
+    description?: string;
+  }[]; // 📧 NEW: Dùng cho logic gom nhóm email (Series)
 }
 
 export interface SyncError {

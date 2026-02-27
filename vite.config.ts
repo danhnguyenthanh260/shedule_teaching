@@ -17,9 +17,9 @@ export default defineConfig(({ mode }) => {
           followRedirects: true,
           secure: true,
           rewrite: (path) => {
-            // 🚀 Rewrite /api/readSheet?t=123 to ?t=123
-            const newPath = path.replace(/^\/api\/[^/?]+/, '') || '/';
-            return newPath;
+            // 🚀 Rewrite /api/sync?... to ?... or empty string.
+            // This prevents adding a trailing slash like /exec/ which Google dislikes.
+            return path.replace(/^\/api\/[^/?]+/, '');
           },
           // 🛡️ Monitor proxy errors
           configure: (proxy, _options) => {

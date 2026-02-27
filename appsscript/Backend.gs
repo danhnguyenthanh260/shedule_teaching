@@ -1,44 +1,53 @@
 /**
  * =====================================================
  * Schedule Teaching - ALL-IN-ONE BACKEND SCRIPT
- * Version: 13.3 - ROBUST REST API & COLOR SUPPORT
+ * Version: 13.6 - FULL SYSTEM WITH HYBRID RSVP
  * =====================================================
  */
 
-const CONSTANTS = {
-  DEFAULT_CALENDAR_NAME: "Schedule Teaching",
-  TIMEZONE: "Asia/Ho_Chi_Minh",
+var CONSTANTS = {
   GAS_SECRET: "FPTxavalo2026",
+  DEFAULT_CALENDAR_NAME: "Schedule Teaching",
+  SOURCE_TAG: "fpt_source",
+  SIGNATURE_TAG: "fpt_signature",
+  MAGIC_STRING: "Đồng bộ từ FPT Scheduler",
+  SUCCESS: "success",
+  ERROR: "error",
+  FIREBASE_WEB_API_KEY: "AIzaSyDRwHY6mgdHKjkanLJk8BFpOQSeV5sqvaY",
   FIREBASE_URL:
     "https://scheduleteaching-default-rtdb.asia-southeast1.firebasedatabase.app/",
   ADMIN_EMAILS: ["ngohoangtruongdat@gmail.com", "ngohoangtruongdat2@gmail.com"],
-  FIREBASE_WEB_API_KEY: "AIzaSyDRwHY6mgdHKjkanLJk8BFpOQSeV5sqvaY",
-  SIGNATURE_TAG: "signature",
-  SOURCE_TAG: "app_source",
-  SUCCESS: "success",
-  ERROR: "error",
 };
 
-const AppLogger = {
-  info: (msg, data) => {
-    const log = `[INFO] ${new Date().toISOString()} - ${msg}`;
-    console.log(log, data || "");
-    Logger.log(log + (data ? " " + JSON.stringify(data) : ""));
+var AppLogger = {
+  log: function (level, message, detail) {
+    var logMsg =
+      "[" +
+      level +
+      "] " +
+      new Date().toISOString() +
+      " - " +
+      message +
+      (detail ? ": " + detail : "");
+    Logger.log(logMsg);
+    console.log(logMsg);
   },
-  error: (msg, err) => {
-    const log = `[ERROR] ${new Date().toISOString()} - ${msg}`;
-    console.error(log, err || "");
-    Logger.log(log + (err ? " " + err.toString() : ""));
+  info: function (msg, detail) {
+    this.log("INFO", msg, detail);
+  },
+  error: function (msg, detail) {
+    this.log("ERROR", msg, detail);
   },
 };
 
 /**
  * 🌐 Google Calendar REST API Wrapper
  */
-const GoogleCalendarAPI = {
+var GoogleCalendarAPI = {
   baseUrl: "https://www.googleapis.com/calendar/v3",
 
-  fetch_: function (accessToken, path, options = {}) {
+  fetch_: function (accessToken, path, options) {
+    options = options || {};
     const url = this.baseUrl + path;
     const params = {
       method: options.method || "get",
@@ -50,13 +59,13 @@ const GoogleCalendarAPI = {
     };
     if (options.payload) params.payload = JSON.stringify(options.payload);
 
-    const response = UrlFetchApp.fetch(url, params);
-    const code = response.getResponseCode();
-    const text = response.getContentText();
+    var response = UrlFetchApp.fetch(url, params);
+    var code = response.getResponseCode();
+    var text = response.getContentText();
 
     if (code >= 400) {
       AppLogger.error("API Error (" + code + "): " + path, text);
-      const errObj = { code: code, body: text };
+      var errObj = { code: code, body: text };
       throw new Error(JSON.stringify(errObj));
     }
 
@@ -67,7 +76,8 @@ const GoogleCalendarAPI = {
     return JSON.parse(text);
   },
 
-  getCalendarMetadata: function (accessToken, calendarId = "primary") {
+  getCalendarMetadata: function (accessToken, calendarId) {
+    calendarId = calendarId || "primary";
     try {
       return this.fetch_(
         accessToken,
@@ -80,7 +90,7 @@ const GoogleCalendarAPI = {
   },
 
   listEvents: function (accessToken, calendarId, timeMin, timeMax) {
-    const path =
+    var path =
       "/calendars/" +
       encodeURIComponent(calendarId) +
       "/events" +
@@ -92,15 +102,16 @@ const GoogleCalendarAPI = {
     return this.fetch_(accessToken, path);
   },
 
-  createEvent: function (accessToken, calendarId, eventData) {
-    return this.fetch_(
-      accessToken,
-      "/calendars/" + encodeURIComponent(calendarId) + "/events",
-      {
-        method: "post",
-        payload: eventData,
-      },
-    );
+  createEvent: function (accessToken, calendarId, eventData, sendUpdates) {
+    var path = "/calendars/" + encodeURIComponent(calendarId) + "/events";
+    // 📧 Luôn thêm sendUpdates=all nếu có yêu cầu gửi mail
+    if (sendUpdates) {
+      path += (path.indexOf("?") === -1 ? "?" : "&") + "sendUpdates=all";
+    }
+    return this.fetch_(accessToken, path, {
+      method: "post",
+      payload: eventData,
+    });
   },
 
   patchEvent: function (accessToken, calendarId, eventId, eventData) {
@@ -136,11 +147,11 @@ const GoogleCalendarAPI = {
   findCalendarIdByName: function (accessToken, name) {
     if (!name || name.toLowerCase() === "primary") return "primary";
     try {
-      const list = this.fetch_(accessToken, "/users/me/calendarList");
+      var list = this.fetch_(accessToken, "/users/me/calendarList");
       if (list.items) {
-        const found = list.items.find(
-          (c) => c.summary === name || c.id === name,
-        );
+        var found = list.items.find(function (c) {
+          return c.summary === name || c.id === name;
+        });
         if (found) return found.id;
       }
     } catch (e) {
@@ -148,27 +159,50 @@ const GoogleCalendarAPI = {
     }
     return "primary";
   },
+
+  fetchAll_: function (accessToken, requests) {
+    var self = this;
+    var rawRequests = requests.map(function (req) {
+      return {
+        url: req.url || self.baseUrl + req.path,
+        method: req.method || "get",
+        headers: {
+          Authorization: "Bearer " + accessToken,
+          "Content-Type": "application/json",
+        },
+        payload: req.payload ? JSON.stringify(req.payload) : null,
+        muteHttpExceptions: true,
+      };
+    });
+    return UrlFetchApp.fetchAll(rawRequests);
+  },
 };
 
 /**
  * 🛠️ Core Service
  */
-const CalendarService = {
+var CalendarService = {
   createEvents: function (
     calendarName,
     events,
-    force = false,
-    googleAccessToken = null,
-    conflictMode = null,
-    sheetType = "unknown",
+    force,
+    googleAccessToken,
+    conflictMode,
+    sheetType,
+    skipCleanup,
   ) {
     if (!Array.isArray(events) || events.length === 0)
       return { total: 0, success: 0 };
 
-    let useRestApi = !!googleAccessToken;
-    let targetCalendarName = calendarName || CONSTANTS.DEFAULT_CALENDAR_NAME;
+    force = force || false;
+    googleAccessToken = googleAccessToken || null;
+    sheetType = sheetType || "unknown";
+    skipCleanup = skipCleanup || false;
 
-    const results = {
+    const useRestApi = !!googleAccessToken;
+    var targetCalendarName = calendarName || CONSTANTS.DEFAULT_CALENDAR_NAME;
+
+    var results = {
       total: events.length,
       success: 0,
       updated: 0,
@@ -180,7 +214,7 @@ const CalendarService = {
 
     try {
       if (useRestApi) {
-        const calendarId = GoogleCalendarAPI.findCalendarIdByName(
+        var calendarId = GoogleCalendarAPI.findCalendarIdByName(
           googleAccessToken,
           targetCalendarName,
         );
@@ -210,8 +244,8 @@ const CalendarService = {
           var listRes = GoogleCalendarAPI.fetch_(googleAccessToken, listPath);
           if (listRes.items) {
             allAppEvents = allAppEvents.concat(
-              listRes.items.filter((it) => {
-                const p =
+              listRes.items.filter(function (it) {
+                var p =
                   (it.extendedProperties && it.extendedProperties.private) ||
                   {};
                 return p[CONSTANTS.SOURCE_TAG] === "fpt_scheduler";
@@ -221,175 +255,148 @@ const CalendarService = {
           pageToken = listRes.nextPageToken;
         } while (pageToken);
 
-        const toAdd = [];
-        const toDeleteIds = [];
-        const exactMatches = [];
+        // 🚀 TỐI ƯU: Tạo Map để tìm kiếm (Dùng Object thay cho Map nếu là Rhino)
+        var signatureMap = {};
+        var norm = function (s) {
+          return (s || "").toLowerCase().trim();
+        };
+
+        for (var i = 0; i < allAppEvents.length; i++) {
+          var o = allAppEvents[i];
+          var p = (o.extendedProperties && o.extendedProperties.private) || {};
+          var sig = p[CONSTANTS.SIGNATURE_TAG];
+          if (sig) signatureMap[sig] = o;
+        }
+
+        var toAdd = [];
+        var toDeleteIds = [];
+        var exactMatches = {};
 
         // 🧩 4. Chiến lược "Đồng bộ Vi sai" (Differential Sync)
-        // Duyệt qua danh sách MỚI (events) để quyết định Add, Update hay Skip
-        events.forEach((nev) => {
-          const nevStart = new Date(nev.start).getTime();
-          const nevEnd = new Date(nev.end).getTime();
-          const nevSignature = nev.signature || "";
+        for (var i = 0; i < events.length; i++) {
+          var nev = events[i];
+          var nevStart = new Date(nev.start).getTime();
+          var nevEnd = new Date(nev.end).getTime();
+          var nevSignature = nev.signature || "";
 
-          // Tìm sự kiện cũ CÙNG LOẠI (sheetType) và CÙNG ID (signature)
-          const oldEvent = allAppEvents.find((o) => {
-            const p =
-              (o.extendedProperties && o.extendedProperties.private) || {};
-            // 1. Ưu tiên trùng Signature (Row ID - Rất chính xác)
-            if (nevSignature && p[CONSTANTS.SIGNATURE_TAG] === nevSignature)
-              return true;
-
-            // 🛡️ BƯỚC 4: NHẬN DIỆN DANH TÍNH (Identity Check)
-            const oStartNum = new Date(
-              o.start.dateTime || o.start.date,
-            ).getTime();
-            const oEndNum = new Date(o.end.dateTime || o.end.date).getTime();
-
-            // Chuẩn hóa cực mạnh
-            const norm = (s) => (s || "").toLowerCase().normalize("NFC").trim();
-            const oldTitle = norm(o.summary);
-            const newTitle = norm(nev.title);
-            const personPart = norm(nev.title.split("-")[0]);
-
-            const isTimeMatch =
-              Math.abs(oStartNum - nevStart) < 300000 &&
-              Math.abs(oEndNum - nevEnd) < 300000;
-
-            if (isTimeMatch) {
-              if (nevSignature && p[CONSTANTS.SIGNATURE_TAG] === nevSignature)
-                return true;
-              if (oldTitle === newTitle) return true;
-              if (
-                sheetType === "council" &&
-                (oldTitle.includes(personPart) || newTitle.includes(oldTitle))
-              )
-                return true;
-            }
-            return false;
-          });
+          // Tìm theo Signature
+          var oldEvent = signatureMap[nevSignature] || null;
 
           if (oldEvent) {
-            const oStartNum = new Date(
+            var oStartNum = new Date(
               oldEvent.start.dateTime || oldEvent.start.date,
             ).getTime();
-            const norm = (s) => (s || "").toLowerCase().normalize("NFC").trim();
-
-            // Kiểm tra thay đổi thực sự
-            const isChanged =
+            var isChanged =
               norm(oldEvent.summary) !== norm(nev.title) ||
               norm(oldEvent.location) !== norm(nev.location) ||
               Math.abs(oStartNum - nevStart) > 120000;
 
             if (!isChanged) {
-              exactMatches.push(oldEvent.id);
+              exactMatches[oldEvent.id] = true;
               results.skipped++;
-              return; // SKIP
+              continue;
             } else {
               toDeleteIds.push(oldEvent.id);
             }
           }
 
           // 🛡️ BƯỚC 5: KIỂM TRA XUNG ĐỘT (Overlap Check)
-          const overlap = allAppEvents.find((other) => {
-            const p =
+          var overlap = null;
+          for (var j = 0; j < allAppEvents.length; j++) {
+            var other = allAppEvents[j];
+            if (exactMatches[other.id] || toDeleteIds.indexOf(other.id) !== -1)
+              continue;
+
+            var p =
               (other.extendedProperties && other.extendedProperties.private) ||
               {};
+            var otherType = p["sheet_type"] || "council";
+            if (otherType === sheetType) continue;
 
-            // 🛑 1. Không bao giờ xung đột với chính mình
-            if (
-              exactMatches.includes(other.id) ||
-              toDeleteIds.includes(other.id)
-            )
-              return false;
-
-            // 🛑 2. Nhận diện loại Board (Ưu tiên Council cho các lịch cũ ko nhãn)
-            let otherType = p["sheet_type"];
-            if (!otherType && p[CONSTANTS.SOURCE_TAG] === "fpt_scheduler") {
-              otherType = "council"; // Legacy mặc định là Council
-            }
-
-            // 🛑 3. Tab Hội đồng / Review KHÔNG BAO GIỜ xung đột với cùng loại mình
-            if (otherType === sheetType) return false;
-
-            const oStartNum = new Date(
+            var oStart = new Date(
               other.start.dateTime || other.start.date,
             ).getTime();
-            const oEndNum = new Date(
-              other.end.dateTime || other.end.date,
-            ).getTime();
-
-            // 🛑 4. Xung đột nếu: Trùng giờ VÀ Trùng địa điểm VÀ KHÁC loại bảng
-            const isOverlap = nevStart < oEndNum && nevEnd > oStartNum;
-            return isOverlap && other.location === nev.location;
-          });
+            var oEnd = new Date(other.end.dateTime || other.end.date).getTime();
+            if (
+              nevStart < oEnd &&
+              nevEnd > oStart &&
+              other.location === nev.location
+            ) {
+              overlap = other;
+              break;
+            }
+          }
 
           if (overlap && !force) {
             results.conflicts.push({
-              index: events.indexOf(nev),
+              index: i,
               newEvent: String(nev.title || "Events mới"),
               newStart: String(nev.start || ""),
               newEnd: String(nev.end || ""),
-              oldEvent: String(
-                overlap.summary || overlap.description || "Lịch hiện có",
-              ),
-              oldStart: String(
-                (overlap.start &&
-                  (overlap.start.dateTime || overlap.start.date)) ||
-                  "",
-              ),
-              oldEnd: String(
-                (overlap.end && (overlap.end.dateTime || overlap.end.date)) ||
-                  "",
-              ),
+              oldEvent: String(overlap.summary || "Lịch hiện có"),
+              oldStart: String(overlap.start.dateTime || overlap.start.date),
+              oldEnd: String(overlap.end.dateTime || overlap.end.date),
             });
           } else {
             toAdd.push(nev);
           }
-        });
+        }
 
         // 🛡️ BƯỚC 6: DỌN DẸP "LỊCH THỪA" (Mirror Cleanup)
-        // Nếu trên Calendar có lịch thuộc bảng này nhưng trong Sheet không thấy đâu -> XÓA.
-        // Điều này đảm bảo Calendar luôn là bản sao khớp 100% với Sheet.
-        allAppEvents.forEach((other) => {
-          const p =
-            (other.extendedProperties && other.extendedProperties.private) ||
-            {};
-          const otherType =
-            p["sheet_type"] ||
-            (p[CONSTANTS.SOURCE_TAG] === "fpt_scheduler"
-              ? "council"
-              : "unknown");
-
-          // Chỉ dọn dẹp nếu:
-          // 1. Cùng loại Board (Council dọn Council, Review dọn Review)
-          // 2. Không nằm trong danh sách được Giữ lại (exactMatches)
-          // 3. Không nằm trong danh sách được Update (toDeleteIds đã có sẵn)
-          if (
-            otherType === sheetType &&
-            !exactMatches.includes(other.id) &&
-            !toDeleteIds.includes(other.id)
-          ) {
-            toDeleteIds.push(other.id);
+        if (!skipCleanup) {
+          for (var i = 0; i < allAppEvents.length; i++) {
+            var other = allAppEvents[i];
+            var p =
+              (other.extendedProperties && other.extendedProperties.private) ||
+              {};
+            var otherType = p["sheet_type"] || "council";
+            if (
+              otherType === sheetType &&
+              !exactMatches[other.id] &&
+              toDeleteIds.indexOf(other.id) === -1
+            ) {
+              toDeleteIds.push(other.id);
+            }
           }
-        });
+        }
 
-        // 🚀 THỰC THI (Execution)
-        // -------------------------------------------------------------
-        toDeleteIds.forEach((id) => {
+        // 🚀 THỰC THI (Execution) - Xóa trước
+        for (var i = 0; i < toDeleteIds.length; i++) {
           try {
-            GoogleCalendarAPI.deleteEvent(googleAccessToken, calendarId, id);
-          } catch (e) {}
-        });
+            GoogleCalendarAPI.deleteEvent(
+              googleAccessToken,
+              calendarId,
+              toDeleteIds[i],
+            );
+          } catch (e) {
+            /* ignore */
+          }
+        }
 
-        toAdd.forEach((ev) => {
+        // Tạo mới
+        for (var i = 0; i < toAdd.length; i++) {
+          var ev = toAdd[i];
           try {
-            const eventData = {
+            var payload = {
               summary: ev.title,
+              sequence: 0,
               location: ev.location || "",
-              description: ev.description || "",
-              start: { dateTime: new Date(ev.start).toISOString() },
-              end: { dateTime: new Date(ev.end).toISOString() },
+              description:
+                CONSTANTS.MAGIC_STRING + "\n\n" + (ev.description || ""),
+              start: {
+                dateTime: Utilities.formatDate(
+                  new Date(ev.start),
+                  "GMT+7",
+                  "yyyy-MM-dd'T'HH:mm:ss+07:00",
+                ),
+              },
+              end: {
+                dateTime: Utilities.formatDate(
+                  new Date(ev.end),
+                  "GMT+7",
+                  "yyyy-MM-dd'T'HH:mm:ss+07:00",
+                ),
+              },
               extendedProperties: {
                 private: {
                   [CONSTANTS.SOURCE_TAG]: "fpt_scheduler",
@@ -398,34 +405,227 @@ const CalendarService = {
                 },
               },
             };
-            if (ev.colorId) eventData.colorId = String(ev.colorId);
+            if (ev.colorId) payload.colorId = String(ev.colorId);
 
-            GoogleCalendarAPI.createEvent(
-              googleAccessToken,
-              calendarId,
-              eventData,
-            );
+            // � LỒNG DATA VÀO DESCRIPTION (Dành cho Google Calendar Invitation)
+            if (ev.guests) {
+              const subItems = ev.subEvents || [
+                {
+                  start: ev.start,
+                  end: ev.end,
+                  location: ev.location,
+                  description: ev.description,
+                },
+              ];
+              const summaryBody = summarizeSchedule_(subItems);
+              payload.description =
+                "<b>CHI TIẾT LỊCH TRÌNH:</b><br>" +
+                summaryBody +
+                "<br>---<br>" +
+                payload.description;
+            }
+            if (ev.guests) {
+              var guestList = ev.guests.split(",");
+              payload.attendees = guestList.map(function (email) {
+                return {
+                  email: email.trim(),
+                  responseStatus: "needsAction",
+                };
+              });
+            }
+
+            // 🚀 HYBRID SERIES: Logic gom nhóm để có RSVP (Accept/Decline)
+            if (ev.subEvents && ev.subEvents.length > 1) {
+              // 🛡️ BẢO VỆ 400: Phân tích ngày thủ công (DD/MM/YYYY không được JS hỗ trợ tốt)
+              // parseDateISO đã được khai báo ở trên nếu cần (nhưng ta sẽ dùng phiên bản dùng chung cho sạch sẽ)
+
+              ev.subEvents.sort(function (a, b) {
+                return (
+                  parseDateISO_(a.start).getTime() -
+                  parseDateISO_(b.start).getTime()
+                );
+              });
+
+              var earliest = ev.subEvents[0];
+              var earliestDate = parseDateISO_(earliest.start);
+              var earliestEndDate = parseDateISO_(earliest.end);
+
+              payload.start.dateTime = Utilities.formatDate(
+                earliestDate,
+                "GMT+7",
+                "yyyy-MM-dd'T'HH:mm:ss+07:00",
+              );
+              payload.end.dateTime = Utilities.formatDate(
+                earliestEndDate,
+                "GMT+7",
+                "yyyy-MM-dd'T'HH:mm:ss+07:00",
+              );
+              payload.start.timeZone = "Asia/Ho_Chi_Minh";
+              payload.end.timeZone = "Asia/Ho_Chi_Minh";
+
+              // 1. Tạo chuỗi lặp đại diện (Trigger 1 email với nút Yes/No)
+              // 🔔 Dùng RDATE từng dòng và TZID để khớp tuyệt đối (Fix 400)
+              // 🚀 FIX RSVP: Bỏ buổi đầu khỏi RDATE để tránh trùng lặp ngày đầu gây mập mờ
+              var recurrence = ["RRULE:FREQ=DAILY;COUNT=1"];
+              ev.subEvents.forEach(function (s, idx) {
+                if (idx === 0) return; // Buổi sớm nhất đã là DTSTART của Master rồi
+                var d = parseDateISO_(s.start);
+                recurrence.push(
+                  "RDATE;TZID=Asia/Ho_Chi_Minh:" +
+                    Utilities.formatDate(d, "GMT+7", "yyyyMMdd'T'HHmmss"),
+                );
+              });
+              payload.recurrence = recurrence;
+
+              var res;
+              try {
+                AppLogger.info(
+                  "Creating Hybrid Series Master (Final Alignment)",
+                  {
+                    summary: payload.summary,
+                    count: ev.subEvents.length,
+                    recurrence: payload.recurrence,
+                    dtstart: payload.start.dateTime,
+                  },
+                );
+                res = GoogleCalendarAPI.createEvent(
+                  googleAccessToken,
+                  calendarId,
+                  payload,
+                  true, // Force send email invitation
+                );
+              } catch (e) {
+                AppLogger.error(
+                  "CRITICAL: Failed to create Hybrid Master (RDATE Mode)",
+                  {
+                    message: e.toString(),
+                    payload: JSON.stringify(payload),
+                  },
+                );
+                throw e;
+              }
+
+              // Clear recurrence from payload for potential reuse (just in case)
+              delete payload.recurrence;
+
+              if (res && res.id) {
+                // 2. Lấy danh sách Instance của chuỗi vừa tạo để điều chỉnh đúng slot giờ
+                var instances = GoogleCalendarAPI.fetch_(
+                  googleAccessToken,
+                  "/calendars/" +
+                    encodeURIComponent(calendarId) +
+                    "/events/" +
+                    encodeURIComponent(res.id) +
+                    "/instances?maxResults=50",
+                );
+
+                if (instances && instances.items) {
+                  // Sắp xếp instances theo thời gian để khớp thứ tự với subEvents
+                  instances.items.sort(function (a, b) {
+                    var ta = new Date(
+                      a.start.dateTime || a.start.date,
+                    ).getTime();
+                    var tb = new Date(
+                      b.start.dateTime || b.start.date,
+                    ).getTime();
+                    return ta - tb;
+                  });
+
+                  var updateRequests = [];
+                  for (
+                    var k = 0;
+                    k < instances.items.length && k < ev.subEvents.length;
+                    k++
+                  ) {
+                    var inst = instances.items[k];
+                    var sub = ev.subEvents[k];
+                    updateRequests.push({
+                      method: "patch",
+                      path:
+                        "/calendars/" +
+                        encodeURIComponent(calendarId) +
+                        "/events/" +
+                        encodeURIComponent(inst.id) +
+                        "?sendUpdates=none",
+                      payload: {
+                        start: {
+                          dateTime: Utilities.formatDate(
+                            parseDateISO_(sub.start),
+                            "GMT+7",
+                            "yyyy-MM-dd'T'HH:mm:ss+07:00",
+                          ),
+                        },
+                        end: {
+                          dateTime: Utilities.formatDate(
+                            parseDateISO_(sub.end),
+                            "GMT+7",
+                            "yyyy-MM-dd'T'HH:mm:ss+07:00",
+                          ),
+                        },
+                        location: sub.location || payload.location,
+                        description:
+                          CONSTANTS.MAGIC_STRING +
+                          "\n\n" +
+                          (sub.description || payload.description),
+                        // 🛡️ BẢO VỆ THU HỒI (RECALL): Patch lại tag ẩn để clearEvents tìm thấy
+                        extendedProperties: payload.extendedProperties,
+                      },
+                    });
+                  }
+
+                  // 3. Batch update các buổi lẻ mà không gửi thêm email báo (TỐI ƯU)
+                  if (updateRequests.length > 0) {
+                    GoogleCalendarAPI.fetchAll_(
+                      googleAccessToken,
+                      updateRequests,
+                    );
+                  }
+                }
+              }
+            } else {
+              // Xử lý sự kiện đơn lẻ thông thường
+              res = GoogleCalendarAPI.createEvent(
+                googleAccessToken,
+                calendarId,
+                payload,
+                true, // Gửi email thông thường cho 1 sự kiện
+              );
+            }
+
+            // 📧 KHÔNG CẦN EMAIL BỔ SUNG NẾU ĐÃ LỒNG VÀO DESCRIPTION
+            // Việc lồng bảng vào mô tả giúp Google Invitation chứa đầy đủ thông tin + Nút Có/Không
+
             results.success++;
           } catch (e) {
             results.failed++;
-            results.errors.push({ title: ev.title, message: e.toString() });
+            results.errors.push({
+              title: ev.title,
+              message: e.toString(),
+            });
           }
-        });
+        }
 
-        results.skipped = exactMatches.length;
         results.updated = toDeleteIds.length;
-        // Count modified/swapped as updated for UI feedback
       } else {
-        // --- CENTRALIZED mode ---
+        // --- CENTRALIZED mode (Legacy) ---
         var calendar = this.getCalendarInternal(targetCalendarName);
-        events.forEach(function (ev, i) {
+        for (var i = 0; i < events.length; i++) {
+          var ev = events[i];
           try {
-            var start = new Date(ev.start);
-            var end = new Date(ev.end);
-            var created = calendar.createEvent(ev.title, start, end, {
+            var options = {
               location: ev.location || "",
               description: ev.description || "",
-            });
+            };
+            if (ev.guests) {
+              options.guests = ev.guests;
+              options.sendInvites = true;
+            }
+            var created = calendar.createEvent(
+              ev.title,
+              new Date(ev.start),
+              new Date(ev.end),
+              options,
+            );
             created.setTag(CONSTANTS.SOURCE_TAG, "fpt_scheduler");
             if (ev.signature)
               created.setTag(CONSTANTS.SIGNATURE_TAG, ev.signature);
@@ -434,7 +634,7 @@ const CalendarService = {
           } catch (e) {
             results.failed++;
           }
-        });
+        }
       }
     } catch (e) {
       throw e;
@@ -444,24 +644,33 @@ const CalendarService = {
 
   clearEvents: function (
     calendarName,
-    googleAccessToken = null,
-    sheetType = null,
+    googleAccessToken,
+    sheetType,
+    sendUpdates,
   ) {
+    googleAccessToken = googleAccessToken || null;
+    sheetType = sheetType || null;
+    sendUpdates = sendUpdates || false;
+
     let deletedCount = 0;
     const now = new Date();
-    const startTimeNum = now.getTime() - 180 * 24 * 60 * 60 * 1000;
-    const endTimeNum = now.getTime() + 180 * 24 * 60 * 60 * 1000;
+    const startTimeNum = now.getTime() - 365 * 24 * 60 * 60 * 1000; // Mở rộng 1 năm
+    const endTimeNum = now.getTime() + 365 * 24 * 60 * 60 * 1000;
     const startTimeStr = new Date(startTimeNum).toISOString();
     const endTimeStr = new Date(endTimeNum).toISOString();
 
-    const SEARCH_KEY = "Đồng bộ từ FPT Scheduler";
+    const SEARCH_KEY = CONSTANTS.MAGIC_STRING;
 
     if (googleAccessToken) {
-      const calendarId = GoogleCalendarAPI.findCalendarIdByName(
+      var calendarId = GoogleCalendarAPI.findCalendarIdByName(
         googleAccessToken,
         calendarName,
       );
+      if (!calendarId) return { success: false, message: "Calendar not found" };
+
       let pageToken = null;
+      const idsToDeleteMap = {}; // Gom nhóm ID duy nhất trên toàn bộ trang
+
       do {
         let path =
           "/calendars/" +
@@ -471,71 +680,90 @@ const CalendarService = {
           encodeURIComponent(startTimeStr) +
           "&timeMax=" +
           encodeURIComponent(endTimeStr) +
-          "&q=" +
-          encodeURIComponent(SEARCH_KEY) +
-          "&showDeleted=false&singleEvents=true&maxResults=2500";
+          "&showDeleted=false&singleEvents=false&maxResults=2500"; // singleEvents=false để liệt kê theo chuỗi
         if (pageToken) path += "&pageToken=" + pageToken;
 
         const listResponse = GoogleCalendarAPI.fetch_(googleAccessToken, path);
         if (listResponse.items) {
-          listResponse.items.forEach((item) => {
+          AppLogger.info(
+            "Scanning page: " + listResponse.items.length + " events",
+          );
+
+          listResponse.items.forEach(function (item) {
             const privateProps =
               (item.extendedProperties && item.extendedProperties.private) ||
               {};
-            const isFromApp =
-              privateProps[CONSTANTS.SOURCE_TAG] === "fpt_scheduler";
+            var isFromApp =
+              privateProps[CONSTANTS.SOURCE_TAG] === "fpt_scheduler" ||
+              (item.description &&
+                item.description.indexOf(CONSTANTS.MAGIC_STRING) !== -1);
 
-            // 🛡️ Isolation check: If sheetType provided, must match. Else, must be from app.
-            let shouldDelete = isFromApp;
-            if (sheetType && privateProps["sheet_type"] !== sheetType) {
-              shouldDelete = false;
+            if (
+              sheetType &&
+              privateProps["sheet_type"] &&
+              privateProps["sheet_type"] !== sheetType
+            ) {
+              isFromApp = false;
             }
 
-            if (shouldDelete) {
-              GoogleCalendarAPI.deleteEvent(
-                googleAccessToken,
-                calendarId,
-                item.id,
-              );
-              deletedCount++;
+            if (isFromApp) {
+              // Với singleEvents=false, item.id chính là Master ID nếu là chuỗi, hoặc ID đơn lẻ.
+              idsToDeleteMap[item.id] = true;
             }
           });
         }
         pageToken = listResponse.nextPageToken;
       } while (pageToken);
+
+      // 🚀 THỰC THI XÓA (Execution) - Sau khi đã gom đủ ID
+      const allIds = Object.keys(idsToDeleteMap);
+      AppLogger.info("Starting deletion of " + allIds.length + " items");
+
+      const deleteRequests = [];
+      allIds.forEach(function (id) {
+        var deletePath =
+          "/calendars/" +
+          encodeURIComponent(calendarId) +
+          "/events/" +
+          encodeURIComponent(id);
+        if (sendUpdates) deletePath += "?sendUpdates=all";
+        deleteRequests.push({ method: "delete", path: deletePath });
+      });
+
+      // Batch delete (40 per chunk)
+      const CHUNK_SIZE = 40;
+      for (let i = 0; i < deleteRequests.length; i += CHUNK_SIZE) {
+        const chunk = deleteRequests.slice(i, i + CHUNK_SIZE);
+        GoogleCalendarAPI.fetchAll_(googleAccessToken, chunk);
+        deletedCount += chunk.length;
+      }
     } else {
-      const calendar = this.getCalendarInternal(calendarName);
-      const events = calendar.getEvents(
+      var calendar = this.getCalendarInternal(calendarName);
+      var events = calendar.getEvents(
         new Date(startTimeNum),
         new Date(endTimeNum),
         { search: SEARCH_KEY },
       );
-      events.forEach((event) => {
-        const typeTag = event.getTag("sheet_type");
+      events.forEach(function (event) {
+        var typeTag = event.getTag("sheet_type");
         if (!sheetType || typeTag === sheetType) {
           event.deleteEvent();
           deletedCount++;
         }
       });
     }
-    AppLogger.info(
-      "Deleted " +
-        deletedCount +
-        " events. SheetType Filter: " +
-        (sheetType || "None"),
-    );
     return { deletedCount: deletedCount };
   },
 
   getCalendarInternal: function (name) {
     if (!name || name.toLowerCase() === "primary")
       return CalendarApp.getDefaultCalendar();
-    const calendars = CalendarApp.getAllCalendars();
+    var calendars = CalendarApp.getAllCalendars();
     for (var i = 0; i < calendars.length; i++) {
       if (calendars[i].getName() === name) return calendars[i];
     }
     try {
-      const cal = CalendarApp.getCalendarById(name);
+      var cal = CalendarApp.getCalendarById(name);
       if (cal) return cal;
     } catch (e) {}
     return CalendarApp.getDefaultCalendar();
@@ -549,131 +777,132 @@ const CalendarService = {
 function doGet(e) {
   return jsonResponse_({
     status: CONSTANTS.SUCCESS,
-    version: "13.3",
-    message: "FPT Scheduler GAS Engine V13.3 (204 Fix) is ACTIVE",
+    version: "13.6",
+    message: "FPT Scheduler GAS Engine V13.6 (ES5 SAFE) is ACTIVE",
   });
 }
 
 function doPost(e) {
+  var payload,
+    action,
+    res,
+    sheetIdMatch,
+    sheetId,
+    ss,
+    sheets,
+    sheet,
+    data,
+    found,
+    authResult;
   try {
-    const payload = JSON.parse(e.postData.contents);
-    const action = payload.action || "sync";
+    if (!e || !e.postData || !e.postData.contents) {
+      throw new Error("Empty POST body received");
+    }
+    payload = JSON.parse(e.postData.contents);
+    action = payload.action || "sync";
 
     // Auth Check
     if (payload.secret !== CONSTANTS.GAS_SECRET) {
-      const authResult = verifyFirebaseToken_(payload.idToken);
+      authResult = verifyFirebaseToken_(payload.idToken);
       if (!authResult.valid || !isAuthorized_(authResult.email)) {
-        throw new Error("Unauthorized Access (V13.3)");
+        throw new Error("Unauthorized Access (V13.6)");
       }
     }
 
     if (action === "readSheet") {
-      const sheetIdMatch = payload.url.match(/\/d\/([a-zA-Z0-9-_]+)/);
-      const sheetId = sheetIdMatch ? sheetIdMatch[1] : null;
-      if (!sheetId) throw new Error("URL Google Sheet không hợp lệ (Không tìm thấy ID)");
+      sheetIdMatch = payload.url.match(/\/d\/([a-zA-Z0-9-_]+)/);
+      sheetId = sheetIdMatch ? sheetIdMatch[1] : null;
+      if (!sheetId) throw new Error("URL Google Sheet không hợp lệ (ID)");
 
-      const gidMatch = payload.url.match(/[#&]gid=([0-9]+)/);
-      const urlGid = gidMatch ? gidMatch[1] : null;
+      ss = SpreadsheetApp.openById(sheetId);
+      sheets = ss.getSheets();
+      sheet = sheets[0];
 
-      try {
-        const ss = SpreadsheetApp.openById(sheetId);
-        let sheet = ss.getSheets()[0];
-        if (payload.tabName)
-          sheet = ss.getSheetByName(payload.tabName.trim()) || sheet;
-        else if (urlGid)
-          sheet =
-            ss.getSheets().find((s) => s.getSheetId().toString() === urlGid) ||
-            sheet;
-
-        const data = sheet.getDataRange().getValues();
-        return jsonResponse_({
-          status: CONSTANTS.SUCCESS,
-          data: data.slice(parseInt(payload.startRow || "1") - 1),
-          rowCount: data.length,
-          fetchTime: new Date().toISOString(),
-          tabName: sheet.getName(),
-          allTabs: ss.getSheets().map((s) => s.getName()), // Trả về danh sách tất cả các tab để UI dropdown
-        });
-      } catch (err) {
-        return jsonResponse_({
-          status: CONSTANTS.ERROR,
-          message: "Lỗi truy cập Google Sheet: " + err.toString(),
-          sheetId: sheetId,
-        });
+      if (payload.tabName) {
+        found = ss.getSheetByName(payload.tabName.trim());
+        if (found) sheet = found;
       }
+
+      data = sheet.getDataRange().getValues();
+      return jsonResponse_({
+        status: CONSTANTS.SUCCESS,
+        data: data.slice(parseInt(payload.startRow || "1") - 1),
+        rowCount: data.length,
+        fetchTime: new Date().toISOString(),
+        tabName: sheet.getName(),
+        allTabs: sheets.map(function (s) {
+          return s.getName();
+        }),
+      });
     }
 
     if (action === "getTabNames") {
-      const sheetIdMatch = payload.url.match(/\/d\/([a-zA-Z0-9-_]+)/);
-      const sheetId = sheetIdMatch ? sheetIdMatch[1] : null;
-      if (!sheetId) throw new Error("URL Google Sheet không hợp lệ (Không tìm thấy ID)");
+      sheetIdMatch = payload.url.match(/\/d\/([a-zA-Z0-9-_]+)/);
+      sheetId = sheetIdMatch ? sheetIdMatch[1] : null;
+      if (!sheetId) throw new Error("URL Google Sheet không hợp lệ");
 
-      try {
-        const ss = SpreadsheetApp.openById(sheetId);
-        const tabs = ss.getSheets().map((s) => s.getName());
-        return jsonResponse_({
-          status: CONSTANTS.SUCCESS,
-          tabs: tabs,
-        });
-      } catch (err) {
-        return jsonResponse_({
-          status: CONSTANTS.ERROR,
-          message: "Không thể lấy danh sách Tab: " + err.toString(),
-        });
-      }
+      ss = SpreadsheetApp.openById(sheetId);
+      return jsonResponse_({
+        status: CONSTANTS.SUCCESS,
+        tabs: ss.getSheets().map(function (s) {
+          return s.getName();
+        }),
+      });
     }
 
     if (action === "setupNotifications") {
-      const sheetIdMatch = payload.url.match(/\/d\/([a-zA-Z0-9-_]+)/);
-      const sheetId = sheetIdMatch ? sheetIdMatch[1] : null;
-      if (!sheetId) throw new Error("URL Google Sheet không hợp lệ (Không tìm thấy ID)");
+      sheetIdMatch = payload.url.match(/\/d\/([a-zA-Z0-9-_]+)/);
+      sheetId = sheetIdMatch ? sheetIdMatch[1] : null;
+      if (!sheetId) throw new Error("URL Google Sheet không hợp lệ");
 
-      const res = setupNotificationTrigger(sheetId, payload.tabName);
+      res = setupNotificationTrigger(sheetId, payload.tabName);
       return jsonResponse_(res);
     }
 
     if (action === "disableNotifications") {
-      const sheetIdMatch = payload.url.match(/\/d\/([a-zA-Z0-9-_]+)/);
-      const sheetId = sheetIdMatch ? sheetIdMatch[1] : null;
-      if (!sheetId) throw new Error("URL Google Sheet không hợp lệ (Không tìm thấy ID)");
+      sheetIdMatch = payload.url.match(/\/d\/([a-zA-Z0-9-_]+)/);
+      sheetId = sheetIdMatch ? sheetIdMatch[1] : null;
+      if (!sheetId) throw new Error("URL Google Sheet không hợp lệ");
 
-      const res = disableNotificationTrigger(sheetId, payload.tabName);
+      res = disableNotificationTrigger(sheetId, payload.tabName);
       return jsonResponse_(res);
     }
 
     if (action === "clearCalendar") {
-      const res = CalendarService.clearEvents(
+      res = CalendarService.clearEvents(
         payload.calendarName || CONSTANTS.DEFAULT_CALENDAR_NAME,
         payload.googleAccessToken || null,
         payload.sheetType || null,
+        payload.sendUpdates || false,
       );
       return jsonResponse_({
         status: CONSTANTS.SUCCESS,
-        version: "13.3",
+        version: "13.6",
         message: "Cleared",
         data: res,
       });
     }
 
-    const res = CalendarService.createEvents(
+    res = CalendarService.createEvents(
       payload.calendarName,
       payload.events || [],
       payload.force || false,
       payload.googleAccessToken || null,
       payload.conflictMode || null,
       payload.sheetType || "unknown",
+      payload.skipCleanup || false,
     );
 
     return jsonResponse_({
       status: CONSTANTS.SUCCESS,
-      version: "13.3",
+      version: "13.6",
       data: res,
     });
   } catch (err) {
-    AppLogger.error("POST Error", err);
+    AppLogger.error("POST Error", err.toString());
     return jsonResponse_({
       status: CONSTANTS.ERROR,
-      version: "13.3",
+      version: "13.6",
       message: err.toString(),
     });
   }
@@ -681,16 +910,17 @@ function doPost(e) {
 
 function verifyFirebaseToken_(idToken) {
   if (!idToken) return { valid: false };
-  const res = UrlFetchApp.fetch(
-    `https://identitytoolkit.googleapis.com/v1/accounts:lookup?key=${CONSTANTS.FIREBASE_WEB_API_KEY}`,
+  var res = UrlFetchApp.fetch(
+    "https://identitytoolkit.googleapis.com/v1/accounts:lookup?key=" +
+      CONSTANTS.FIREBASE_WEB_API_KEY,
     {
       method: "post",
       contentType: "application/json",
-      payload: JSON.stringify({ idToken }),
+      payload: JSON.stringify({ idToken: idToken }),
       muteHttpExceptions: true,
     },
   );
-  const data = JSON.parse(res.getContentText());
+  var data = JSON.parse(res.getContentText());
   return data.users && data.users.length > 0
     ? { valid: true, email: data.users[0].email }
     : { valid: false };
@@ -698,72 +928,68 @@ function verifyFirebaseToken_(idToken) {
 
 function isAuthorized_(email) {
   if (!email) return false;
-  const cleanEmail = email.trim().toLowerCase();
+  var cleanEmail = email.trim().toLowerCase();
   try {
-    const url = `${CONSTANTS.FIREBASE_URL}admin_whitelist.json`;
-    const res = UrlFetchApp.fetch(url, { muteHttpExceptions: true });
-    const data = JSON.parse(res.getContentText());
+    var url = CONSTANTS.FIREBASE_URL + "admin_whitelist.json";
+    var res = UrlFetchApp.fetch(url, { muteHttpExceptions: true });
+    var data = JSON.parse(res.getContentText());
     if (data) {
-      const list = Object.values(data).map((v) =>
-        String(v).trim().toLowerCase(),
-      );
-      if (list.includes(cleanEmail)) return true;
+      for (var key in data) {
+        if (String(data[key]).trim().toLowerCase() === cleanEmail) return true;
+      }
     }
   } catch (e) {}
-  if (CONSTANTS.ADMIN_EMAILS.some((e) => e.toLowerCase() === cleanEmail))
-    return true;
-  return true;
+  for (var i = 0; i < CONSTANTS.ADMIN_EMAILS.length; i++) {
+    if (CONSTANTS.ADMIN_EMAILS[i].toLowerCase() === cleanEmail) return true;
+  }
+  return false;
 }
 
 /**
  * 📧 NOTIFICATION SYSTEM (Council Sheets)
- * Logic for monitoring changes and sending emails after 5 minutes.
  */
 
-const NOTIF_CONSTANTS = {
+var NOTIF_CONSTANTS = {
   CACHE_PREFIX: "__notif_cache_",
   DEBOUNCE_SECONDS: 20,
   EMAIL_COLUMN_INDEX: 13, // Column N (0-indexed)
 };
 
-/**
- * 🛠️ Setup: Bật tính năng thông báo cho một Spreadsheet + Tab cụ thể
- */
 function setupNotificationTrigger(spreadsheetId, tabName) {
   try {
-    const ss = SpreadsheetApp.openById(spreadsheetId);
-    const sourceSheet = tabName
-      ? ss.getSheetByName(tabName)
-      : ss.getSheets()[0];
+    var ss = SpreadsheetApp.openById(spreadsheetId);
+    var sourceSheet = tabName ? ss.getSheetByName(tabName) : ss.getSheets()[0];
 
     if (!sourceSheet) {
-      throw new Error(`Không tìm thấy tab: ${tabName || "Mặc định (Sheet1)"}`);
+      throw new Error("Không tìm thấy tab: " + (tabName || "Mặc định"));
     }
 
-    const actualTabName = sourceSheet.getName();
-    const cacheSheetName = NOTIF_CONSTANTS.CACHE_PREFIX + actualTabName;
+    var actualTabName = sourceSheet.getName();
+    var cacheSheetName = NOTIF_CONSTANTS.CACHE_PREFIX + actualTabName;
 
-    // 1. Kiểm tra/Tạo sheet cache ẩn cho tab này
-    let cacheSheet = ss.getSheetByName(cacheSheetName);
+    var cacheSheet = ss.getSheetByName(cacheSheetName);
     if (!cacheSheet) {
       cacheSheet = ss.insertSheet(cacheSheetName);
       cacheSheet.hideSheet();
     }
 
-    // Lưu dữ liệu hiện tại làm bản "stable" đầu tiên
-    const currentData = sourceSheet.getDataRange().getValues();
+    var currentData = sourceSheet.getDataRange().getValues();
     cacheSheet.clear();
     cacheSheet
       .getRange(1, 1, currentData.length, currentData[0].length)
       .setValues(currentData);
 
-    // 2. Tạo trigger onChange nếu chưa có (Spreadsheet-wide)
-    const triggers = ScriptApp.getProjectTriggers();
-    const existing = triggers.find(
-      (t) =>
-        t.getHandlerFunction() === "handleSheetChange" &&
-        t.getTriggerSourceId() === spreadsheetId,
-    );
+    var triggers = ScriptApp.getProjectTriggers();
+    var existing = false;
+    for (var i = 0; i < triggers.length; i++) {
+      if (
+        triggers[i].getHandlerFunction() === "handleSheetChange" &&
+        triggers[i].getTriggerSourceId() === spreadsheetId
+      ) {
+        existing = true;
+        break;
+      }
+    }
 
     if (!existing) {
       ScriptApp.newTrigger("handleSheetChange")
@@ -774,27 +1000,22 @@ function setupNotificationTrigger(spreadsheetId, tabName) {
 
     return {
       status: "success",
-      message: `Đã bật theo dõi cho tab "${actualTabName}" của sheet: ${ss.getName()}`,
+      message: "Đã bật theo dõi cho tab " + actualTabName,
     };
   } catch (e) {
-    AppLogger.error("Setup trigger error", e);
+    AppLogger.error("Setup trigger error", e.toString());
     throw e;
   }
 }
 
-/**
- * 🛠️ Setup: Tắt tính năng thông báo cho một Spreadsheet + Tab cụ thể
- */
 function disableNotificationTrigger(spreadsheetId, tabName) {
   try {
-    const ss = SpreadsheetApp.openById(spreadsheetId);
-    const targetSheet = tabName
-      ? ss.getSheetByName(tabName)
-      : ss.getSheets()[0];
+    var ss = SpreadsheetApp.openById(spreadsheetId);
+    var targetSheet = tabName ? ss.getSheetByName(tabName) : ss.getSheets()[0];
     if (!targetSheet) return { status: "error", message: "Không tìm thấy tab" };
 
-    const cacheSheetName = NOTIF_CONSTANTS.CACHE_PREFIX + targetSheet.getName();
-    const cacheSheet = ss.getSheetByName(cacheSheetName);
+    var cacheSheetName = NOTIF_CONSTANTS.CACHE_PREFIX + targetSheet.getName();
+    var cacheSheet = ss.getSheetByName(cacheSheetName);
 
     if (cacheSheet) {
       ss.deleteSheet(cacheSheet);
@@ -802,71 +1023,42 @@ function disableNotificationTrigger(spreadsheetId, tabName) {
 
     return {
       status: "success",
-      message: `Đã tắt theo dõi cho tab "${targetSheet.getName()}"`,
+      message: "Đã tắt theo dõi cho tab " + targetSheet.getName(),
     };
   } catch (e) {
-    AppLogger.error("Disable trigger error", e);
+    AppLogger.error("Disable trigger error", e.toString());
     throw e;
   }
 }
 
-/**
- * ⚡ Triggered on Change
- */
 function handleSheetChange(e) {
-  const ss = e.source;
-  const ssId = ss.getId();
-  const props = PropertiesService.getScriptProperties();
-  const now = new Date().getTime();
+  var ss = e.source;
+  var ssId = ss.getId();
+  var props = PropertiesService.getScriptProperties();
+  var now = new Date().getTime();
 
-  // 1. Throttling - Giới hạn tần suất tạo trigger
-  const lastTriggerTime = parseInt(
+  var lastTriggerTime = parseInt(
     props.getProperty("last_trigger_time_" + ssId) || "0",
   );
   if (now - lastTriggerTime < 5000) return;
   props.setProperty("last_trigger_time_" + ssId, now.toString());
 
   try {
-    // 2. Tạo trigger mới
-    const trigger = ScriptApp.newTrigger("processNotifications")
+    var trigger = ScriptApp.newTrigger("processNotifications")
       .timeBased()
       .after(NOTIF_CONSTANTS.DEBOUNCE_SECONDS * 1000)
       .create();
 
-    const newTriggerId = trigger.getUniqueId();
+    var newTriggerId = trigger.getUniqueId();
     props.setProperty("active_trigger_" + ssId, newTriggerId);
     props.setProperty("trigger_ss_id_" + newTriggerId, ssId);
   } catch (err) {
-    // 3. Fallback: Nếu hết quota, thử dọn dẹp các trigger cũ và tạo lại
-    AppLogger.warn("Trigger quota reached, attempting cleanup", err);
-    try {
-      const triggers = ScriptApp.getProjectTriggers();
-      let count = 0;
-      for (let t of triggers) {
-        if (t.getHandlerFunction() === "processNotifications") {
-          ScriptApp.deleteTrigger(t);
-          count++;
-        }
-      }
-      if (count > 0) {
-        const trigger = ScriptApp.newTrigger("processNotifications")
-          .timeBased()
-          .after(NOTIF_CONSTANTS.DEBOUNCE_SECONDS * 1000)
-          .create();
-        props.setProperty("active_trigger_" + ssId, trigger.getUniqueId());
-        props.setProperty("trigger_ss_id_" + trigger.getUniqueId(), ssId);
-      }
-    } catch (e2) {
-      AppLogger.error("Fatal trigger creation error", e2);
-    }
+    AppLogger.error("Trigger creation error", err.toString());
   }
 }
 
-/**
- * �️ Helpers for Dynamic Content (Council Sheets)
- */
 function findNotifyColumns_(values) {
-  const keywords = {
+  var keywords = {
     date: ["ngày bảo vệ", "ngày khóa luận", "ngày", "date"],
     time: ["giờ", "thời gian", "khung giờ", "slot"],
     person: [
@@ -880,57 +1072,66 @@ function findNotifyColumns_(values) {
     email: ["@fpt.edu.vn", "@gmail.com", "email", "thư điện tử"],
   };
 
-  const Mapping = {
-    date: 5, // F
-    time: 6, // G
-    person: 10, // K
-    emails: [11, 13], // L, N
+  var Mapping = {
+    date: 5,
+    time: 6,
+    person: 10,
+    emails: [11, 13],
     headerRowIndex: 0,
   };
-
   if (!values || values.length === 0) return Mapping;
 
-  const scanLimit = Math.min(values.length, 15);
-  let bestRow = -1;
-  let maxMatches = -1;
+  var scanLimit = Math.min(values.length, 15);
+  var bestRow = -1;
+  var maxMatches = -1;
 
-  for (let r = 0; r < scanLimit; r++) {
-    const row = values[r];
-    let matches = 0;
-    const currentMapping = { date: -1, time: -1, person: -1, emails: [] };
+  for (var r = 0; r < scanLimit; r++) {
+    var row = values[r];
+    var matches = 0;
+    var currentMapping = { date: -1, time: -1, person: -1, emails: [] };
 
-    row.forEach((cell, c) => {
-      const val = String(cell || "")
+    for (var c = 0; c < row.length; c++) {
+      var val = String(row[c] || "")
         .toLowerCase()
         .trim();
-      if (!val) return;
+      if (!val) continue;
 
       if (
         currentMapping.date === -1 &&
-        keywords.date.some((k) => val.includes(k))
+        keywords.date.some(function (k) {
+          return val.indexOf(k) !== -1;
+        })
       ) {
         currentMapping.date = c;
         matches++;
       }
       if (
         currentMapping.time === -1 &&
-        keywords.time.some((k) => val.includes(k))
+        keywords.time.some(function (k) {
+          return val.indexOf(k) !== -1;
+        })
       ) {
         currentMapping.time = c;
         matches++;
       }
       if (
         currentMapping.person === -1 &&
-        keywords.person.some((k) => val.includes(k))
+        keywords.person.some(function (k) {
+          return val.indexOf(k) !== -1;
+        })
       ) {
         currentMapping.person = c;
         matches++;
       }
-      if (keywords.email.some((k) => val.includes(k))) {
+      if (
+        keywords.email.some(function (k) {
+          return val.indexOf(k) !== -1;
+        })
+      ) {
         currentMapping.emails.push(c);
         matches++;
       }
-    });
+    }
 
     if (matches > maxMatches && matches >= 2) {
       maxMatches = matches;
@@ -938,9 +1139,8 @@ function findNotifyColumns_(values) {
       if (currentMapping.date !== -1) Mapping.date = currentMapping.date;
       if (currentMapping.time !== -1) Mapping.time = currentMapping.time;
       if (currentMapping.person !== -1) Mapping.person = currentMapping.person;
-      if (currentMapping.emails.length > 0) {
-        Mapping.emails = [...new Set(currentMapping.emails)];
-      }
+      if (currentMapping.emails.length > 0)
+        Mapping.emails = currentMapping.emails;
       Mapping.headerRowIndex = r;
     }
   }
@@ -952,165 +1152,152 @@ function formatNotifDate_(date) {
   if (date instanceof Date) {
     return Utilities.formatDate(date, "Asia/Ho_Chi_Minh", "dd/MM/yyyy");
   }
-  const dStr = String(date);
-  if (dStr.includes("-") || dStr.includes("/")) {
+  var dStr = String(date);
+  if (dStr.indexOf("-") !== -1 || dStr.indexOf("/") !== -1) {
     try {
-      const d = new Date(dStr);
-      if (!isNaN(d))
+      var d = new Date(dStr);
+      if (!isNaN(d.getTime()))
         return Utilities.formatDate(d, "Asia/Ho_Chi_Minh", "dd/MM/yyyy");
     } catch (e) {}
   }
   return dStr;
 }
 
-/**
- * 🛠️ Helper: So sánh an toàn giữa 2 giá trị từ Sheet
- * Coi null, undefined và chuỗi rỗng là giống nhau
- */
 function isSameValue_(v1, v2) {
   if (v1 === v2) return true;
-
-  // Xử lý Ngày tháng (Date objects)
   if (v1 instanceof Date || v2 instanceof Date) {
-    const d1 =
-      v1 instanceof Date ? v1.getTime() : new Date(String(v1)).getTime();
-    const d2 =
-      v2 instanceof Date ? v2.getTime() : new Date(String(v2)).getTime();
+    var d1 = v1 instanceof Date ? v1.getTime() : new Date(String(v1)).getTime();
+    var d2 = v2 instanceof Date ? v2.getTime() : new Date(String(v2)).getTime();
     if (!isNaN(d1) && !isNaN(d2)) return d1 === d2;
   }
-
-  // So sánh chuỗi chuẩn hóa
-  const s1 = String(v1 || "")
+  var s1 = String(v1 || "")
     .trim()
     .toLowerCase();
-  const s2 = String(v2 || "")
+  var s2 = String(v2 || "")
     .trim()
     .toLowerCase();
   return s1 === s2;
 }
 
-/**
- * �🚀 Main Notification Engine
- */
 function processNotifications(e) {
-  const triggerId = e.triggerUid;
-  const props = PropertiesService.getScriptProperties();
-  const ssId = props.getProperty("trigger_ss_id_" + triggerId);
+  var triggerId = e.triggerUid;
+  var props = PropertiesService.getScriptProperties();
+  var ssId = props.getProperty("trigger_ss_id_" + triggerId);
 
   if (!ssId) return;
 
-  // 🚀 TỐI ƯU 1: Kiểm tra xem đây có phải là trigger cuối cùng không (Self-Cleanup Debounce)
-  const activeTriggerId = props.getProperty("active_trigger_" + ssId);
+  var activeTriggerId = props.getProperty("active_trigger_" + ssId);
   if (activeTriggerId && activeTriggerId !== triggerId) {
-    // Nếu có trigger mới hơn, trigger hiện tại tự xóa mình và thoát
     deleteTriggerById_(triggerId);
     props.deleteProperty("trigger_ss_id_" + triggerId);
     return;
   }
 
-  // Đây là trigger cuối cùng -> Tiến hành xử lý
   props.deleteProperty("active_trigger_" + ssId);
   props.deleteProperty("trigger_ss_id_" + triggerId);
 
   try {
-    const ss = SpreadsheetApp.openById(ssId);
-    const allSheets = ss.getSheets();
+    var ss = SpreadsheetApp.openById(ssId);
+    var allSheets = ss.getSheets();
+    var cacheSheets = [];
+    for (var i = 0; i < allSheets.length; i++) {
+      if (allSheets[i].getName().indexOf(NOTIF_CONSTANTS.CACHE_PREFIX) === 0) {
+        cacheSheets.push(allSheets[i]);
+      }
+    }
 
-    const cacheSheets = allSheets.filter((s) =>
-      s.getName().startsWith(NOTIF_CONSTANTS.CACHE_PREFIX),
-    );
     if (cacheSheets.length === 0) {
       deleteTriggerById_(triggerId);
       return;
     }
 
-    const lecturersChangesMap = {}; // email -> string[]
+    var lecturersChangesMap = {};
 
-    cacheSheets.forEach((cacheSheet) => {
-      const cacheName = cacheSheet.getName();
-      const sourceName = cacheName.replace(NOTIF_CONSTANTS.CACHE_PREFIX, "");
-      const sourceSheet = ss.getSheetByName(sourceName);
-
+    cacheSheets.forEach(function (cacheSheet) {
+      var sourceName = cacheSheet
+        .getName()
+        .replace(NOTIF_CONSTANTS.CACHE_PREFIX, "");
+      var sourceSheet = ss.getSheetByName(sourceName);
       if (!sourceSheet) return;
 
-      const newData = sourceSheet.getDataRange().getValues();
-      const oldData = cacheSheet.getDataRange().getValues();
-
+      var newData = sourceSheet.getDataRange().getValues();
+      var oldData = cacheSheet.getDataRange().getValues();
       if (newData.length === 0) return;
 
-      const colMap = findNotifyColumns_(newData);
-      const startRow = colMap.headerRowIndex + 1;
+      var colMap = findNotifyColumns_(newData);
+      var startRow = colMap.headerRowIndex + 1;
+      var targetIndices = [colMap.date, colMap.time, colMap.person].concat(
+        colMap.emails,
+      );
 
-      // Xử lý so sánh: Ngày, Giờ, Giảng viên, Email
-      const targetIndices = [
-        colMap.date,
-        colMap.time,
-        colMap.person,
-        ...colMap.emails,
-      ];
+      var maxRows = Math.max(newData.length, oldData.length);
+      for (var i = startRow; i < maxRows; i++) {
+        var newRow = newData[i] || [];
+        var oldRow = oldData[i] || [];
 
-      const maxRows = Math.max(newData.length, oldData.length);
-      for (let i = startRow; i < maxRows; i++) {
-        const newRow = newData[i] || [];
-        const oldRow = oldData[i] || [];
-
-        // 🚀 TỐI ƯU 2: Chỉ so sánh các cột quan trọng
-        const hasChange = targetIndices.some((idx) => {
-          return !isSameValue_(newRow[idx], oldRow[idx]);
-        });
+        var hasChange = false;
+        for (var j = 0; j < targetIndices.length; j++) {
+          if (
+            !isSameValue_(newRow[targetIndices[j]], oldRow[targetIndices[j]])
+          ) {
+            hasChange = true;
+            break;
+          }
+        }
 
         if (hasChange) {
-          // Kiểm tra tất cả các cột email khả dụng
-          let email = "";
-          for (const emailIdx of colMap.emails) {
-            const val = String(
-              newRow[emailIdx] || oldRow[emailIdx] || "",
+          var email = "";
+          for (var k = 0; k < colMap.emails.length; k++) {
+            var val = String(
+              newRow[colMap.emails[k]] || oldRow[colMap.emails[k]] || "",
             ).trim();
-            if (val.includes("@")) {
+            if (val.indexOf("@") !== -1) {
               email = val;
               break;
             }
           }
 
-          const person = String(
+          var person = String(
             newRow[colMap.person] || oldRow[colMap.person] || "",
           ).trim();
+          if (email.indexOf("@") !== -1 || person.length > 2) {
+            var lecturerEmail = email ? email.toLowerCase() : null;
+            if (!lecturerEmail) continue;
 
-          // 🛡️ XÁC THỰC DÒNG: Chỉ xử lý nếu có Email hoặc ít nhất là tên Giảng viên
-          if (email.includes("@") || person.length > 2) {
-            const lecturerEmail = email ? email.toLowerCase() : null;
-
-            // Nếu không có email, log cảnh báo nhưng không thể gửi mail
-            if (!lecturerEmail) {
-              AppLogger.warn(
-                `Dòng ${i + 1} thay đổi nhưng không tìm thấy Email cho: ${person}`,
-              );
-              continue;
-            }
-
-            const dateVal = formatNotifDate_(
+            var dateVal = formatNotifDate_(
               newRow[colMap.date] || oldRow[colMap.date],
             );
-            const oldTime = String(oldRow[colMap.time] || "").trim();
-            const newTime = String(newRow[colMap.time] || "").trim();
+            var oldTime = String(oldRow[colMap.time] || "").trim();
+            var newTime = String(newRow[colMap.time] || "").trim();
 
             if (!lecturersChangesMap[lecturerEmail])
               lecturersChangesMap[lecturerEmail] = [];
 
             if (!isSameValue_(oldTime, newTime) && oldTime && newTime) {
               lecturersChangesMap[lecturerEmail].push(
-                `- Ngày ${dateVal}: Thay đổi giờ từ "${oldTime}" sang "${newTime}" (${person})`,
+                "- Ngày " +
+                  dateVal +
+                  ": Thay đổi giờ từ " +
+                  oldTime +
+                  " sang " +
+                  newTime +
+                  " (" +
+                  person +
+                  ")",
               );
             } else {
               lecturersChangesMap[lecturerEmail].push(
-                `- Ngày ${dateVal}: Có cập nhật mới về lịch giảng dạy (${person})`,
+                "- Ngày " +
+                  dateVal +
+                  ": Có cập nhật mới về lịch giảng dạy (" +
+                  person +
+                  ")",
               );
             }
           }
         }
       }
 
-      // Cập nhật cache cho tab này
       cacheSheet.clear();
       if (newData.length > 0) {
         cacheSheet
@@ -1119,61 +1306,146 @@ function processNotifications(e) {
       }
     });
 
-    // Gửi mail cho từng giảng viên
-    let totalSent = 0;
-    Object.keys(lecturersChangesMap).forEach((email) => {
+    var emails = Object.keys(lecturersChangesMap);
+    var totalSent = 0;
+    for (var i = 0; i < emails.length; i++) {
+      var email = emails[i];
       try {
-        const changesList = lecturersChangesMap[email];
-        // Loại bỏ trùng lặp nếu có
-        const uniqueChanges = [...new Set(changesList)];
-
-        const emailBody = `Xin chào giảng viên,
-
-Lịch giảng dạy/hội đồng của bạn trên Google Sheet đã có sự thay đổi. Chi tiết như sau:
-${uniqueChanges.join("\n")}
-
-Vui lòng truy cập trang web dưới đây để đồng bộ lại lịch vào Google Calendar cá nhân:
-https://shedule-teaching.vercel.app/
-
-Trân trọng,
-Đội ngũ Admin.`;
-
+        var changes = lecturersChangesMap[email];
+        var emailBody =
+          "Xin chào giảng viên,\n\nLịch giảng dạy/hội đồng của bạn trên Google Sheet đã có sự thay đổi. Chi tiết như sau:\n" +
+          changes.join("\n") +
+          "\n\nVui lòng truy cập trang web để đồng bộ lại: https://shedule-teaching.vercel.app/\n\nTrân trọng.";
         GmailApp.sendEmail(
           email,
-          "[FPT Calendar] Thông báo thay đổi lịch giảng dạy",
+          "[FPT Calendar] Thông báo thay đổi lịch",
           emailBody,
         );
         totalSent++;
       } catch (err) {
-        AppLogger.error("Failed to send email to: " + email, err);
+        AppLogger.error("Failed to send email to " + email, err.toString());
       }
-    });
+    }
 
-    AppLogger.info("Notifications processed", {
-      ssId: ssId,
-      recipients: Object.keys(lecturersChangesMap).length,
-      totalSent: totalSent,
-    });
-
-    // Cuối cùng xóa trigger hiện tại
+    AppLogger.info("Notifications processed", { totalSent: totalSent });
     deleteTriggerById_(triggerId);
   } catch (err) {
-    AppLogger.error("Process notifications error", err);
+    AppLogger.error("Process notifications error", err.toString());
     deleteTriggerById_(triggerId);
   }
 }
 
-/**
- * 🗑️ Helper: Xóa trigger theo ID mà không cần quét toàn bộ danh sách
- */
 function deleteTriggerById_(id) {
   if (!id) return;
-  const triggers = ScriptApp.getProjectTriggers();
-  for (let i = 0; i < triggers.length; i++) {
+  var triggers = ScriptApp.getProjectTriggers();
+  for (var i = 0; i < triggers.length; i++) {
     if (triggers[i].getUniqueId() === id) {
       ScriptApp.deleteTrigger(triggers[i]);
       break;
     }
+  }
+}
+
+/**
+ *  Tạo bảng tóm tắt lịch trình (Text/HTML basic) cho phần mô tả Calendar
+ */
+function summarizeSchedule_(subEvents) {
+  try {
+    return subEvents
+      .map(function (s, idx) {
+        const d = parseDateISO_(s.start);
+        const dateStr = Utilities.formatDate(d, "GMT+7", "dd/MM/yyyy");
+        const timeStr =
+          Utilities.formatDate(d, "GMT+7", "HH:mm") +
+          "-" +
+          Utilities.formatDate(parseDateISO_(s.end), "GMT+7", "HH:mm");
+        return (
+          idx +
+          1 +
+          ". 📅 " +
+          dateStr +
+          " | ⏰ " +
+          timeStr +
+          " | 📍 " +
+          (s.location || "N/A")
+        );
+      })
+      .join("<br>");
+  } catch (e) {
+    return "Không thể tải tóm tắt.";
+  }
+}
+
+/**
+ * 🛠️ Utility: Parse ISO date string reliably
+ */
+function parseDateISO_(isoStr) {
+  if (!isoStr) return new Date();
+  var d = new Date(isoStr);
+  if (!isNaN(d.getTime())) return d;
+  // Fallback for YYYY-MM-DD
+  var parts = String(isoStr).split("T")[0].split("-");
+  if (parts.length === 3) {
+    return new Date(parts[0], parts[1] - 1, parts[2]);
+  }
+  return new Date();
+}
+
+function sendManualSummaryEmail_(toEmails, title, subEvents, calendarName) {
+  try {
+    var emailList = toEmails.split(",");
+    var rowsHtml = subEvents
+      .map(function (s, idx) {
+        var d = new Date(s.start);
+        var dateStr = Utilities.formatDate(d, "GMT+7", "dd/MM/yyyy");
+        var timeStr =
+          Utilities.formatDate(d, "GMT+7", "HH:mm") +
+          " - " +
+          Utilities.formatDate(new Date(s.end), "GMT+7", "HH:mm");
+        return (
+          "<tr>" +
+          "<td style='padding: 10px; border: 1px solid #ddd;'>" +
+          (idx + 1) +
+          "</td>" +
+          "<td style='padding: 10px; border: 1px solid #ddd;'>" +
+          dateStr +
+          "</td>" +
+          "<td style='padding: 10px; border: 1px solid #ddd;'>" +
+          timeStr +
+          "</td>" +
+          "<td style='padding: 10px; border: 1px solid #ddd;'>" +
+          s.location +
+          "</td>" +
+          "</tr>"
+        );
+      })
+      .join("");
+
+    var bodyHtml =
+      "<div style='font-family: Arial, sans-serif; color: #333; max-width: 600px; border: 1px solid #eee; padding: 20px; border-radius: 10px;'>" +
+      "<h2 style='color: #F27024; border-bottom: 2px solid #F27024; padding-bottom: 10px;'>" +
+      title +
+      "</h2>" +
+      "<p>Kính chào Giảng viên,</p>" +
+      "<p>Bạn có lịch chấm mới trên hệ thống <b>FPT Scheduler</b>. Toàn bộ lịch trình đã được đồng bộ vào Google Calendar cá nhân của bạn.</p>" +
+      "<table style='width: 100%; border-collapse: collapse; margin: 15px 0;'>" +
+      "<thead style='background: #f8f8f8;'><tr><th>STT</th><th>Ngày</th><th>Giờ</th><th>Phòng</th></tr></thead>" +
+      "<tbody>" +
+      rowsHtml +
+      "</tbody>" +
+      "</table>" +
+      "<p>Trân trọng,<br><b>Ban Đào Tạo FPT Polytechnic</b></p></div>";
+
+    emailList.forEach(function (email) {
+      GmailApp.sendEmail(
+        email.trim(),
+        "[FPT Scheduler] Thông báo lịch chấm mới",
+        "",
+        { htmlBody: bodyHtml },
+      );
+    });
+  } catch (e) {
+    AppLogger.error("sendManualSummaryEmail error", e.toString());
   }
 }
 

@@ -1105,31 +1105,44 @@ export const LecturerDashboard: React.FC = () => {
       {(rows.length > 0 || (allRows.length > 0 && isPreviewMode)) && (
         <section className="flex-none lg:flex-1 lg:min-h-0 card-clean flex flex-col mb-2 overflow-hidden">
           {/* Header Row */}
-          <div className="p-4 md:p-5 border-b border-slate-100 flex flex-col lg:flex-row lg:items-center justify-between gap-4">
+          <div className="p-3 md:p-5 border-b border-slate-100 flex flex-col lg:flex-row lg:items-center justify-between gap-3 sm:gap-4">
             {/* Step label */}
-            <div className="flex items-center gap-4 shrink-0">
-              <div className="step-number">3</div>
-              <div>
-                <h2 className="text-sm font-bold text-slate-800 uppercase tracking-widest leading-none">Kiểm tra & Đồng bộ</h2>
-                <p className="text-[10px] text-slate-400 font-bold mt-1 uppercase">
-                  {isPreviewMode ? 'CHẾ ĐỘ XEM TRƯỚC' : `ĐÃ SẴN SÀNG: ${filteredRows.length}`}
-                </p>
+            <div className="flex items-center justify-between lg:justify-start gap-3 shrink-0">
+              <div className="flex items-center gap-2">
+                <div className="step-number w-6 h-6 sm:w-7 sm:h-7 text-[10px] sm:text-xs">3</div>
+                <div>
+                  <h2 className="text-[10px] sm:text-sm font-bold text-slate-800 uppercase tracking-widest leading-none">Kiểm tra</h2>
+                  <p className="text-[8px] sm:text-[10px] text-slate-400 font-bold mt-0.5 uppercase">
+                    {isPreviewMode ? 'XEM TRƯỚC' : `Sẵn sàng: ${filteredRows.length}`}
+                  </p>
+                </div>
               </div>
+              
+              {/* Mobile-only Config Toggle button */}
+              <button
+                onClick={() => setIsConfigExpanded(!isConfigExpanded)}
+                className="lg:hidden p-2 rounded-lg bg-slate-50 text-slate-400 border border-slate-200"
+                title={isConfigExpanded ? 'Ẩn cấu hình' : 'Hiện cấu hình'}
+              >
+                <svg className={`w-3.5 h-3.5 transition-transform ${isConfigExpanded ? 'rotate-180' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M19 9l-7 7-7-7" />
+                </svg>
+              </button>
             </div>
 
-            {/* Search */}
-            <div className="flex flex-col sm:flex-row items-center gap-3 flex-1 min-w-0">
+            {/* Search + Action Buttons Group */}
+            <div className="flex flex-col sm:flex-row items-center gap-2 flex-1 min-w-0 w-full">
               <div className="relative flex-1 group w-full">
-                <div className="absolute left-4 top-2.5 text-slate-300 group-focus-within:text-[#F27024] transition-colors pointer-events-none">
-                  <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
+                <div className="absolute left-3 top-2.5 text-slate-300 pointer-events-none">
+                  <svg className="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
                     <circle cx="11" cy="11" r="8"></circle>
                     <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
                   </svg>
                 </div>
                 <input
                   type="text"
-                  placeholder="Lọc tên giảng viên..."
-                  className="w-full pl-11 pr-4 py-2 bg-white border border-slate-200 rounded-xl text-sm text-slate-700 placeholder:text-slate-400 focus:ring-2 focus:ring-[#F27024]/20 focus:border-[#F27024] outline-none transition-all"
+                  placeholder="Tìm giảng viên..."
+                  className="w-full pl-9 pr-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs text-slate-700 placeholder:text-slate-400 focus:ring-2 focus:ring-[#F27024]/10 focus:border-[#F27024] outline-none transition-all"
                   value={personFilter}
                   onChange={(e) => {
                     setPersonFilter(e.target.value);
@@ -1137,136 +1150,103 @@ export const LecturerDashboard: React.FC = () => {
                   }}
                 />
               </div>
-              <SearchColumnSelector
-                headers={searchHeaderOptions}
-                selectedIndices={searchColumnIndices}
-                onSelectionChange={setSearchColumnIndices}
-              />
+              <div className="flex items-center gap-2 w-full sm:w-auto">
+                <SearchColumnSelector
+                  headers={searchHeaderOptions}
+                  selectedIndices={searchColumnIndices}
+                  onSelectionChange={setSearchColumnIndices}
+                />
+                {/* Desktop Config Button */}
+                <button
+                  onClick={() => setIsConfigExpanded(!isConfigExpanded)}
+                  className="hidden lg:flex h-10 px-4 bg-slate-50 text-slate-500 border border-slate-200 rounded-xl font-bold text-xs uppercase items-center gap-2 hover:bg-slate-100 transition-all shadow-sm"
+                >
+                  <svg className={`w-3.5 h-3.5 transition-transform ${isConfigExpanded ? 'rotate-180' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M19 9l-7 7-7-7" />
+                  </svg>
+                  <span>{isConfigExpanded ? 'Ẩn cấu hình' : 'Hiện cấu hình'}</span>
+                </button>
+              </div>
             </div>
 
-            {/* Action buttons — flex-wrap để không tràn */}
-            <div className="flex flex-wrap items-center gap-2 shrink-0">
-              <button
-                onClick={() => setIsConfigExpanded(!isConfigExpanded)}
-                className={`h-11 px-4 rounded-xl font-bold transition-all flex items-center justify-center gap-2 border shadow-sm text-xs uppercase ${
-                  isConfigExpanded 
-                  ? 'bg-slate-50 text-slate-500 border-slate-200 hover:bg-slate-100' 
-                  : 'bg-indigo-50 text-indigo-600 border-indigo-100 hover:bg-indigo-100'
-                }`}
-                title="Đóng / Mở phần Cấu hình Semester và Ánh xạ dữ liệu"
-              >
-                <svg className={`w-4 h-4 transition-transform duration-300 ${isConfigExpanded ? 'rotate-180' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M19 9l-7 7-7-7" />
-                </svg>
-                <span className="hidden sm:inline">{isConfigExpanded ? 'Ẩn cấu hình' : 'Sửa cấu hình (Bước 1 & 2)'}</span>
-              </button>
-
+            {/* Buttons Group — Scrollable on mobile if many items */}
+            <div className="flex items-center gap-1.5 shrink-0 overflow-x-auto pb-1 sm:pb-0 scrollbar-none w-full lg:w-auto overflow-y-hidden">
               <button
                 onClick={() => handleSync(false)}
                 disabled={syncing || clearing || selectedIds.size === 0}
-                className="h-11 px-6 bg-[#F27024] hover:bg-orange-600 text-white rounded-xl font-bold disabled:opacity-30 transition-all flex items-center justify-center gap-2 shadow-sm uppercase text-xs tracking-wider"
+                className="h-10 px-4 bg-[#F27024] hover:bg-orange-600 text-white rounded-xl font-bold disabled:opacity-30 transition-all flex items-center justify-center gap-2 shadow-sm uppercase text-[10px] sm:text-xs tracking-wider whitespace-nowrap"
               >
                 {syncing ? (
-                  <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                  <div className="w-3.5 h-3.5 border-2 border-white/30 border-t-white rounded-full animate-spin" />
                 ) : (
                   <>
                     <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" /></svg>
-                    Đồng bộ ({selectedIds.size})
+                    <span>Lịch ({selectedIds.size})</span>
                   </>
                 )}
               </button>
 
               {isAdmin(firebaseUser?.email) && (
                 <>
-                  <div className="relative group">
+                  <div className="relative group shrink-0">
                     <button
                       onClick={handleNotifyAllLecturers}
                       disabled={isNotifying || syncing || clearing}
-                      className={`h-11 px-6 rounded-xl font-bold transition-all shadow-sm flex items-center justify-center gap-2 text-xs uppercase ${
-                        confirmNotifyData 
-                        ? 'bg-slate-900 text-white' 
-                        : 'bg-slate-800 text-white hover:bg-slate-900'
+                      className={`h-10 px-3 rounded-xl font-bold transition-all shadow-sm flex items-center justify-center gap-1.5 text-[10px] sm:text-xs uppercase whitespace-nowrap ${
+                        confirmNotifyData ? 'bg-slate-900 text-white' : 'bg-slate-800 text-white hover:bg-slate-900'
                       }`}
                     >
                       {isNotifying ? (
-                        <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                        <div className="w-3.5 h-3.5 border-2 border-white/30 border-t-white rounded-full animate-spin" />
                       ) : (
                         <>
-                          <svg className="w-4 h-4 text-orange-400" fill="currentColor" viewBox="0 0 20 20"><path d="M2.003 5.884L10 9.882l7.997-3.998A2 2 0 0016 4H4a2 2 0 00-1.997 1.884z" /><path d="M18 8.118l-8 4-8-4V14a2 2 0 002 2h12a2 2 0 002-2V8.118z" /></svg>
-                          Thông báo GV
+                          <svg className="w-3.5 h-3.5 text-orange-400" fill="currentColor" viewBox="0 0 20 20"><path d="M2.003 5.884L10 9.882l7.997-3.998A2 2 0 0016 4H4a2 2 0 00-1.997 1.884z" /><path d="M18 8.118l-8 4-8-4V14a2 2 0 002 2h12a2 2 0 002-2V8.118z" /></svg>
+                          <span className="hidden sm:inline">Thông báo GV</span>
+                          <span className="sm:hidden">Email</span>
                         </>
                       )}
                     </button>
 
                     {confirmNotifyData && (
-                      <div className="absolute bottom-full right-0 mb-4 w-80 bg-white border border-slate-100 p-8 rounded-[2rem] shadow-[0_20px_50px_rgba(0,0,0,0.15)] z-[100] animate-in fade-in slide-in-from-bottom-4 duration-300">
-                        <div className="text-center mb-6">
-                          <h4 className="text-sm font-black text-blue-600 uppercase tracking-tight mb-2">Gửi thư thông báo?</h4>
-                          <p className="text-[10px] text-slate-400 font-bold leading-relaxed uppercase tracking-wider">
-                            Sẽ gửi thư mời tới {confirmNotifyData.length} GV. <br/>
-                            Lịch sẽ tự động đồng bộ nếu đã liên kết.
-                          </p>
+                      <div className="absolute bottom-full right-0 mb-4 w-72 xs:w-80 bg-white border border-slate-100 p-6 rounded-[1.5rem] shadow-[0_20px_50px_rgba(0,0,0,0.15)] z-[100] animate-in fade-in slide-in-from-bottom-2 duration-300">
+                        <div className="text-center mb-4">
+                          <h4 className="text-sm font-black text-blue-600 uppercase tracking-tight mb-1">Gửi thư thông báo?</h4>
+                          <p className="text-[10px] text-slate-400 font-bold leading-relaxed uppercase tracking-wider">Tới {confirmNotifyData.length} GV.</p>
                         </div>
-                        <div className="flex gap-3">
-                          <button
-                            onClick={() => executeNotifyLecturers(confirmNotifyData)}
-                            className="flex-[1.5] py-3.5 bg-blue-600 text-white rounded-2xl font-black text-[10px] uppercase tracking-widest hover:bg-blue-700 transition-all active:scale-95 shadow-lg shadow-blue-100"
-                          >
-                            Xác nhận gửi
-                          </button>
-                          <button 
-                            onClick={() => {
-                                setConfirmNotifyData(null);
-                                setIsNotifying(false);
-                            }} 
-                            className="flex-1 py-3.5 bg-slate-50 text-slate-400 rounded-2xl font-black text-[10px] uppercase tracking-widest hover:bg-slate-100"
-                          >
-                            Hủy
-                          </button>
+                        <div className="flex gap-2">
+                          <button onClick={() => executeNotifyLecturers(confirmNotifyData)} className="flex-[1.5] py-2.5 bg-blue-600 text-white rounded-xl font-black text-[10px] uppercase tracking-widest active:scale-95 shadow-lg">Gửi</button>
+                          <button onClick={() => { setConfirmNotifyData(null); setIsNotifying(false); }} className="flex-1 py-2.5 bg-slate-50 text-slate-400 rounded-xl font-black text-[10px] uppercase tracking-widest outline-none">Hủy</button>
                         </div>
                         <div className="absolute top-full right-8 w-4 h-4 bg-white rotate-45 -translate-y-2 border-r border-b border-slate-100"></div>
                       </div>
                     )}
                   </div>
 
-                  <div className="relative group">
+                  <div className="relative group shrink-0">
                     <button
                       onClick={() => {
-                        // 🛡️ Close other popovers
                         setConfirmNotifyData(null);
                         setIsNotifying(false);
                         setIsConfirmingClear(false);
                         setIsConfirmingGlobalRecall(true);
                       }}
                       disabled={syncing || clearing}
-                      className={`h-11 px-6 rounded-xl font-bold transition-all text-xs uppercase ${
-                         isConfirmingGlobalRecall
-                         ? 'bg-rose-600 text-white'
-                         : 'bg-rose-50 text-rose-600 border border-rose-100 hover:bg-rose-100'
+                      className={`h-10 px-3 rounded-xl font-bold transition-all text-[10px] sm:text-xs uppercase whitespace-nowrap border ${
+                        isConfirmingGlobalRecall ? 'bg-rose-600 text-white border-rose-600' : 'bg-rose-50 text-rose-600 border-rose-100'
                       }`}
                     >
-                      Thu hồi tất cả
+                      Thu hồi
                     </button>
 
                     {isConfirmingGlobalRecall && (
-                      <div className="absolute bottom-full right-0 mb-4 w-80 bg-white border border-slate-100 p-8 rounded-[2rem] shadow-[0_20px_50px_rgba(0,0,0,0.15)] z-[100] animate-in fade-in slide-in-from-bottom-4 duration-300">
-                        <div className="text-center mb-6">
-                          <h4 className="text-sm font-black text-rose-600 uppercase tracking-tight mb-2">THU HỒI TẤT CẢ?</h4>
-                          <p className="text-[10px] text-slate-400 font-bold leading-relaxed uppercase tracking-wider">
-                            HÀNH ĐỘNG NÀY SẼ XÓA TRIỆT ĐỂ LỊCH TRÊN TOÀN BỘ GIẢNG VIÊN.
-                          </p>
+                      <div className="absolute bottom-full right-0 mb-4 w-72 xs:w-80 bg-white border border-slate-100 p-6 rounded-[1.5rem] shadow-[0_20px_50px_rgba(0,0,0,0.15)] z-[100] animate-in fade-in slide-in-from-bottom-2 duration-300">
+                        <div className="text-center mb-4">
+                          <h4 className="text-sm font-black text-rose-600 uppercase tracking-tight mb-1">XÓA TẤT CẢ?</h4>
+                          <p className="text-[10px] text-slate-400 font-bold uppercase tracking-widest text-center">HÀNH ĐỘNG KHÔNG THỂ KHÔI PHỤC.</p>
                         </div>
-                        <div className="flex gap-3">
-                          <button
-                            onClick={async () => {
-                              setIsConfirmingGlobalRecall(false);
-                              await globalRecallEvents();
-                            }}
-                            className="flex-[1.5] py-3.5 bg-rose-600 text-white rounded-2xl font-black text-[10px] uppercase tracking-widest hover:bg-rose-700 transition-all active:scale-95 shadow-lg shadow-rose-100"
-                          >
-                            Xác nhận xóa
-                          </button>
-                          <button onClick={() => setIsConfirmingGlobalRecall(false)} className="flex-1 py-3.5 bg-slate-50 text-slate-400 rounded-2xl font-black text-[10px] uppercase tracking-widest hover:bg-slate-100">Hủy</button>
+                        <div className="flex gap-2">
+                          <button onClick={async () => { setIsConfirmingGlobalRecall(false); await globalRecallEvents(); }} className="flex-[1.5] py-2.5 bg-rose-600 text-white rounded-xl font-black text-[10px] uppercase tracking-widest active:scale-95">Xác nhận</button>
+                          <button onClick={() => setIsConfirmingGlobalRecall(false)} className="flex-1 py-2.5 bg-slate-50 text-slate-400 rounded-xl font-black text-[10px] uppercase tracking-widest outline-none">Hủy</button>
                         </div>
                         <div className="absolute top-full right-8 w-4 h-4 bg-white rotate-45 -translate-y-2 border-r border-b border-slate-100"></div>
                       </div>
@@ -1275,52 +1255,41 @@ export const LecturerDashboard: React.FC = () => {
                 </>
               )}
 
-              <div className="relative group">
+              <div className="relative group shrink-0">
                 <button
                   onClick={() => {
-                    // 🛡️ Close other popovers
                     setConfirmNotifyData(null);
                     setIsNotifying(false);
                     setIsConfirmingGlobalRecall(false);
                     setIsConfirmingClear(true);
                   }}
                   disabled={syncing || clearing}
-                  className={`h-11 px-6 rounded-xl font-bold transition-all text-xs uppercase flex items-center justify-center gap-2 border shadow-sm ${
-                    isConfirmingClear
-                    ? 'bg-rose-600 text-white border-rose-600 shadow-rose-200'
-                    : 'bg-white text-slate-500 border-slate-200 hover:border-rose-500 hover:text-rose-500'
+                  className={`h-10 px-3 rounded-xl font-bold transition-all flex items-center justify-center gap-1.5 border shadow-sm text-[10px] sm:text-xs uppercase whitespace-nowrap ${
+                    isConfirmingClear ? 'bg-rose-600 text-white border-rose-600 shadow-rose-200' : 'bg-white text-slate-500 border-slate-200 hover:border-rose-500 hover:text-rose-500'
                   }`}
                 >
                   {clearing ? (
-                    <div className="w-4 h-4 border-2 border-current border-t-transparent rounded-full animate-spin" />
+                    <div className="w-3.5 h-3.5 border-2 border-current border-t-transparent rounded-full animate-spin" />
                   ) : (
                     <>
-                      <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg>
-                      Dọn dẹp Lịch
+                      <svg className="w-3.5 h-3.5 sm:w-4 sm:h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg>
+                      <span className="hidden sm:inline">Dọn dẹp</span>
+                      <span className="sm:hidden">Xóa</span>
                     </>
                   )}
                 </button>
 
                 {isConfirmingClear && (
-                  <div className="absolute bottom-full right-0 mb-4 w-80 bg-white border border-slate-100 p-8 rounded-[2rem] shadow-[0_20px_50px_rgba(0,0,0,0.15)] z-[100] animate-in fade-in slide-in-from-bottom-4 duration-300">
-                    <div className="text-center mb-6">
-                      <h4 className="text-sm font-black text-rose-600 uppercase tracking-tight mb-2">Dọn dẹp lịch cá nhân</h4>
-                      <p className="text-[10px] text-slate-400 font-bold leading-relaxed uppercase tracking-wider">Sẽ xóa sạch các sự kiện app đã tạo trên lịch của bạn.</p>
+                  <div className="absolute bottom-full right-0 mb-4 w-72 xs:w-80 bg-white border border-slate-100 p-6 rounded-[1.5rem] shadow-[0_20px_50px_rgba(0,0,0,0.15)] z-[100] animate-in fade-in slide-in-from-bottom-2 duration-300">
+                    <div className="text-center mb-4">
+                      <h4 className="text-sm font-black text-rose-600 uppercase tracking-tight mb-1">DỌN DẸP LỊCH</h4>
+                      <p className="text-[10px] text-slate-400 font-bold uppercase tracking-widest">Sẽ xóa sạch sự kiện cũ của bạn.</p>
                     </div>
-                    <div className="flex gap-3">
-                      <button
-                        onClick={async () => {
-                          setIsConfirmingClear(false);
-                          const currentType = effectiveIsReview ? 'review' : 'council';
-                          await clearAppEvents(currentType);
-                        }}
-                        className="flex-[1.5] py-3.5 bg-rose-600 text-white rounded-2xl font-black text-[10px] uppercase tracking-widest hover:bg-rose-700 transition-all active:scale-95 shadow-lg shadow-rose-100"
-                      >
-                        Xác nhận
-                      </button>
-                      <button onClick={() => setIsConfirmingClear(false)} className="flex-1 py-3.5 bg-slate-50 text-slate-400 rounded-2xl font-black text-[10px] uppercase tracking-widest hover:bg-slate-100">Hủy</button>
+                    <div className="flex gap-2">
+                      <button onClick={async () => { setIsConfirmingClear(false); const currentType = effectiveIsReview ? 'review' : 'council'; await clearAppEvents(currentType); }} className="flex-[1.5] py-2.5 bg-rose-600 text-white rounded-xl font-black text-[10px] uppercase tracking-widest active:scale-95">Xác nhận</button>
+                      <button onClick={() => setIsConfirmingClear(false)} className="flex-1 py-2.5 bg-slate-50 text-slate-400 rounded-xl font-black text-[10px] uppercase tracking-widest outline-none">Hủy</button>
                     </div>
-                    <div className="absolute top-full right-14 w-4 h-4 bg-white rotate-45 -translate-y-2 border-r border-b border-slate-100"></div>
+                    <div className="absolute top-full right-8 w-4 h-4 bg-white rotate-45 -translate-y-2 border-r border-b border-slate-100"></div>
                   </div>
                 )}
               </div>

@@ -137,7 +137,7 @@ export const useCalendarSync = ({ accessToken, reauthorizeGoogle }: UseCalendarS
           resources: [r.person, r.location].filter(Boolean) as string[],
           description: r.raw?.description || `Đồng bộ từ FPT Scheduler\nGV: ${r.person || 'N/A'}\nNhiệm vụ: ${r.task || 'N/A'}\nPhòng: ${r.location || 'N/A'}\n[ID: ${r.id}]`,
           signature: r.id,
-          colorId: r.isGrouped ? '' : '11', // 🎨 Tomato (Red) for Councils, Default for Reviews
+          colorId: r.sheetType === 'review' ? '9' : '11', // 🎨 Review: Blue (9), Council: Red (11)
           subEvents: r.subEvents // 📧 NEW: Truyền danh sách các buổi lẻ
         };
       });
@@ -289,8 +289,8 @@ export const useCalendarSync = ({ accessToken, reauthorizeGoogle }: UseCalendarS
         failed: res.data?.silentFailed || 0,
         skipped: 0,
         logs: [
-          `Global Recall: Processed ${res.data?.totalProcessed || 0} lecturers.`, 
-          `Cleared: ${res.data?.silentCleared || 0} local events, ${res.data?.proxyCleared || 0} proxy invitations.`
+          `Thu hồi toàn hệ thống: Đã xử lý ${res.data?.totalProcessed || 0} giảng viên.`, 
+          `Đã xóa: ${res.data?.silentCleared || 0} sự kiện cá nhân, ${res.data?.proxyCleared || 0} lời mời dự phòng.`
         ]
       };
       setSyncResult(result);

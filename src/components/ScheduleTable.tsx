@@ -187,26 +187,26 @@ export const ScheduleTable: React.FC<ScheduleTableProps> = ({
               {!isPreview ? (
                 <>
                   <td className="px-6 py-4 border-b border-slate-100">
-                    <span className="text-sm text-slate-700 font-medium">{row.dateRaw || row.date}</span>
+                    <span className="text-[13px] text-slate-600 font-bold uppercase tracking-tight">{row.dateRaw || row.date}</span>
                   </td>
                   <td className="px-6 py-4 border-b border-slate-100">
-                    <span className="text-sm text-slate-800 font-bold">
+                    <span className="text-[13px] text-slate-900 font-bold tracking-widest whitespace-nowrap">
                       {row.timeRaw || (row.startTime?.includes('T') ? (row.startTime.split('T')[1].substring(0, 5) + ' - ' + row.endTime.split('T')[1].substring(0, 5)) : '')}
                     </span>
                   </td>
                   <td className="px-6 py-4 border-b border-slate-100">
                     {columnLabels?.task && (columnLabels.task.toLowerCase().includes('reviewer') || columnLabels.task.toLowerCase().includes('gv')) ? (
                       <div className="flex flex-col">
-                        <span className="text-sm font-bold text-slate-800 uppercase tracking-tight">{row.task || '-'}</span>
+                        <span className="text-[13px] font-bold text-slate-600 uppercase tracking-tight">{row.task || '-'}</span>
                         <span className="text-[9px] font-bold text-[#F27024] mt-1 uppercase tracking-tighter">REVIEW 1</span>
                       </div>
                     ) : (
-                      <span className="text-xs text-slate-500 font-medium max-w-xs truncate block">{row.task || '-'}</span>
+                      <span className="text-[13px] text-slate-600 font-bold uppercase tracking-tight block max-w-xs truncate">{row.task || '-'}</span>
                     )}
                   </td>
                   <td className="px-6 py-4 border-b border-slate-100">
                     <div className="flex flex-col">
-                      <span className="text-sm font-bold text-slate-800 uppercase tracking-tight">{row.personRaw || row.person}</span>
+                      <span className="text-sm font-bold text-slate-900 uppercase tracking-tight">{row.personRaw || row.person}</span>
                       {row.groupName &&
                         row.groupName.toLowerCase().trim() !== (row.personRaw || row.person).toLowerCase().trim() && (
                           <span className="text-[9px] font-bold text-[#F27024] mt-1 uppercase tracking-tighter">{row.groupName}</span>
@@ -214,7 +214,7 @@ export const ScheduleTable: React.FC<ScheduleTableProps> = ({
                     </div>
                   </td>
                   <td className="px-6 py-4 border-b border-slate-100">
-                    <span className="text-[11px] font-bold text-slate-600 uppercase tracking-wider">{row.locationRaw || row.location}</span>
+                    <span className="text-[13px] font-bold text-slate-600 uppercase tracking-tight">{row.locationRaw || row.location}</span>
                   </td>
                 </>
               ) : showDynamic ? (
@@ -235,30 +235,30 @@ export const ScheduleTable: React.FC<ScheduleTableProps> = ({
 
                   return (
                     <td key={i} className="px-6 py-4 border-b border-slate-100">
-                      <span className="text-sm text-slate-700">{cellValue}</span>
+                      <span className="text-[13px] text-slate-800 font-bold">{cellValue}</span>
                     </td>
                   );
                 })
               ) : (
                 <>
                   <td className="px-6 py-4 border-b border-slate-100">
-                    <span className="text-sm text-slate-700 font-medium">{row.dateRaw || row.date}</span>
+                    <span className="text-[13px] text-slate-600 font-bold uppercase tracking-tight">{row.dateRaw || row.date}</span>
                   </td>
                   <td className="px-6 py-4 border-b border-slate-100">
-                    <span className="text-sm text-slate-800 font-bold">
+                    <span className="text-[13px] text-slate-900 font-bold tracking-widest whitespace-nowrap">
                       {row.timeRaw || (row.startTime?.includes('T') ? (row.startTime.split('T')[1].substring(0, 5) + ' - ' + row.endTime.split('T')[1].substring(0, 5)) : '')}
                     </span>
                   </td>
                   <td className="px-6 py-4 border-b border-slate-100">
                     <div className="flex flex-col">
-                       <span className="text-sm font-bold text-slate-800 uppercase tracking-tight">{row.personRaw || row.person}</span>
+                       <span className="text-sm font-bold text-slate-900 uppercase tracking-tight">{row.personRaw || row.person}</span>
                        {row.groupName && (
                           <span className="text-[9px] font-bold text-[#F27024] mt-1 uppercase tracking-tighter">{row.groupName}</span>
                        )}
                     </div>
                   </td>
                   <td className="px-6 py-4 border-b border-slate-100">
-                     <span className="text-[11px] font-bold text-slate-600 uppercase tracking-wider">{row.locationRaw || row.location}</span>
+                     <span className="text-[13px] font-bold text-slate-600 uppercase tracking-tight">{row.locationRaw || row.location}</span>
                   </td>
                 </>
               )}

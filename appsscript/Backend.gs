@@ -13,11 +13,9 @@ var CONSTANTS = {
   MAGIC_STRING: "Đồng bộ từ FPT Scheduler",
   SUCCESS: "success",
   ERROR: "error",
-  // 🛡️ SECURITY: Keys are now stored in GAS Script Properties
   FIREBASE_WEB_API_KEY:
-    PropertiesService.getScriptProperties().getProperty(
-      "FIREBASE_WEB_API_KEY",
-    ) || "YOUR_KEY",
+    PropertiesService.getScriptProperties().getProperty("FIREBASE_API_KEY") ||
+    "AIzaSy...",
   FIREBASE_URL:
     "https://scheduleteaching-default-rtdb.asia-southeast1.firebasedatabase.app/",
   ADMIN_EMAILS: ["ngohoangtruongdat@gmail.com", "ngohoangtruongdat2@gmail.com"],
@@ -26,11 +24,11 @@ var CONSTANTS = {
   OAUTH: {
     CLIENT_ID:
       PropertiesService.getScriptProperties().getProperty("OAUTH_CLIENT_ID") ||
-      "YOUR_ID.apps.googleusercontent.com",
+      "YOUR_CLIENT_ID",
     CLIENT_SECRET:
       PropertiesService.getScriptProperties().getProperty(
         "OAUTH_CLIENT_SECRET",
-      ) || "YOUR_SECRET",
+      ) || "YOUR_CLIENT_SECRET",
     REDIRECT_URI: "https://shedule-teaching.vercel.app/",
   },
 };
@@ -453,7 +451,12 @@ var CalendarService = {
                 },
               },
             };
-            if (ev.colorId) payload.colorId = String(ev.colorId);
+            // 🎨 MÀU SẮC: Đỏ cho Hội đồng, Xanh dương cho Review
+            payload.colorId = ev.colorId
+              ? String(ev.colorId)
+              : sheetType === "review"
+                ? "9"
+                : "11";
 
             // � LỒNG DATA VÀO DESCRIPTION (Dành cho Google Calendar Invitation)
             if (ev.guests) {
@@ -1924,6 +1927,7 @@ function createMergedCalendarInvitation_(
           sheet_type: sheetType || "council",
         },
       },
+      colorId: sheetType === "review" ? "9" : "11",
     };
 
     // 🚀 Đảm bảo mô tả có MAGIC_STRING để có thể xóa bằng search
@@ -2404,7 +2408,7 @@ function globalRecallHandler_(payload) {
               } catch (clearErr) {
                 results.silentFailed++;
                 results.errors.push(
-                  "Recall failed for " + key + ": " + clearErr.toString(),
+                  "Thu hồi thất bại cho " + key + ": " + clearErr.toString(),
                 );
               }
             } else {
@@ -2414,10 +2418,10 @@ function globalRecallHandler_(payload) {
         }
       }
     } else {
-      results.errors.push("Failed to fetch lecturer tokens from DB.");
+      results.errors.push("Không thể lấy danh sách token giảng viên từ DB.");
     }
   } catch (e) {
-    results.errors.push("Silent sync recall loop error: " + e.toString());
+    results.errors.push("Lỗi vòng lặp thu hồi silent sync: " + e.toString());
   }
 
   // -----------------------------------------------------------------
@@ -2433,7 +2437,7 @@ function globalRecallHandler_(payload) {
     );
     results.proxyCleared += proxyRes.deletedCount || 0;
   } catch (e) {
-    results.errors.push("Proxy recall error: " + e.toString());
+    results.errors.push("Lỗi thu hồi proxy: " + e.toString());
   }
 
   // -----------------------------------------------------------------
@@ -2449,12 +2453,12 @@ function globalRecallHandler_(payload) {
     );
     results.proxyCleared += adminRes.deletedCount || 0;
   } catch (e) {
-    results.errors.push("Admin recall error: " + e.toString());
+    results.errors.push("Lỗi thu hồi Admin: " + e.toString());
   }
 
   return {
     status: CONSTANTS.SUCCESS,
-    message: "Global Recall Completed",
+    message: "Đã thu hồi tất cả sự kiện thành công",
     data: results,
   };
 }

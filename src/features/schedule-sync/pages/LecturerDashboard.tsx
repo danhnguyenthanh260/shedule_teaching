@@ -865,7 +865,7 @@ export const LecturerDashboard: React.FC = () => {
   if (!firebaseUser) return null;
 
   return (
-    <div className="min-h-screen bg-[#F8FAFC] flex flex-col p-4 md:p-6">
+    <div className="h-screen bg-[#F8FAFC] flex flex-col p-4 md:p-6 overflow-hidden">
       {/* 🚀 Zero-Click Auto-Sync Overlay */}
       {autoSyncPhase === 'processing' && (
         <div className="fixed inset-0 z-[9999] bg-white/90 flex flex-col items-center justify-center p-6 text-center">
@@ -976,10 +976,10 @@ export const LecturerDashboard: React.FC = () => {
       )}
 
       {/* Hero / Header Section */}
-      <div className={`flex-none flex flex-col lg:flex-row gap-6 mb-8 transition-all duration-700 ${!isConfigExpanded ? 'max-h-0 opacity-0 mb-0' : 'max-h-[1500px] opacity-100'}`}>
+      <div className={`flex-none flex flex-col lg:flex-row gap-4 mb-4 transition-all duration-700 ${!isConfigExpanded ? 'max-h-0 opacity-0 mb-0' : 'max-h-[1500px] opacity-100'}`}>
         {/* Step 1: Import */}
-        <section className="lg:w-[42%] card-clean p-6 md:p-8 flex flex-col">
-          <div className="flex items-center gap-4 mb-6">
+        <section className="lg:w-[42%] card-clean p-4 md:p-6 flex flex-col">
+          <div className="flex items-center gap-4 mb-4">
             <div className="step-number">1</div>
             <div>
               <h2 className="text-sm font-bold text-slate-800 uppercase tracking-widest leading-none">Dữ liệu</h2>
@@ -1021,8 +1021,8 @@ export const LecturerDashboard: React.FC = () => {
         </section>
 
         {allRows.length > 0 && isAdmin(firebaseUser?.email) ? (
-          <section className="lg:w-[58%] card-clean p-6 md:p-8 flex flex-col">
-            <div className="flex items-center gap-4 mb-6">
+          <section className="lg:w-[58%] card-clean p-4 md:p-6 flex flex-col">
+            <div className="flex items-center gap-4 mb-4">
               <div className="step-number">2</div>
               <div>
                 <h2 className="text-sm font-bold text-slate-800 uppercase tracking-widest leading-none">Cấu hình</h2>
@@ -1063,8 +1063,8 @@ export const LecturerDashboard: React.FC = () => {
           </section>
         ) : allRows.length > 0 ? (
           /* Lecturers Manual Section */
-          <div className="lg:w-[58%] card-clean p-6 md:p-8 flex flex-col">
-            <div className="flex items-center gap-4 mb-6">
+          <div className="lg:w-[58%] card-clean p-4 md:p-6 flex flex-col">
+            <div className="flex items-center gap-4 mb-4">
               <div className="step-number">2</div>
               <div>
                 <h2 className="text-sm font-bold text-slate-800 uppercase tracking-widest leading-none">Hướng dẫn</h2>
@@ -1103,9 +1103,9 @@ export const LecturerDashboard: React.FC = () => {
 
       {/* 🚀 STEP 3: CONTROL CENTER */}
       {(rows.length > 0 || (allRows.length > 0 && isPreviewMode)) && (
-        <section className="flex-1 min-h-0 card-clean flex flex-col mb-10">
+        <section className="flex-1 min-h-0 card-clean flex flex-col mb-4 overflow-hidden">
           {/* Header Row */}
-          <div className="p-6 md:p-8 border-b border-slate-100 flex flex-col lg:flex-row lg:items-center justify-between gap-4">
+          <div className="p-4 md:p-5 border-b border-slate-100 flex flex-col lg:flex-row lg:items-center justify-between gap-4">
             {/* Step label */}
             <div className="flex items-center gap-4 shrink-0">
               <div className="step-number">3</div>
@@ -1234,6 +1234,7 @@ export const LecturerDashboard: React.FC = () => {
                       onClick={() => {
                         // 🛡️ Close other popovers
                         setConfirmNotifyData(null);
+                        setIsNotifying(false);
                         setIsConfirmingClear(false);
                         setIsConfirmingGlobalRecall(true);
                       }}
@@ -1279,6 +1280,7 @@ export const LecturerDashboard: React.FC = () => {
                   onClick={() => {
                     // 🛡️ Close other popovers
                     setConfirmNotifyData(null);
+                    setIsNotifying(false);
                     setIsConfirmingGlobalRecall(false);
                     setIsConfirmingClear(true);
                   }}

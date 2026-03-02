@@ -969,7 +969,7 @@ export const LecturerDashboard: React.FC = () => {
       )}
 
       {isCalendarConnected === true && !isAdmin(firebaseUser?.email) && (
-        <div className="mb-4 flex items-center gap-2 px-4 py-2 bg-emerald-50 text-emerald-700 rounded-xl w-fit text-sm font-bold border border-emerald-100 shadow-sm">
+        <div className="mb-2 flex items-center gap-2 px-3 py-1.5 bg-emerald-50 text-emerald-700 rounded-xl w-fit text-[11px] font-bold border border-emerald-100 shadow-sm">
           <span className="w-2 h-2 bg-emerald-500 rounded-full animate-pulse" />
           Đã kết nối Lịch tự động
         </div>
@@ -978,8 +978,8 @@ export const LecturerDashboard: React.FC = () => {
       {/* Hero / Header Section */}
       <div className={`flex-none flex flex-col lg:flex-row gap-4 mb-4 transition-all duration-700 ${!isConfigExpanded ? 'max-h-0 opacity-0 mb-0' : 'max-h-[1500px] opacity-100'}`}>
         {/* Step 1: Import */}
-        <section className="lg:w-[42%] card-clean p-4 md:p-6 flex flex-col">
-          <div className="flex items-center gap-4 mb-4">
+        <section className="lg:w-[42%] card-clean p-2 md:p-4 flex flex-col">
+          <div className="flex items-center gap-4 mb-2">
             <div className="step-number">1</div>
             <div>
               <h2 className="text-sm font-bold text-slate-800 uppercase tracking-widest leading-none">Dữ liệu</h2>
@@ -1063,8 +1063,8 @@ export const LecturerDashboard: React.FC = () => {
           </section>
         ) : allRows.length > 0 ? (
           /* Lecturers Manual Section */
-          <div className="lg:w-[58%] card-clean p-4 md:p-6 flex flex-col">
-            <div className="flex items-center gap-4 mb-4">
+          <div className="lg:w-[58%] card-clean p-2 md:p-4 flex flex-col">
+            <div className="flex items-center gap-4 mb-2">
               <div className="step-number">2</div>
               <div>
                 <h2 className="text-sm font-bold text-slate-800 uppercase tracking-widest leading-none">Hướng dẫn</h2>
@@ -1072,19 +1072,19 @@ export const LecturerDashboard: React.FC = () => {
               </div>
             </div>
             
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 flex-1">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 flex-1">
               {[
                 { id: '1', title: 'Lọc lịch cá nhân', desc: 'Sử dụng ô tìm kiếm để lọc đích danh tên của bạn trong danh sách.' },
                 { id: '2', title: 'Chọn sự kiện', desc: 'Đánh dấu vào các sự kiện bạn muốn đồng bộ lên Calendar cá nhân.' },
                 { id: '3', title: 'Kiểm tra xung đột', desc: 'Hệ thống sẽ báo nếu thời gian trùng với lịch hiện có của bạn.' },
                 { id: '4', title: 'Hoàn tất', desc: 'Nhấn nút Đồng bộ và chờ trong vài giây để lịch được cập nhật.' },
               ].map((item) => (
-                <div key={item.id} className="p-4 rounded-xl bg-slate-50 border border-slate-100 hover:border-orange-200 transition-all group">
-                  <div className="flex items-center gap-3 mb-2">
+                <div key={item.id} className="p-2 px-3 rounded-xl bg-slate-50 border border-slate-100 hover:border-orange-200 transition-all group">
+                  <div className="flex items-center gap-2 mb-1">
                     <span className="text-[10px] font-bold text-orange-500 uppercase tracking-widest">Tiêu điểm {item.id}</span>
                   </div>
-                  <h4 className="text-xs font-bold text-slate-800 mb-1 uppercase tracking-tight">{item.title}</h4>
-                  <p className="text-[11px] text-slate-500 font-medium leading-relaxed">
+                  <h4 className="text-[11px] font-bold text-slate-800 mb-0.5 uppercase tracking-tight">{item.title}</h4>
+                  <p className="text-[10px] text-slate-500 font-medium leading-tight">
                     {item.desc}
                   </p>
                 </div>

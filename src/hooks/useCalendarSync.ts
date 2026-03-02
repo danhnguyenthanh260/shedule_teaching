@@ -1,6 +1,6 @@
 
 import { useState, useCallback } from 'react';
-import { syncEventsToCalendar, clearCalendar } from '../services/appsScriptService';
+import { syncEventsToCalendar, clearCalendar, globalRecallAppEvents } from '../services/appsScriptService';
 import { RowNormalized, SyncResult } from '../types';
 
 interface UseCalendarSyncProps {
@@ -226,7 +226,7 @@ export const useCalendarSync = ({ accessToken, reauthorizeGoogle }: UseCalendarS
     }
   }, [accessToken]);
 
-  const clearAppEvents = useCallback(async (sheetType?: 'council' | 'review', sendUpdates: boolean = false, isRetry: boolean = false) => {
+  const clearAppEvents = useCallback(async (sheetType?: 'council' | 'review', sendUpdates: boolean = false, calendarName?: string, retryCount: number = 0) => {
     setClearing(true);
     setSyncError(null);
     setSyncResult(null);
@@ -243,7 +243,7 @@ export const useCalendarSync = ({ accessToken, reauthorizeGoogle }: UseCalendarS
     }
 
     try {
-      const res: any = await clearCalendar(undefined, currentToken || '', sheetType, sendUpdates);
+      const res: any = await clearCalendar(calendarName, currentToken || '', sheetType, sendUpdates);
       const deletedCount = res.data?.deletedCount ?? res.deletedCount ?? 0;
       
       const result: SyncResult = {
@@ -252,26 +252,57 @@ export const useCalendarSync = ({ accessToken, reauthorizeGoogle }: UseCalendarS
         updated: 0,
         failed: 0,
         skipped: 0,
-        logs: [`Đã xóa tất cả ${deletedCount} sự kiện cũ trên lịch.`]
+        logs: [`Đã xóa ${deletedCount} sự kiện trên lịch ${calendarName || 'mặc định'}.`]
       };
       setSyncResult(result);
       return result;
     } catch (err: any) {
       console.error("Clear error:", err);
-      // 🔄 AUTO-RETRY ON 401
-      if ((err.message.includes('401') || err.message.toLowerCase().includes('unauthenticated')) && !isRetry) {
-        console.warn("⚠️ Clear failed with 401, trying auto re-auth retry...");
+      // 🔄 AUTO-RETRY ON 401 (Limit to 1 retry)
+      const isAuthError = err.message && (err.message.includes('401') || err.message.toLowerCase().includes('unauthenticated'));
+      if (isAuthError && retryCount < 1) {
+        console.warn("⚠️ Clear failed with 401, trying auto re-auth retry (Attempt 1)...");
         const newToken = await reauthorizeGoogle();
         if (newToken) {
-          return clearAppEvents(sheetType, true);
+          return clearAppEvents(sheetType, sendUpdates, calendarName, retryCount + 1);
         }
       }
-      setSyncError("Lỗi xóa lịch: " + err.message);
+      setSyncError("Lỗi hệ thống: " + (err.message || "Không xác định"));
       throw err;
     } finally {
       setClearing(false);
     }
   }, [accessToken, reauthorizeGoogle]);
+
+  const globalRecallEvents = useCallback(async (sheetType?: 'council' | 'review') => {
+    setClearing(true);
+    setSyncError(null);
+    setSyncResult(null);
+
+    try {
+      const res: any = await globalRecallAppEvents(sheetType);
+      
+      const result: SyncResult = {
+        type: 'clear',
+        created: 0,
+        updated: 0,
+        failed: res.data?.silentFailed || 0,
+        skipped: 0,
+        logs: [
+          `Global Recall: Processed ${res.data?.totalProcessed || 0} lecturers.`, 
+          `Cleared: ${res.data?.silentCleared || 0} local events, ${res.data?.proxyCleared || 0} proxy invitations.`
+        ]
+      };
+      setSyncResult(result);
+      return result;
+    } catch (err: any) {
+      console.error("Global Recall error:", err);
+      setSyncError("Lỗi hệ thống thu hồi: " + (err.message || "Không xác định"));
+      throw err;
+    } finally {
+      setClearing(false);
+    }
+  }, []);
 
   return {
     syncing,
@@ -282,6 +313,7 @@ export const useCalendarSync = ({ accessToken, reauthorizeGoogle }: UseCalendarS
     setSyncError,
     syncToCalendar,
     clearAppEvents,
+    globalRecallEvents,
     conflicts,
     setConflicts
   };

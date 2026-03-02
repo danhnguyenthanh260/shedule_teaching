@@ -4,6 +4,7 @@ import { ExcelImport } from '../../../components/ExcelImport';
 import { MappingTool } from '../../../components/MappingTool';
 import { ScheduleTable } from '../../../components/ScheduleTable';
 import { StatusAlerts } from '../../../components/StatusAlerts';
+import ConfirmModal from '../../../components/ConfirmModal';
 import { InternalConflictModal, detectInternalOverlaps } from '../../../components/InternalConflictModal';
 import SyncHistoryModal from '../../../components/SyncHistoryModal';
 import { useFirebaseMapping } from '../../../hooks/useFirebaseMapping';
@@ -14,6 +15,7 @@ import { useSheetParser } from '../../../hooks/useSheetParser';
 import { useSyncLogs } from '../../../hooks/useSyncLogs';
 import { useCalendarSync } from '../../../hooks/useCalendarSync';
 import { khongDau } from '../../../utils/stringUtils';
+import { notifyLecturers, respondToInvitations, exchangeOAuthCode, getLecturerTokenStatus } from '../../../services/appsScriptService';
 import { googleService, inferSchema } from '../../../services/googleService';
 import { SearchColumnSelector } from '../../../components/SearchColumnSelector';
 import { isAdmin, isSuperAdmin } from '../../../config/admin';
@@ -64,14 +66,17 @@ export const LecturerDashboard: React.FC = () => {
   const [isFetchingData, setIsFetchingData] = useState(false);
   const [isMappingSettled, setIsMappingSettled] = useState(false);
   const [isSemestersLoading, setIsSemestersLoading] = useState(true);
-  const [isConfigExpanded, setIsConfigExpanded] = useState(false); // 📱 Mobile config visibility
+  const [isConfigExpanded, setIsConfigExpanded] = useState(true); // 📱 Mobile/Desktop config visibility. Default to true.
 
   // Internal conflict modal state
   const [internalConflictOpen, setInternalConflictOpen] = useState(false);
   const [internalConflictGroups, setInternalConflictGroups] = useState<any[]>([]);
   const [pendingNonConflicting, setPendingNonConflicting] = useState<RowNormalized[]>([]);
   const [pendingAllRows, setPendingAllRows] = useState<RowNormalized[]>([]);
-  const [lastSyncedRows, setLastSyncedRows] = useState<RowNormalized[]>([]); // Lưu rows cuối cùng đã gửi sync
+  const [lastSyncedRows, setLastSyncedRows] = useState<RowNormalized[]>([]);
+  const [autoRSVPStatus, setAutoRSVPStatus] = useState<{ loading: boolean; success?: boolean; error?: string; message?: string }>({ loading: false });
+  const [isCalendarConnected, setIsCalendarConnected] = useState<boolean | null>(null);
+  const [isConnectingCalendar, setIsConnectingCalendar] = useState(false);
 
   // Hooks
   const {
@@ -113,6 +118,7 @@ export const LecturerDashboard: React.FC = () => {
     syncError, setSyncError,
     syncToCalendar,
     clearAppEvents,
+    globalRecallEvents,
     conflicts, setConflicts
   } = useCalendarSync({ accessToken, reauthorizeGoogle });
 
@@ -136,8 +142,86 @@ export const LecturerDashboard: React.FC = () => {
 
   // Confirmation State
   const [isConfirmingClear, setIsConfirmingClear] = useState(false);
+  const [isConfirmingGlobalRecall, setIsConfirmingGlobalRecall] = useState(false);
+  const [isNotifying, setIsNotifying] = useState(false); // 📧 New notification state
+  const [confirmNotifyData, setConfirmNotifyData] = useState<any[] | null>(null);
+  
+  // 🚀 Zero-Click Auto-Sync State
+  const [autoSyncPhase, setAutoSyncPhase] = useState<'idle' | 'detecting' | 'processing' | 'done'>('idle');
+  const autoSyncProcessedRef = useRef(false);
 
   const [appliedColumnMap, setAppliedColumnMap] = useState<ColumnMapping>({});
+
+  // 🔑 Handle OAuth Callback from URL (Option 2)
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const code = params.get('code');
+
+    if (code && firebaseUser?.email) {
+      const completeOAuth = async () => {
+        setIsConnectingCalendar(true);
+        try {
+          // Exchange code for token
+          await exchangeOAuthCode(firebaseUser.email!, code);
+          setIsCalendarConnected(true);
+          // Success notification
+          alert("Kết nối Google Calendar thành công! Từ giờ lịch sẽ tự động đồng bộ ngầm.");
+          // Clean URL
+          window.history.replaceState({}, document.title, window.location.pathname);
+        } catch (err) {
+          alert("Lỗi kết nối Calendar: " + (err instanceof Error ? err.message : String(err)));
+        } finally {
+          setIsConnectingCalendar(false);
+        }
+      };
+      completeOAuth();
+    }
+  }, [firebaseUser]);
+
+  // Check Calendar Connection Status (Option 2) - Using Hybrid Backend Check
+  useEffect(() => {
+    if (firebaseUser?.email) {
+      const checkConnection = async () => {
+        try {
+          const connected = await getLecturerTokenStatus(firebaseUser.email!);
+          setIsCalendarConnected(connected);
+        } catch (err) {
+          console.error('Error checking calendar connection:', err);
+        }
+      };
+      checkConnection();
+    }
+  }, [firebaseUser]);
+
+  const handleConnectCalendar = async () => {
+    if (!firebaseUser?.email) return;
+    
+    setIsConnectingCalendar(true);
+    try {
+      // 🌐 Construct Google OAuth URL
+      const clientId = import.meta.env.VITE_GOOGLE_CLIENT_ID || 'YOUR_CLIENT_ID';
+      const redirectUri = window.location.origin + '/'; // Back to dashboard
+      const scope = encodeURIComponent(
+        'https://www.googleapis.com/auth/calendar ' +
+        'https://www.googleapis.com/auth/calendar.events'
+      );
+      
+      const authUrl = `https://accounts.google.com/o/oauth2/v2/auth?` +
+        `client_id=${clientId}&` +
+        `redirect_uri=${encodeURIComponent(redirectUri)}&` +
+        `response_type=code&` +
+        `scope=${scope}&` +
+        `access_type=offline&` +
+        `prompt=consent&` +
+        `state=${encodeURIComponent(firebaseUser.email)}`;
+
+      // Redirect lecturer to Google
+      window.location.href = authUrl;
+    } catch (err) {
+      console.error("Không thể khởi tạo kết nối Google");
+      setIsConnectingCalendar(false);
+    }
+  };
 
   // Sync appliedColumnMap with persistence columnMap whenever it changes (especially for Admin)
   useEffect(() => {
@@ -146,6 +230,81 @@ export const LecturerDashboard: React.FC = () => {
     }
   }, [columnMap]);
 
+  // ✅ Create a unique ID for each sheet-tab combination to prevent settings overlap
+  const currentSheetKey = useMemo(() => {
+    if (!sheetUrl) return 'default';
+    const id = sheetUrl.match(/\/d\/([a-zA-Z0-9-_]+)/)?.[1] || 'unknown';
+    return `${id}-${tabName}`;
+  }, [sheetUrl, tabName]);
+
+  // 🚀 Step 1: Deep Link Detection
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const isAutoSync = params.get('autoSync') === 'true';
+    const targetEmail = params.get('email');
+    const targetUrl = params.get('url');
+    const targetTab = params.get('tab');
+
+    if (isAutoSync && targetEmail && targetUrl) {
+      console.log(`🚀 Auto-Sync Init: ${targetEmail}`);
+      setSheetUrl(targetUrl);
+      if (targetTab) setTabName(targetTab);
+      setPersonFilter(targetEmail);
+      
+      setAutoSyncPhase('detecting');
+      
+      // Clear URL params to avoid re-triggering
+      window.history.replaceState({}, document.title, window.location.pathname);
+    }
+  }, []);
+
+  // 🚀 Step 3: Magic Link (autoRSVP) Detection
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const isAutoRSVP = params.get('autoRSVP') === 'true';
+    const email = params.get('email');
+    const action = params.get('action');
+
+    if (isAutoRSVP && email && (action === 'accept' || action === 'decline' || action === 'maybe')) {
+      const triggerBatchRSVP = async () => {
+        setAutoRSVPStatus({ loading: true });
+        try {
+          const result = await respondToInvitations(email, action as 'accept' | 'decline' | 'maybe');
+          setAutoRSVPStatus({ 
+            loading: false, 
+            success: true, 
+            message: result.message || `Đã cập nhật thành công ${result.data?.updatedCount || 0} buổi chấm vào Calendar của bạn!` 
+          });
+        } catch (err) {
+          setAutoRSVPStatus({ 
+            loading: false, 
+            success: false, 
+            error: err instanceof Error ? err.message : String(err) 
+          });
+        }
+      };
+      triggerBatchRSVP();
+    }
+  }, []);
+
+  // 🚀 Step 2: Auto-Trigger Sync Logic
+  useEffect(() => {
+    if (autoSyncPhase === 'detecting' && !loading && rows.length > 0 && accessToken && !autoSyncProcessedRef.current) {
+      console.log('🚀 Triggering Zero-Click Auto-Sync...');
+      autoSyncProcessedRef.current = true;
+      setAutoSyncPhase('processing');
+      
+      // Delay slightly for UI smoothness
+      setTimeout(() => {
+        handleSync(true, 'replace').then(() => {
+          setAutoSyncPhase('done');
+        }).catch(err => {
+          console.error('Auto-Sync failed:', err);
+          setAutoSyncPhase('idle'); // Back to normal if failed
+        });
+      }, 1500);
+    }
+  }, [autoSyncPhase, loading, rows.length, accessToken]);
   // ✅ Create a unique ID for each sheet-tab combination to prevent settings overlap
   const mappingId = useMemo(() => {
     if (!sheetMeta?.sheetId) return undefined;
@@ -430,7 +589,11 @@ export const LecturerDashboard: React.FC = () => {
 
   const handleSync = async (isForce: boolean = false, conflictMode?: 'insert' | 'keep_old' | 'replace') => {
     setSyncError(null);
-    let rowsToSync = filteredRows.filter(r => selectedIds.has(r.id));
+    
+    // 🚀 Optimization: If no rows are selected, we sync ALL filtered rows (useful for Auto-Sync)
+    let rowsToSync = selectedIds.size > 0 
+      ? filteredRows.filter(r => selectedIds.has(r.id))
+      : filteredRows;
     
     // ...
     if (isPreviewMode) {
@@ -460,114 +623,370 @@ export const LecturerDashboard: React.FC = () => {
     await doSyncRows(rowsToSync, isForce, conflictMode, effectiveIsReview ? 'review' : 'council');
   };
 
-  // 🚀 NEW: Đồng bộ cho tất cả giảng viên (Gửi mail mời)
-  const handleSyncAllLecturers = async () => {
+  // 🚀 NEW: Thông báo cho tất cả giảng viên (Gửi mail có nút bấm đồng bộ chủ động)
+  const handleNotifyAllLecturers = async () => {
+    // 🛡️ Close other popovers
+    setIsConfirmingGlobalRecall(false);
+    setIsConfirmingClear(false);
+    
     setSyncError(null);
+    setIsNotifying(true);
     
-    // 1. Lấy tất cả dòng đang filter (hoặc tất cả đang chọn)
-    const targetRows = selectedIds.size > 0 
-      ? filteredRows.filter(r => selectedIds.has(r.id))
-      : filteredRows;
+    try {
+      // 1. Lấy tất cả dòng đang filter (hoặc tất cả đang chọn)
+      const targetRows = selectedIds.size > 0 
+        ? filteredRows.filter(r => selectedIds.has(r.id))
+        : filteredRows;
 
-    if (targetRows.length === 0) {
-      setSyncError("Không có dữ liệu giảng viên để đồng bộ. Vui lòng chọn hoặc lọc dữ liệu trước.");
-      return;
-    }
-
-    // 2. Gom nhóm theo Email: Một giảng viên chỉ nhận 1 lời mời duy nhất
-    const emailGroups: Record<string, RowNormalized[]> = {};
-    
-    targetRows.forEach(r => {
-      let emails: string[] = [];
-      if (r.reviewers && r.reviewers.length > 0) {
-        emails = r.reviewers
-          .filter(name => name && name.trim())
-          .map(name => {
-             const cleanHandle = name.trim().split(' ')[0].toLowerCase().replace(/[^a-z0-9]/g, '');
-             // 💡 DYNAMIC DOMAIN: Nếu là giảng viên FPT thường dùng @fpt.edu.vn, còn lại dùng @gmail.com
-             // Đây là một giả định, lý tưởng nhất là lấy từ cột Email nếu có
-             return r.email ? r.email.toLowerCase() : `${cleanHandle}@fpt.edu.vn`;
-          });
-      } else if (r.person) {
-        const names = r.person.split('&').map(n => n.trim());
-        emails = names
-          .filter(n => n.length > 0)
-          .map(n => {
-            if (n.includes('@')) return n.toLowerCase();
-            const cleanHandle = n.split(' ')[0].toLowerCase().replace(/[^a-z0-9]/g, ''); 
-            return r.email ? r.email.toLowerCase() : `${cleanHandle}@fpt.edu.vn`;
-          });
-      } else if (r.email) {
-        emails = [r.email.toLowerCase()];
+      if (targetRows.length === 0) {
+        setSyncError("Không có dữ liệu giảng viên để thông báo. Vui lòng chọn hoặc lọc dữ liệu trước.");
+        return;
       }
 
-      emails.forEach(email => {
-        if (!emailGroups[email]) emailGroups[email] = [];
-        emailGroups[email].push(r);
+      // 2. Gom nhóm theo Email: Một giảng viên chỉ nhận 1 mail duy nhất
+      const emailGroups: Record<string, RowNormalized[]> = {};
+      
+      targetRows.forEach(r => {
+        let emails: string[] = [];
+
+        const extractEmail = (val: string) => {
+          if (!val) return null;
+          const str = val.trim();
+          if (!str) return null;
+          if (str.includes('@')) return str.toLowerCase();
+          const parts = str.split(' ');
+          const handle = parts[parts.length - 1].toLowerCase().replace(/[^a-z0-9]/g, '');
+          if (!handle) return null;
+          return `${handle}@gmail.com`;
+        };
+
+        if (r.rawRow && Array.isArray(r.rawRow)) {
+          if (effectiveIsReview) {
+            // 🚀 Theo yêu cầu hardcode từ user cho Review
+            let col1 = -1, col2 = -1;
+            if (r.groupName === 'Review 1') { col1 = 11; col2 = 12; } // L(11), M(12)
+            else if (r.groupName === 'Review 2') { col1 = 20; col2 = 21; } // U(20), V(21)
+            else if (r.groupName === 'Review 3') { col1 = 30; col2 = 31; } // AE(30), AF(31)
+
+            if (col1 !== -1 && col1 < r.rawRow.length) {
+              const e1 = extractEmail(r.rawRow[col1]);
+              if (e1) emails.push(e1);
+            }
+            if (col2 !== -1 && col2 < r.rawRow.length) {
+              const e2 = extractEmail(r.rawRow[col2]);
+              if (e2) emails.push(e2);
+            }
+          } else {
+            // 🚀 Theo yêu cầu hardcode từ user cho Hội Đồng (Council) -> Cột M (Index 12)
+            if (r.rawRow.length > 12) {
+              const e = extractEmail(r.rawRow[12]);
+              if (e) emails.push(e);
+            }
+          }
+        }
+
+        emails.forEach(email => {
+          if (!emailGroups[email]) emailGroups[email] = [];
+          emailGroups[email].push(r);
+        });
       });
-    });
 
-    const groupedRows: RowNormalized[] = Object.entries(emailGroups).map(([email, rows], groupIdx) => {
-      // 🚀 NEW: Gom nhóm bằng SubEvents thay vì 1 block dài
-      const subEvents = rows.map(r => ({
-        start: r.startTime,
-        end: r.endTime,
-        location: r.location || '',
-        description: `Buổi chấm: Slot ${r.timeRaw || 'N/A'}`
-      }));
+      const lecturersData = Object.entries(emailGroups).map(([email, rows]) => {
+        const handle = email.split('@')[0];
+        let foundName = handle;
+        
+        // 🔍 Search for the correct name matching this email handle
+        for (const r of rows) {
+          if (r.reviewers) {
+            const match = r.reviewers.find(name => {
+              const parts = name.trim().split(' ');
+              const h = parts[parts.length - 1].toLowerCase().replace(/[^a-z0-9]/g, '');
+              return h === handle;
+            });
+            if (match) {
+              foundName = match;
+              break;
+            }
+          }
+          if (r.person) {
+            const parts = r.person.split(' ');
+            const h = parts[parts.length - 1].toLowerCase().replace(/[^a-z0-9]/g, '');
+            if (h === handle) {
+              foundName = r.person;
+              break;
+            }
+          }
+        }
 
-      // Sắp xếp các buổi theo thời gian
-      subEvents.sort((a, b) => new Date(a.start).getTime() - new Date(b.start).getTime());
+        return {
+          email,
+          name: foundName,
+          events: rows.map(r => {
+            let eventTitle = r.person;
+            
+            if (r.isGrouped) {
+               const names = r.reviewers && r.reviewers.length > 0 ? r.reviewers : [r.person];
+               // Combine all names clearly, adding time for uniqueness just like in manual sync
+               const timePart = r.timeRaw ? `(${r.timeRaw})` : '';
+               eventTitle = `${names.join(' & ')} ${timePart}`.trim();
+            } else {
+               const taskPart = r.task && r.task !== 'Nhiệm vụ' && r.task !== 'Review' ? ` - ${r.task}` : '';
+               eventTitle = `${r.person}${taskPart}`;
+               if (!eventTitle) eventTitle = effectiveIsReview ? 'Chấm bài Review' : 'Hội đồng bảo vệ';
+            }
 
-      // Thông tin chi tiết cho mô tả email
-      const detailInfo = subEvents.map((s, i) => {
-        const d = new Date(s.start);
-        const dateStr = `${d.getDate().toString().padStart(2, '0')}/${(d.getMonth() + 1).toString().padStart(2, '0')}/${d.getFullYear()}`;
-        return `${i+1}. ${dateStr} | ${s.description} | Phòng: ${s.location}`
-      }).join('\n');
+            return {
+              start: r.startTime,
+              end: r.endTime,
+              location: r.location || '',
+              title: eventTitle,
+              description: r.isGrouped 
+                ? `Đồng bộ từ FPT Scheduler\nGiảng viên: ${r.reviewers ? r.reviewers.join(' & ') : r.person}\nThời gian: ${r.timeRaw || 'N/A'}`
+                : `Nhiệm vụ: ${r.task || 'Chưa phân công'}\nThời gian: ${r.timeRaw || 'N/A'}`
+            };
+          })
+        };
+      });
 
-      const firstRow = rows[0];
-      return {
-        ...firstRow,
-        id: `group-${email.split('@')[0]}`,
-        email: email,
-        task: `Lịch chấm ${effectiveIsReview ? 'Review' : 'Hội đồng'} - ${rows.length} buổi`,
-        // Start/End của base event lấy theo buổi đầu tiên (để không bị kéo dài 6 ngày)
-        startTime: subEvents[0].start,
-        endTime: subEvents[0].end,
-        subEvents: subEvents, // 📧 CHUYỂN DANH SÁCH SANG BACKEND
-        raw: {
-          ...firstRow.raw,
-          description: `Đồng bộ từ FPT Scheduler\n\nChào Giảng viên,\n\nBạn có lịch chấm ${effectiveIsReview ? 'Review' : 'Hội đồng'} tổng cộng ${rows.length} buổi như sau:\n\n${detailInfo}\n\nTrân trọng,\nFPT Scheduler`
-        },
-        status: 'pending'
-      } as RowNormalized;
-    });
+      if (lecturersData.length === 0) {
+        throw new Error("Không thể xác định email giảng viên hợp lệ.");
+      }
 
-    if (groupedRows.length === 0) {
-      setSyncError("Không thể xác định được email giảng viên từ dữ liệu này.");
-      return;
+      setConfirmNotifyData(lecturersData);
+    } catch (err: any) {
+      setSyncError(err.message || "Lỗi khi thiết lập thông báo.");
+      setIsNotifying(false);
     }
-
-    if (!window.confirm(`Xác nhận gửi 01 EMAIL TỔNG HỢP cho mỗi giảng viên (Tổng cộng ${groupedRows.length} giảng viên, ${targetRows.length} sự kiện)?`)) {
-      return;
-    }
-
-    await doSyncRows(groupedRows, true, 'replace', effectiveIsReview ? 'review' : 'council');
   };
+
+  const executeNotifyLecturers = async (lecturersData: any[]) => {
+    setConfirmNotifyData(null);
+    setSyncError(null);
+    setSyncResult(null);
+    try {
+      const currentType = effectiveIsReview ? 'review' : 'council';
+      const result = await notifyLecturers(lecturersData, sheetUrl, tabName, currentType);
+      
+      if (result.status === 'success') {
+        const { success, failed, total, errors, quotaRemaining } = result.data;
+        if (failed > 0) {
+          const errorMsgs = errors.map((e: any) => `${e.email}: ${e.error}`).join('\n');
+          setSyncError(`Hoàn tất với một số lỗi. Đã gửi thành công: ${success}/${total}.\nLỗi chi tiết:\n${errorMsgs}\n\nQuota gửi mail: ${quotaRemaining}`);
+        } else if (success === 0) {
+          setSyncError(`Không có lời mời nào được gửi thành công. Quota gửi mail còn: ${quotaRemaining}`);
+        } else {
+          setSyncResult({
+             type: 'sync',
+             created: success,
+             updated: 0,
+             skipped: 0,
+             failed: 0,
+             logs: [`Đã gửi Lời mời Calendar (Yes/No) thành công cho tất cả ${success} giảng viên.`, `Hạn ngạch (Quota) gửi email trong ngày còn: ${quotaRemaining}`]
+          });
+        }
+      } else {
+        throw new Error(result.message || "Backend không trả về trạng thái thành công.");
+      }
+    } catch (err: any) {
+      setSyncError(err.message || "Lỗi khi gửi thông báo.");
+    } finally {
+      setIsNotifying(false);
+    }
+  };
+
+  // Magic Link (autoRSVP) Check
+  const isAutoRSVPMood = useMemo(() => {
+    const params = new URLSearchParams(window.location.search);
+    return params.get('autoRSVP') === 'true';
+  }, []);
+
+  if (isAutoRSVPMood) {
+    return (
+      <div className="fixed inset-0 z-[9999] flex items-center justify-center bg-white dark:bg-slate-950 overflow-hidden">
+        {/* Subtle motion background */}
+        <div className="absolute top-1/4 -left-20 w-96 h-96 bg-orange-300/20 rounded-full blur-[120px] animate-pulse"></div>
+        <div className="absolute bottom-1/4 -right-20 w-96 h-96 bg-blue-300/10 rounded-full blur-[120px] animate-pulse" style={{ animationDelay: '2s' }}></div>
+
+        <div className="relative z-10 bg-white/40 dark:bg-slate-900/40 backdrop-blur-2xl p-10 rounded-[3rem] shadow-[0_32px_128px_-16px_rgba(0,0,0,0.1)] max-w-lg w-full mx-4 border border-white/40 dark:border-white/5 text-center transform transition-all duration-700">
+          {autoRSVPStatus.loading ? (
+            <div className="flex flex-col items-center py-10">
+              <div className="relative w-24 h-24 mb-10">
+                <div className="absolute inset-0 border-4 border-[#F27024]/10 rounded-full"></div>
+                <div className="absolute inset-0 border-4 border-[#F27024] border-t-transparent rounded-full animate-spin"></div>
+              </div>
+              <h2 className="text-4xl font-extrabold text-slate-900 dark:text-white mb-4 tracking-tight uppercase italic">Đang đồng bộ...</h2>
+              <p className="text-slate-500 dark:text-slate-400 text-xl font-medium leading-relaxed italic">
+                Hệ thống đang tự động xác nhận lịch và lưu vào Calendar cá nhân của bạn.
+              </p>
+            </div>
+          ) : autoRSVPStatus.success ? (
+            <div className="flex flex-col items-center py-6">
+              <div className="w-28 h-28 bg-emerald-500/10 text-emerald-500 rounded-full flex items-center justify-center mb-10 text-6xl shadow-inner animate-bounce">✓</div>
+              <h2 className="text-4xl font-extrabold text-slate-900 dark:text-white mb-4 tracking-tight uppercase italic">Thành công!</h2>
+              <p className="text-slate-600 dark:text-slate-300 text-xl mb-10 leading-relaxed font-medium italic">
+                {autoRSVPStatus.message || "Lịch giảng dạy đã được cập nhật thành công!"}
+              </p>
+              
+              <div className="flex flex-col gap-4 w-full">
+                <button
+                  onClick={() => window.open('https://calendar.google.com', '_blank')}
+                  className="w-full bg-slate-900 dark:bg-slate-700 text-white py-5 rounded-2xl font-bold text-xl hover:shadow-2xl hover:-translate-y-1 transition-all duration-300 active:scale-95 shadow-lg"
+                >
+                  Mở Google Calendar
+                </button>
+                <button
+                  onClick={() => window.close()}
+                  className="w-full bg-white dark:bg-slate-800 text-slate-400 py-4 rounded-2xl font-bold text-lg hover:text-slate-600 dark:hover:text-slate-300 transition-all active:scale-95"
+                >
+                  Đóng trang này
+                </button>
+              </div>
+            </div>
+          ) : (
+            <div className="flex flex-col items-center py-10">
+              <div className="w-24 h-24 bg-rose-500/10 text-rose-500 rounded-full flex items-center justify-center mb-10 text-6xl italic shadow-inner">!</div>
+              <h2 className="text-4xl font-extrabold text-slate-900 dark:text-white mb-4 tracking-tight uppercase italic">Rất tiếc!</h2>
+              <p className="text-rose-500/90 text-xl mb-10 leading-relaxed font-medium italic">
+                {autoRSVPStatus.error || "Đã xảy ra lỗi không xác định."}
+              </p>
+              <button
+                onClick={() => window.location.reload()}
+                className="w-full bg-[#F27024] text-white py-5 rounded-2xl font-bold text-xl hover:bg-orange-600 shadow-xl shadow-orange-500/20 transition-all active:scale-95"
+              >
+                Thử lại ngay
+              </button>
+            </div>
+          )}
+        </div>
+      </div>
+    );
+  }
 
   if (!firebaseUser) return null;
 
   return (
-    <div className="h-full flex flex-col gap-4 relative overflow-visible text-slate-900 bg-[#F1F5F9]">
-      {/* Header Section: Steps 1 & 2 side-by-side (Approx 1/4 of screen) */}
-      <div className={`flex-none flex flex-col lg:flex-row gap-3 overflow-hidden transition-all duration-500 ease-in-out ${!isConfigExpanded ? 'max-h-0 lg:max-h-[1000px] opacity-0 lg:opacity-100' : 'max-h-[1500px] opacity-100'}`}>
+    <div className="min-h-screen bg-[#F8FAFC] flex flex-col p-4 md:p-6">
+      {/* 🚀 Zero-Click Auto-Sync Overlay */}
+      {autoSyncPhase === 'processing' && (
+        <div className="fixed inset-0 z-[9999] bg-white/90 flex flex-col items-center justify-center p-6 text-center">
+           <div className="w-16 h-16 border-4 border-[#F27024]/20 border-t-[#F27024] rounded-full animate-spin mb-4" />
+           <h2 className="text-2xl font-bold text-slate-800 mb-2 tracking-tight uppercase">Đang đồng bộ tự động</h2>
+           <p className="text-slate-500 max-w-md font-medium">Hệ thống đang xử lý lịch và lưu vào Calendar cá nhân. Vui lòng không đóng trình duyệt!</p>
+        </div>
+      )}
+      
+      {autoSyncPhase === 'done' && (
+        <div className="fixed inset-0 z-[9999] bg-white flex flex-col items-center justify-center p-6 text-center">
+           <div className="w-20 h-20 bg-emerald-50 text-emerald-500 rounded-full flex items-center justify-center mb-6 shadow-sm">
+              <svg className="w-10 h-10" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M5 13l4 4L19 7" />
+              </svg>
+           </div>
+           <h2 className="text-3xl font-bold text-slate-800 mb-3 tracking-tight uppercase">Thành công!</h2>
+           <p className="text-slate-500 max-w-md text-lg mb-8 font-medium italic">Lịch giảng dạy của bạn đã được cập nhật vào Google Calendar.</p>
+           <div className="flex flex-col sm:flex-row gap-4">
+              <button 
+                onClick={() => window.open('https://calendar.google.com', '_blank')}
+                className="px-8 py-4 bg-slate-800 text-white rounded-2xl font-bold hover:bg-slate-900 transition-all flex items-center justify-center gap-2 shadow-lg"
+              >
+                 Mở Google Calendar
+              </button>
+              <button 
+                onClick={() => setAutoSyncPhase('idle')}
+                className="px-8 py-4 bg-white text-slate-600 border border-slate-200 rounded-2xl font-bold hover:bg-slate-50 transition-all"
+              >
+                 Quay lại Dashboard
+              </button>
+           </div>
+        </div>
+      )}
+
+      {/* 🏛️ OAuth Connection Banner - PROMINENT SILENT SYNC */}
+      {!isAdmin(firebaseUser?.email) && isCalendarConnected === false && (
+        <section className="mb-10">
+          {/* Urgent top strip */}
+          <div className="flex items-center gap-2 mb-2 px-1">
+            <span className="w-2 h-2 rounded-full bg-orange-500 animate-ping inline-flex" />
+            <span className="text-xs font-black text-orange-600 uppercase tracking-widest">Hành động được khuyến nghị</span>
+          </div>
+          <div className="relative overflow-hidden bg-gradient-to-br from-orange-50 via-white to-blue-50 border-2 border-orange-300 rounded-[2rem] p-8 md:p-10 shadow-2xl shadow-orange-100 group">
+            {/* Background glow */}
+            <div className="absolute -top-20 -right-20 w-72 h-72 bg-orange-200 rounded-full blur-[100px] opacity-40 group-hover:opacity-70 transition-opacity duration-700" />
+            <div className="absolute -bottom-20 -left-20 w-72 h-72 bg-blue-200 rounded-full blur-[100px] opacity-30" />
+
+            <div className="relative z-10 flex flex-col lg:flex-row items-center gap-10">
+              {/* Icon */}
+              <div className="relative shrink-0">
+                <div className="w-24 h-24 bg-white rounded-3xl flex items-center justify-center text-4xl shadow-xl border-2 border-orange-200 transform group-hover:scale-110 group-hover:rotate-6 transition-all duration-500">
+                  📅
+                </div>
+                <div className="absolute -top-1 -right-1 w-5 h-5 bg-red-500 rounded-full flex items-center justify-center">
+                  <span className="text-white text-[10px] font-black">!</span>
+                </div>
+              </div>
+
+              {/* Text */}
+              <div className="flex-1 text-center lg:text-left">
+                <div className="flex flex-wrap justify-center lg:justify-start gap-2 mb-3">
+                  <span className="px-3 py-1 bg-orange-500 text-white text-[10px] font-black uppercase tracking-widest rounded-full animate-pulse">Màu Đậm = Cần bước này</span>
+                  <span className="px-3 py-1 bg-slate-100 text-slate-500 text-[10px] font-black uppercase tracking-widest rounded-full italic">Silent Sync</span>
+                </div>
+                <h3 className="text-2xl md:text-3xl font-bold text-slate-900 mb-3 tracking-tight">
+                  Lịch vẫn{' '}
+                  <span className="relative inline-block">
+                    <span className="text-slate-400 line-through decoration-red-400">màu nhạt?</span>
+                  </span>
+                  {' '}→ Kết nối <span className="text-[#F27024]">1 lần</span> để fix!
+                </h3>
+                <p className="text-slate-600 font-medium leading-relaxed max-w-2xl text-sm md:text-base">
+                  Khi chưa kết nối, Google chỉ gửi <b>lời mời</b> nên lịch hiện{' '}
+                  <span className="text-blue-400 font-bold">xanh nhạt (viền)</span>. Sau khi bấm kết nối,
+                  mọi lịch mới sẽ <span className="text-slate-900 font-black underline decoration-orange-400">tự động xuất hiện với màu đậm hoàn toàn</span> mà không cần làm gì thêm.
+                </p>
+              </div>
+
+              {/* CTA Button */}
+              <div className="flex flex-col items-center gap-2 shrink-0">
+                <button
+                  onClick={handleConnectCalendar}
+                  disabled={isConnectingCalendar}
+                  className="relative px-10 py-5 bg-[#F27024] hover:bg-orange-600 text-white rounded-2xl font-black transition-all shadow-lg shadow-orange-300/50 hover:shadow-orange-500/40 active:scale-95 disabled:opacity-50 uppercase text-[10px] tracking-[0.2em] whitespace-nowrap overflow-hidden group/btn"
+                >
+                  <span className="relative z-10 flex items-center gap-3">
+                    {isConnectingCalendar ? (
+                      <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                    ) : (
+                      <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1" /></svg>
+                    )}
+                    Kết nối ngay (Free)
+                  </span>
+                </button>
+                <p className="text-[10px] text-slate-400 font-medium">✅ Chỉ làm 1 lần duy nhất</p>
+              </div>
+            </div>
+          </div>
+        </section>
+      )}
+
+      {isCalendarConnected === true && !isAdmin(firebaseUser?.email) && (
+        <div className="mb-4 flex items-center gap-2 px-4 py-2 bg-emerald-50 text-emerald-700 rounded-xl w-fit text-sm font-bold border border-emerald-100 shadow-sm">
+          <span className="w-2 h-2 bg-emerald-500 rounded-full animate-pulse" />
+          Đã kết nối Lịch tự động
+        </div>
+      )}
+
+      {/* Hero / Header Section */}
+      <div className={`flex-none flex flex-col lg:flex-row gap-6 mb-8 transition-all duration-700 ${!isConfigExpanded ? 'max-h-0 opacity-0 mb-0' : 'max-h-[1500px] opacity-100'}`}>
         {/* Step 1: Import */}
-        <section className="lg:w-[42%] bg-white p-4 rounded-3xl border border-slate-200 flex flex-col relative z-[50] border-b-4 border-b-slate-200/50">
-          <h2 className="text-[10px] font-bold text-[#F27024] mb-1.5 flex items-center gap-2 uppercase tracking-[0.2em] flex-none">
-            Dữ liệu
-          </h2>
-          <div className="flex-1 overflow-visible p-0.5">
+        <section className="lg:w-[42%] card-clean p-6 md:p-8 flex flex-col">
+          <div className="flex items-center gap-4 mb-6">
+            <div className="step-number">1</div>
+            <div>
+              <h2 className="text-sm font-bold text-slate-800 uppercase tracking-widest leading-none">Dữ liệu</h2>
+              <p className="text-[10px] text-slate-400 font-bold mt-1 uppercase">CHỌN HỌC KỲ ĐỂ LẤY LỊCH</p>
+            </div>
+          </div>
+          <div className="flex-1">
             <ExcelImport
               accessToken={accessToken}
               onDataLoaded={(data) => {
@@ -602,11 +1021,15 @@ export const LecturerDashboard: React.FC = () => {
         </section>
 
         {allRows.length > 0 && isAdmin(firebaseUser?.email) ? (
-          <section className="lg:w-[58%] bg-white p-4 rounded-3xl border border-slate-200 flex flex-col relative z-[50] border-b-4 border-b-slate-200/50">
-            <h2 className="text-[10px] font-bold text-slate-700 mb-2 flex items-center gap-2 uppercase tracking-[0.2em] flex-none">
-              Cấu hình (Quyền Admin)
-            </h2>
-            <div className="flex-1 overflow-visible p-0.5">
+          <section className="lg:w-[58%] card-clean p-6 md:p-8 flex flex-col">
+            <div className="flex items-center gap-4 mb-6">
+              <div className="step-number">2</div>
+              <div>
+                <h2 className="text-sm font-bold text-slate-800 uppercase tracking-widest leading-none">Cấu hình</h2>
+                <p className="text-[10px] text-slate-400 font-bold mt-1 uppercase">ÁNH XẠ CỘT DỮ LIỆU</p>
+              </div>
+            </div>
+            <div className="flex-1">
               <MappingTool
                 headers={headerOptions}
                 headerRowOptions={headerRowOptions}
@@ -619,12 +1042,7 @@ export const LecturerDashboard: React.FC = () => {
                   setIsPreviewMode(false);
                   
                   try {
-                    // 1. Save Column Mapping (User-specific persistence)
-                    if (mappingId) {
-                      await saveFirebaseMapping(mappingId, columnMap, headerRowIndex);
-                    }
-
-                    // 2. Save Global Semester Config (Because user IS Admin)
+                    if (mappingId) await saveFirebaseMapping(mappingId, columnMap, headerRowIndex);
                     if (selectedSemesterId) {
                       const currentConfig = semesters[selectedSemesterId];
                       if (currentConfig) {
@@ -633,348 +1051,306 @@ export const LecturerDashboard: React.FC = () => {
                           ...currentConfig,
                           startRow: startRow.toString(),
                           columns: columnsConfig,
-                          mapping: columnMap // 🏛️ Save this as global mapping for all users
+                          mapping: columnMap
                         });
                       }
                     }
-                  } catch (err: any) {
-                    // Fail silently or handle error differently
-                  }
+                  } catch (err) { /* silent */ }
                 }}
                 isLoading={loading}
               />
             </div>
           </section>
         ) : allRows.length > 0 ? (
-          /* Lecturers see a comprehensive, categorized User Manual */
-          <div className="lg:w-[58%] bg-white border border-slate-200 rounded-3xl flex flex-col p-5 gap-3 shadow-sm border-b-4 border-b-slate-200/50">
-            <div className="flex items-center justify-between mb-1">
-              <h2 className="text-[10px] font-bold text-slate-700 flex items-center gap-2 uppercase tracking-[0.2em]">
-                Cẩm nang sử dụng
-              </h2>
-              <span className="px-2 py-0.5 bg-orange-100 text-[#F27024] text-[8px] font-bold rounded-full uppercase tracking-tighter">Lecturer Edition</span>
+          /* Lecturers Manual Section */
+          <div className="lg:w-[58%] card-clean p-6 md:p-8 flex flex-col">
+            <div className="flex items-center gap-4 mb-6">
+              <div className="step-number">2</div>
+              <div>
+                <h2 className="text-sm font-bold text-slate-800 uppercase tracking-widest leading-none">Hướng dẫn</h2>
+                <p className="text-[10px] text-slate-400 font-bold mt-1 uppercase">CÁCH ĐỒNG BỘ LỊCH CHUẨN</p>
+              </div>
             </div>
             
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 flex-1 overflow-auto pr-1 scrollbar-thin scrollbar-thumb-slate-200">
-              {/* Category 1: Core Flow */}
-              <div className="bg-slate-50/50 rounded-2xl p-3 border border-slate-100 hover:border-orange-200 transition-colors">
-                <div className="flex items-center gap-2 mb-2">
-                  <span className="w-5 h-5 bg-[#F27024] text-white text-[10px] font-bold rounded-lg flex items-center justify-center shadow-sm">1</span>
-                  <h4 className="text-[11px] font-bold text-slate-800 uppercase tracking-tight">Đồng bộ lên Google Calendar</h4>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 flex-1">
+              {[
+                { id: '1', title: 'Lọc lịch cá nhân', desc: 'Sử dụng ô tìm kiếm để lọc đích danh tên của bạn trong danh sách.' },
+                { id: '2', title: 'Chọn sự kiện', desc: 'Đánh dấu vào các sự kiện bạn muốn đồng bộ lên Calendar cá nhân.' },
+                { id: '3', title: 'Kiểm tra xung đột', desc: 'Hệ thống sẽ báo nếu thời gian trùng với lịch hiện có của bạn.' },
+                { id: '4', title: 'Hoàn tất', desc: 'Nhấn nút Đồng bộ và chờ trong vài giây để lịch được cập nhật.' },
+              ].map((item) => (
+                <div key={item.id} className="p-4 rounded-xl bg-slate-50 border border-slate-100 hover:border-orange-200 transition-all group">
+                  <div className="flex items-center gap-3 mb-2">
+                    <span className="text-[10px] font-bold text-orange-500 uppercase tracking-widest">Tiêu điểm {item.id}</span>
+                  </div>
+                  <h4 className="text-xs font-bold text-slate-800 mb-1 uppercase tracking-tight">{item.title}</h4>
+                  <p className="text-[11px] text-slate-500 font-medium leading-relaxed">
+                    {item.desc}
+                  </p>
                 </div>
-                <ul className="space-y-1.5 ml-1">
-                  <li className="flex gap-2 text-[9px] text-slate-500 font-medium">
-                    <span className="text-orange-400">•</span> Chọn học kỳ & Nhập tên bạn vào ô tìm kiếm.
-                  </li>
-                  <li className="flex gap-2 text-[9px] text-slate-500 font-medium">
-                    <span className="text-orange-400">•</span> Tích chọn các dòng cần đồng bộ lên Calendar.
-                  </li>
-                </ul>
-              </div>
-
-              {/* Category 2: Management */}
-              <div className="bg-slate-50/50 rounded-2xl p-3 border border-slate-100 hover:border-orange-200 transition-colors">
-                <div className="flex items-center gap-2 mb-2">
-                  <span className="w-5 h-5 bg-blue-500 text-white text-[10px] font-bold rounded-lg flex items-center justify-center shadow-sm">2</span>
-                  <h4 className="text-[11px] font-bold text-slate-800 uppercase tracking-tight">Quản lý hiệu quả</h4>
-                </div>
-                <ul className="space-y-1.5 ml-1">
-                  <li className="flex gap-2 text-[9px] text-slate-500 font-medium">
-                    <span className="text-blue-400">•</span> Click "Lịch sử" (góc trên) để xem các lần import.
-                  </li>
-                  <li className="flex gap-2 text-[9px] text-slate-500 font-medium">
-                    <span className="text-blue-400">•</span> Dùng "Tải lại" nếu dữ liệu Excel vừa thay đổi.
-                  </li>
-                </ul>
-              </div>
-
-              {/* Category 3: Cleanup */}
-              <div className="bg-slate-50/50 rounded-2xl p-3 border border-slate-100 hover:border-orange-200 transition-colors">
-                <div className="flex items-center gap-2 mb-2">
-                  <span className="w-5 h-5 bg-rose-500 text-white text-[10px] font-bold rounded-lg flex items-center justify-center shadow-sm">3</span>
-                  <h4 className="text-[11px] font-bold text-slate-800 uppercase tracking-tight">Dọn dẹp lịch cũ</h4>
-                </div>
-                <p className="text-[9px] text-slate-500 font-medium leading-relaxed">
-                  Dùng nút <span className="text-rose-600 font-bold">"Xóa lịch cũ"</span> ở bảng dưới để xóa sạch các sự kiện app đã tạo, giúp Calendar gọn gàng trước khi sync mới.
-                </p>
-              </div>
-
-              {/* Category 4: Optimization */}
-              <div className="bg-slate-50/50 rounded-2xl p-3 border border-slate-100 hover:border-orange-200 transition-colors">
-                <div className="flex items-center gap-2 mb-2">
-                  <span className="w-5 h-5 bg-emerald-500 text-white text-[10px] font-bold rounded-lg flex items-center justify-center shadow-sm">4</span>
-                  <h4 className="text-[11px] font-bold text-slate-800 uppercase tracking-tight">Lọc nâng cao</h4>
-                </div>
-                <p className="text-[9px] text-slate-500 font-medium leading-relaxed">
-                  Sử dụng biểu tượng <span className="text-slate-800 font-bold">🔍 (biểu tượng phễu)</span> bên cạnh ô tìm kiếm để lọc dữ liệu theo Phòng, Tiêu đề hoặc Ngày.
-                </p>
-              </div>
+              ))}
             </div>
           </div>
         ) : (
-          <div className="lg:w-[58%] bg-slate-50/30 border border-dashed border-slate-200 rounded-3xl flex flex-col items-center justify-center p-6 gap-3 opacity-60">
-            <div className="w-10 h-10 rounded-full border-2 border-slate-200 flex items-center justify-center text-slate-300 font-bold">1</div>
-            <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest text-center">Hoàn thành bước 1 (Chọn học kỳ) để bắt đầu</p>
+          <div className="lg:w-[58%] card-clean p-8 flex flex-col items-center justify-center border-dashed border-2">
+            <div className="w-16 h-16 rounded-full bg-slate-100 flex items-center justify-center text-slate-300 text-2xl font-bold mb-4">
+               2
+            </div>
+            <p className="text-xs font-bold text-slate-400 uppercase tracking-widest text-center">Đang chờ cấu hình bước 1</p>
           </div>
         )}
       </div>
 
-      {/* 🚀 STEP 3: PREMIUM CONTROL CENTER (Mobile-First) */}
+      {/* 🚀 STEP 3: CONTROL CENTER */}
       {(rows.length > 0 || (allRows.length > 0 && isPreviewMode)) && (
-        <section className="flex-1 min-h-0 bg-white/40 glass-panel p-3 sm:p-5 rounded-2xl sm:rounded-[2.5rem] flex flex-col shadow-2xl shadow-slate-200/40 mb-2 sm:mb-0 border-b-4 sm:border-b-8 border-b-slate-200/10 transition-all duration-300">
-          {/* Mobile Config Toggle & Status */}
-          <div className="lg:hidden flex items-center justify-between mb-2 px-1">
-            <button
-              onClick={() => setIsConfigExpanded(!isConfigExpanded)}
-              className={`flex items-center gap-2 px-2.5 py-1.5 rounded-lg border transition-all font-bold text-[9px] uppercase tracking-wider ${isConfigExpanded ? 'bg-orange-50 text-[#F27024] border-orange-200' : 'bg-white text-slate-500 border-slate-200 shadow-sm'}`}
-            >
-              <svg className={`w-3 h-3 transition-transform duration-300 ${isConfigExpanded ? 'rotate-180' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M19 9l-7 7-7-7" />
-              </svg>
-              {isConfigExpanded ? 'Thu gọn' : 'Thiết lập & Cấu hình'}
-            </button>
-            
-            <div className="flex items-center gap-2 bg-white/50 px-2 py-1 rounded-lg border border-white/50">
-              <div className="w-1 h-1 rounded-full bg-emerald-500 animate-pulse" />
-              <span className="text-[8px] font-extrabold text-slate-400 uppercase tracking-widest leading-none">
-                {rows.length} mục
-              </span>
+        <section className="flex-1 min-h-0 card-clean flex flex-col mb-10">
+          {/* Header Row */}
+          <div className="p-6 md:p-8 border-b border-slate-100 flex flex-col lg:flex-row lg:items-center justify-between gap-4">
+            {/* Step label */}
+            <div className="flex items-center gap-4 shrink-0">
+              <div className="step-number">3</div>
+              <div>
+                <h2 className="text-sm font-bold text-slate-800 uppercase tracking-widest leading-none">Kiểm tra & Đồng bộ</h2>
+                <p className="text-[10px] text-slate-400 font-bold mt-1 uppercase">
+                  {isPreviewMode ? 'CHẾ ĐỘ XEM TRƯỚC' : `ĐÃ SẴN SÀNG: ${filteredRows.length}`}
+                </p>
+              </div>
             </div>
-          </div>
 
-          <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-2 sm:gap-5 mb-2 sm:mb-5 pb-2 sm:pb-5 border-b border-white/50">
-            <div className="flex items-center gap-3 shrink-0">
-                <div className="w-10 h-10 rounded-xl fpt-gradient flex items-center justify-center text-white shadow-lg shadow-orange-200 lg:hidden transform hover:scale-105 transition-transform">
-                   <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10" /></svg>
+            {/* Search */}
+            <div className="flex flex-col sm:flex-row items-center gap-3 flex-1 min-w-0">
+              <div className="relative flex-1 group w-full">
+                <div className="absolute left-4 top-2.5 text-slate-300 group-focus-within:text-[#F27024] transition-colors pointer-events-none">
+                  <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
+                    <circle cx="11" cy="11" r="8"></circle>
+                    <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
+                  </svg>
                 </div>
-                <div>
-                  <h2 className="text-sm sm:text-lg font-black text-slate-800 tracking-tight leading-tight">Kiểm tra & Đồng bộ</h2>
-                  <div className="flex items-center gap-2 mt-0.5">
-                    <div className="w-1 h-1 rounded-full bg-emerald-500 animate-pulse" />
-                    <p className="text-[9px] sm:text-[11px] text-slate-400 font-extrabold uppercase tracking-widest leading-none">
-                      {isPreviewMode ? 'Xem trước' : `${filteredRows.length} mục sẵn sàng`}
-                    </p>
-                  </div>
-                </div>
+                <input
+                  type="text"
+                  placeholder="Lọc tên giảng viên..."
+                  className="w-full pl-11 pr-4 py-2 bg-white border border-slate-200 rounded-xl text-sm text-slate-700 placeholder:text-slate-400 focus:ring-2 focus:ring-[#F27024]/20 focus:border-[#F27024] outline-none transition-all"
+                  value={personFilter}
+                  onChange={(e) => {
+                    setPersonFilter(e.target.value);
+                    updateSelections(rows, e.target.value);
+                  }}
+                />
               </div>
- 
-              <div className="w-full sm:flex-1 flex flex-col sm:flex-row items-center justify-end gap-3 min-w-0">
-                {mappingLoading && (
-                  <div className="hidden lg:flex items-center gap-2 px-3 py-1.5 bg-orange-50 text-orange-600 rounded-lg text-[10px] font-bold animate-pulse border border-orange-100 italic shrink-0">
-                    Đang tải...
-                  </div>
-                )}
-                
-                <div className="flex items-center gap-2 w-full max-w-sm min-w-0 group">
-                  {/* 🔍 Premium Glass Search Bar */}
-                  <div className="relative flex-1 min-w-0">
-                    <div className="absolute left-3 top-2.5 text-slate-300 group-focus-within:text-[#F27024] transition-colors pointer-events-none">
-                      <svg className="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
-                        <circle cx="11" cy="11" r="8"></circle>
-                        <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
-                      </svg>
-                    </div>
-                    <input
-                      type="text"
-                      placeholder="Tìm kiếm..."
-                      className="w-full pl-9 pr-3 py-2 bg-white border-2 border-slate-100 rounded-xl text-[12px] font-black text-slate-700 placeholder:text-slate-300 focus:border-[#F27024]/30 focus:shadow-xl focus:shadow-orange-100/50 outline-none transition-all cursor-text"
-                      value={personFilter}
-                      onChange={(e) => {
-                        setPersonFilter(e.target.value);
-                        updateSelections(rows, e.target.value);
-                      }}
-                    />
-                  </div>
- 
-                  <SearchColumnSelector
-                    headers={searchHeaderOptions}
-                    selectedIndices={searchColumnIndices}
-                    onSelectionChange={setSearchColumnIndices}
-                  />
-                </div>
-              </div>
+              <SearchColumnSelector
+                headers={searchHeaderOptions}
+                selectedIndices={searchColumnIndices}
+                onSelectionChange={setSearchColumnIndices}
+              />
             </div>
- 
-                <div className="flex items-center gap-2 w-full sm:w-auto shrink-0 border-t sm:border-t-0 pt-3 sm:pt-0 mb-4 sm:mb-0 border-white/50">
-                  {/* 🚨 NÚT ĐỒNG BỘ CHÍNH - Premium Gradient Overlay */}
-                  <div className="relative group flex-[2] sm:flex-initial">
+
+            {/* Action buttons — flex-wrap để không tràn */}
+            <div className="flex flex-wrap items-center gap-2 shrink-0">
+              <button
+                onClick={() => setIsConfigExpanded(!isConfigExpanded)}
+                className={`h-11 px-4 rounded-xl font-bold transition-all flex items-center justify-center gap-2 border shadow-sm text-xs uppercase ${
+                  isConfigExpanded 
+                  ? 'bg-slate-50 text-slate-500 border-slate-200 hover:bg-slate-100' 
+                  : 'bg-indigo-50 text-indigo-600 border-indigo-100 hover:bg-indigo-100'
+                }`}
+                title="Đóng / Mở phần Cấu hình Semester và Ánh xạ dữ liệu"
+              >
+                <svg className={`w-4 h-4 transition-transform duration-300 ${isConfigExpanded ? 'rotate-180' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M19 9l-7 7-7-7" />
+                </svg>
+                <span className="hidden sm:inline">{isConfigExpanded ? 'Ẩn cấu hình' : 'Sửa cấu hình (Bước 1 & 2)'}</span>
+              </button>
+
+              <button
+                onClick={() => handleSync(false)}
+                disabled={syncing || clearing || selectedIds.size === 0}
+                className="h-11 px-6 bg-[#F27024] hover:bg-orange-600 text-white rounded-xl font-bold disabled:opacity-30 transition-all flex items-center justify-center gap-2 shadow-sm uppercase text-xs tracking-wider"
+              >
+                {syncing ? (
+                  <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                ) : (
+                  <>
+                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" /></svg>
+                    Đồng bộ ({selectedIds.size})
+                  </>
+                )}
+              </button>
+
+              {isAdmin(firebaseUser?.email) && (
+                <>
+                  <div className="relative group">
                     <button
-                      onClick={() => handleSync(false)}
-                      disabled={syncing || clearing || selectedIds.size === 0}
-                      className="w-full h-10 sm:h-12 px-4 sm:px-6 fpt-gradient text-white rounded-xl sm:rounded-[1.25rem] font-black hover:brightness-110 disabled:bg-slate-100 disabled:text-slate-300 disabled:border-slate-100 border border-transparent transition-all shadow-xl shadow-orange-200/40 flex items-center justify-center gap-2 text-[10px] sm:text-[11px] uppercase tracking-widest active:scale-95"
+                      onClick={handleNotifyAllLecturers}
+                      disabled={isNotifying || syncing || clearing}
+                      className={`h-11 px-6 rounded-xl font-bold transition-all shadow-sm flex items-center justify-center gap-2 text-xs uppercase ${
+                        confirmNotifyData 
+                        ? 'bg-slate-900 text-white' 
+                        : 'bg-slate-800 text-white hover:bg-slate-900'
+                      }`}
                     >
-                      {syncing ? (
+                      {isNotifying ? (
                         <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
                       ) : (
-                        <>Đồng bộ lên Google Calendar ({selectedIds.size})</>
-                      )}
-                    </button>
-                  </div>
-
-                  {/* 🏛️ Admin Only: Sync for All Lecturers & Recall All */}
-                  {isAdmin(firebaseUser?.email) && (
-                    <div className="flex items-center gap-2 flex-wrap sm:flex-nowrap">
-                      {/* Sync All Button */}
-                      <div className="relative group">
-                        <button
-                          onClick={handleSyncAllLecturers}
-                          disabled={syncing || clearing}
-                          className="h-10 sm:h-12 px-4 sm:px-6 bg-slate-900 text-white rounded-xl sm:rounded-[1.25rem] font-black hover:bg-slate-800 disabled:bg-slate-100 disabled:text-slate-300 border border-transparent transition-all shadow-xl shadow-slate-200/40 flex items-center justify-center gap-2 text-[10px] sm:text-[11px] uppercase tracking-widest active:scale-95 whitespace-nowrap"
-                          title="Đồng bộ và gửi mail mời cho toàn bộ giảng viên trong danh sách"
-                        >
-                          {syncing ? (
-                             <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
-                          ) : (
-                            <>
-                              <svg className="w-4 h-4 text-orange-400" fill="currentColor" viewBox="0 0 20 20">
-                                <path d="M2.003 5.884L10 9.882l7.997-3.998A2 2 0 0016 4H4a2 2 0 00-1.997 1.884z" />
-                                <path d="M18 8.118l-8 4-8-4V14a2 2 0 002 2h12a2 2 0 002-2V8.118z" />
-                              </svg>
-                              Đồng bộ cho tất cả GV
-                            </>
-                          )}
-                        </button>
-                      </div>
-
-                      {/* 🚀 NEW: Admin Recall All Button (Thu hồi tất cả) */}
-                      <div className="relative group">
-                        <button
-                          onClick={async () => {
-                            if (window.confirm(`⚠️ CẢNH BÁO QUAN TRỌNG:
-Hành động này sẽ THU HỒI (Xóa) toàn bộ lịch đã gửi cho TẤT CẢ giảng viên của học kỳ này.
-Các giảng viên sẽ nhận được email thông báo hủy lịch.
-Bạn có chắc chắn muốn tiếp tục?`)) {
-                              const currentType = effectiveIsReview ? 'review' : 'council';
-                              await clearAppEvents(currentType, true); // sendUpdates = true
-                            }
-                          }}
-                          disabled={syncing || clearing}
-                          className="h-10 sm:h-12 px-4 bg-rose-600 text-white rounded-xl sm:rounded-[1.25rem] font-black hover:bg-rose-700 disabled:bg-slate-100 disabled:text-slate-300 transition-all shadow-xl shadow-rose-200/40 flex items-center justify-center gap-2 text-[10px] sm:text-[11px] uppercase tracking-widest active:scale-95 whitespace-nowrap"
-                          title="Thu hồi toàn bộ sự kiện đã gửi (Xóa trên lịch GV)"
-                        >
-                          {clearing ? (
-                            <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
-                          ) : (
-                            <>
-                               <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M3 10h10a8 8 0 018 8v2M3 10l6 6m-6-6l6-6" />
-                               </svg>
-                               Thu hồi tất cả
-                            </>
-                          )}
-                        </button>
-                      </div>
-                    </div>
-                  )}
- 
-                  <div className="hidden sm:block w-px h-8 bg-slate-200/50 mx-1" />
- 
-                  {/* 🗑️ NÚT XÓA LỊCH - Icon Focus */}
-                  <div className="relative group flex-1 sm:flex-initial">
-                    <button
-                      onClick={() => setIsConfirmingClear(!isConfirmingClear)}
-                      disabled={syncing || clearing}
-                      className={`w-full h-10 sm:h-12 px-2 sm:px-4 rounded-xl sm:rounded-[1.25rem] font-black transition-all text-[10px] uppercase tracking-wider flex items-center justify-center gap-2 border shadow-lg active:scale-95 ${
-                        isConfirmingClear 
-                        ? 'bg-rose-50 text-rose-500 border-rose-200 ring-4 ring-rose-50' 
-                        : 'bg-white text-slate-400 border-slate-100 hover:bg-rose-50 hover:text-rose-500 hover:border-rose-200 shadow-sm'
-                      }`}
-                      title="Xóa dữ liệu cũ"
-                    >
-                      {clearing ? (
-                        <div className="w-4 h-4 border-2 border-rose-500/30 border-t-rose-500 rounded-full animate-spin" />
-                      ) : (
                         <>
-                          <svg className="w-4 h-4 sm:w-5 sm:h-5 group-hover:rotate-12 transition-transform" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
-                          </svg>
-                          <span className="hidden sm:inline-block">Xóa lịch</span>
+                          <svg className="w-4 h-4 text-orange-400" fill="currentColor" viewBox="0 0 20 20"><path d="M2.003 5.884L10 9.882l7.997-3.998A2 2 0 0016 4H4a2 2 0 00-1.997 1.884z" /><path d="M18 8.118l-8 4-8-4V14a2 2 0 002 2h12a2 2 0 002-2V8.118z" /></svg>
+                          Thông báo GV
                         </>
                       )}
                     </button>
- 
-                    {/* Premium Popover Confirm */}
-                    {isConfirmingClear && (
-                      <div className="absolute top-full right-0 mt-4 w-72 bg-white border border-slate-100 p-6 rounded-[2.5rem] shadow-[0_25px_50px_-12px_rgba(0,0,0,0.15)] z-[100] animate-in fade-in zoom-in-95 slide-in-from-top-4 duration-300 pointer-events-auto">
+
+                    {confirmNotifyData && (
+                      <div className="absolute bottom-full right-0 mb-4 w-80 bg-white border border-slate-100 p-8 rounded-[2rem] shadow-[0_20px_50px_rgba(0,0,0,0.15)] z-[100] animate-in fade-in slide-in-from-bottom-4 duration-300">
                         <div className="text-center mb-6">
-                          <div className="w-14 h-14 bg-rose-50 rounded-[1.25rem] flex items-center justify-center mx-auto mb-4 text-rose-500 shadow-inner">
-                             <svg className="w-7 h-7" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" /></svg>
-                          </div>
-                          <h4 className="text-[13px] font-black text-rose-500 uppercase tracking-widest mb-2">Dọn dẹp lịch cá nhân</h4>
-                          <p className="text-[10px] text-slate-400 font-extrabold leading-relaxed px-2 uppercase tracking-tight">Xóa sạch các sự kiện app đã tạo trên LỊCH CỦA BẠN <br/><span className="text-slate-900">(Không ảnh hưởng đến người khác)</span></p>
+                          <h4 className="text-sm font-black text-blue-600 uppercase tracking-tight mb-2">Gửi thư thông báo?</h4>
+                          <p className="text-[10px] text-slate-400 font-bold leading-relaxed uppercase tracking-wider">
+                            Sẽ gửi thư mời tới {confirmNotifyData.length} GV. <br/>
+                            Lịch sẽ tự động đồng bộ nếu đã liên kết.
+                          </p>
                         </div>
                         <div className="flex gap-3">
                           <button
-                            onClick={async (e) => {
-                              e.stopPropagation();
-                              setIsConfirmingClear(false);
-                              const currentType = effectiveIsReview ? 'review' : 'council';
-                              await clearAppEvents(currentType);
-                            }}
-                            className="flex-[1.5] py-4 bg-rose-600 text-white rounded-2xl font-black text-[11px] uppercase tracking-widest hover:brightness-110 active:scale-95 shadow-2xl shadow-rose-200 transition-all"
+                            onClick={() => executeNotifyLecturers(confirmNotifyData)}
+                            className="flex-[1.5] py-3.5 bg-blue-600 text-white rounded-2xl font-black text-[10px] uppercase tracking-widest hover:bg-blue-700 transition-all active:scale-95 shadow-lg shadow-blue-100"
                           >
-                            Xác nhận Xóa
+                            Xác nhận gửi
                           </button>
-                          <button
-                            onClick={() => setIsConfirmingClear(false)}
-                            className="flex-1 py-4 bg-slate-50 text-slate-400 border border-slate-100 rounded-2xl font-black text-[11px] uppercase tracking-widest hover:bg-white hover:border-slate-300 transition-all active:scale-95"
+                          <button 
+                            onClick={() => {
+                                setConfirmNotifyData(null);
+                                setIsNotifying(false);
+                            }} 
+                            className="flex-1 py-3.5 bg-slate-50 text-slate-400 rounded-2xl font-black text-[10px] uppercase tracking-widest hover:bg-slate-100"
                           >
                             Hủy
                           </button>
                         </div>
-                        <div className="absolute -top-1.5 right-6 w-3 h-3 bg-white border-t border-l border-slate-100 rotate-45" />
+                        <div className="absolute top-full right-8 w-4 h-4 bg-white rotate-45 -translate-y-2 border-r border-b border-slate-100"></div>
                       </div>
                     )}
                   </div>
-                </div>
 
-          <div className="flex-1 min-h-0 overflow-hidden rounded-xl border border-slate-50 bg-slate-100">
-            {(!isRestored || loading || mappingLoading || isFetchingData || !isMappingSettled || isSemestersLoading) ? (
-              <div className="h-full flex flex-col items-center justify-center bg-white animate-in fade-in duration-500">
-                <div className="relative mb-6">
-                  <div className="w-16 h-16 border-4 border-orange-100 border-t-[#F27024] rounded-full animate-spin"></div>
-                  <div className="absolute inset-0 flex items-center justify-center">
-                    <div className="w-8 h-8 bg-white rounded-full shadow-sm flex items-center justify-center">
-                      <div className="w-4 h-4 bg-orange-400 rounded-full animate-ping"></div>
-                    </div>
+                  <div className="relative group">
+                    <button
+                      onClick={() => {
+                        // 🛡️ Close other popovers
+                        setConfirmNotifyData(null);
+                        setIsConfirmingClear(false);
+                        setIsConfirmingGlobalRecall(true);
+                      }}
+                      disabled={syncing || clearing}
+                      className={`h-11 px-6 rounded-xl font-bold transition-all text-xs uppercase ${
+                         isConfirmingGlobalRecall
+                         ? 'bg-rose-600 text-white'
+                         : 'bg-rose-50 text-rose-600 border border-rose-100 hover:bg-rose-100'
+                      }`}
+                    >
+                      Thu hồi tất cả
+                    </button>
+
+                    {isConfirmingGlobalRecall && (
+                      <div className="absolute bottom-full right-0 mb-4 w-80 bg-white border border-slate-100 p-8 rounded-[2rem] shadow-[0_20px_50px_rgba(0,0,0,0.15)] z-[100] animate-in fade-in slide-in-from-bottom-4 duration-300">
+                        <div className="text-center mb-6">
+                          <h4 className="text-sm font-black text-rose-600 uppercase tracking-tight mb-2">THU HỒI TẤT CẢ?</h4>
+                          <p className="text-[10px] text-slate-400 font-bold leading-relaxed uppercase tracking-wider">
+                            HÀNH ĐỘNG NÀY SẼ XÓA TRIỆT ĐỂ LỊCH TRÊN TOÀN BỘ GIẢNG VIÊN.
+                          </p>
+                        </div>
+                        <div className="flex gap-3">
+                          <button
+                            onClick={async () => {
+                              setIsConfirmingGlobalRecall(false);
+                              await globalRecallEvents();
+                            }}
+                            className="flex-[1.5] py-3.5 bg-rose-600 text-white rounded-2xl font-black text-[10px] uppercase tracking-widest hover:bg-rose-700 transition-all active:scale-95 shadow-lg shadow-rose-100"
+                          >
+                            Xác nhận xóa
+                          </button>
+                          <button onClick={() => setIsConfirmingGlobalRecall(false)} className="flex-1 py-3.5 bg-slate-50 text-slate-400 rounded-2xl font-black text-[10px] uppercase tracking-widest hover:bg-slate-100">Hủy</button>
+                        </div>
+                        <div className="absolute top-full right-8 w-4 h-4 bg-white rotate-45 -translate-y-2 border-r border-b border-slate-100"></div>
+                      </div>
+                    )}
                   </div>
-                </div>
-                <div className="text-center">
-                  <h3 className="text-sm font-bold text-slate-800 uppercase tracking-[0.2em] mb-2">
-                    {(!isRestored || mappingLoading || !isMappingSettled || isSemestersLoading) ? 'Đang khôi phục phiên làm việc' : 'Đang tải dữ liệu Sheet'}
-                  </h3>
-                  <p className="text-[10px] text-slate-400 font-bold uppercase tracking-widest animate-pulse">Vui lòng đợi trong giây lát...</p>
-                </div>
+                </>
+              )}
+
+              <div className="relative group">
+                <button
+                  onClick={() => {
+                    // 🛡️ Close other popovers
+                    setConfirmNotifyData(null);
+                    setIsConfirmingGlobalRecall(false);
+                    setIsConfirmingClear(true);
+                  }}
+                  disabled={syncing || clearing}
+                  className={`h-11 px-6 rounded-xl font-bold transition-all text-xs uppercase flex items-center justify-center gap-2 border shadow-sm ${
+                    isConfirmingClear
+                    ? 'bg-rose-600 text-white border-rose-600 shadow-rose-200'
+                    : 'bg-white text-slate-500 border-slate-200 hover:border-rose-500 hover:text-rose-500'
+                  }`}
+                >
+                  {clearing ? (
+                    <div className="w-4 h-4 border-2 border-current border-t-transparent rounded-full animate-spin" />
+                  ) : (
+                    <>
+                      <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg>
+                      Dọn dẹp Lịch
+                    </>
+                  )}
+                </button>
+
+                {isConfirmingClear && (
+                  <div className="absolute bottom-full right-0 mb-4 w-80 bg-white border border-slate-100 p-8 rounded-[2rem] shadow-[0_20px_50px_rgba(0,0,0,0.15)] z-[100] animate-in fade-in slide-in-from-bottom-4 duration-300">
+                    <div className="text-center mb-6">
+                      <h4 className="text-sm font-black text-rose-600 uppercase tracking-tight mb-2">Dọn dẹp lịch cá nhân</h4>
+                      <p className="text-[10px] text-slate-400 font-bold leading-relaxed uppercase tracking-wider">Sẽ xóa sạch các sự kiện app đã tạo trên lịch của bạn.</p>
+                    </div>
+                    <div className="flex gap-3">
+                      <button
+                        onClick={async () => {
+                          setIsConfirmingClear(false);
+                          const currentType = effectiveIsReview ? 'review' : 'council';
+                          await clearAppEvents(currentType);
+                        }}
+                        className="flex-[1.5] py-3.5 bg-rose-600 text-white rounded-2xl font-black text-[10px] uppercase tracking-widest hover:bg-rose-700 transition-all active:scale-95 shadow-lg shadow-rose-100"
+                      >
+                        Xác nhận
+                      </button>
+                      <button onClick={() => setIsConfirmingClear(false)} className="flex-1 py-3.5 bg-slate-50 text-slate-400 rounded-2xl font-black text-[10px] uppercase tracking-widest hover:bg-slate-100">Hủy</button>
+                    </div>
+                    <div className="absolute top-full right-14 w-4 h-4 bg-white rotate-45 -translate-y-2 border-r border-b border-slate-100"></div>
+                  </div>
+                )}
               </div>
-            ) : (rows.length > 0 || (allRows.length > 0 && isPreviewMode)) ? (
-              <div className="relative h-full">
-                <ScheduleTable
-                  rows={filteredRows}
-                  selectedIds={selectedIds}
-                  onToggleSelect={handleToggleSelect}
-                  onToggleAll={handleToggleAll}
-                  columnLabels={columnLabels}
-                  columnsConfig={columnsConfig}
-                  headers={fullDetailHeaders}
-                  isPreview={isPreviewMode}
-                  allRows={allRows}
-                  headerRowIndex={headerRowIndex}
-                />
+            </div>
+          </div>
+
+          {/* Table Area */}
+          <div className="flex-1 min-h-0 overflow-hidden bg-white">
+            {(!isRestored || loading || mappingLoading || isFetchingData || !isMappingSettled || isSemestersLoading) ? (
+              <div className="h-full flex flex-col items-center justify-center bg-slate-50/30">
+                <div className="w-12 h-12 border-4 border-slate-100 border-t-[#F27024] rounded-full animate-spin mb-4" />
+                <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest animate-pulse">Đang nạp dữ liệu...</p>
               </div>
             ) : (
-              <div className="h-full flex flex-col items-center justify-center bg-white">
-                <div className="w-20 h-20 bg-orange-50 rounded-full flex items-center justify-center mb-4 text-[#F27024] font-bold text-xl">
-                  ?
-                </div>
-                <h3 className="text-slate-400 font-bold text-xs uppercase tracking-[0.3em]">Đang đợi học kỳ...</h3>
-              </div>
+              <ScheduleTable
+                rows={filteredRows}
+                selectedIds={selectedIds}
+                onToggleSelect={handleToggleSelect}
+                onToggleAll={handleToggleAll}
+                columnLabels={columnLabels}
+                columnsConfig={columnsConfig}
+                headers={fullDetailHeaders}
+                isPreview={isPreviewMode}
+                allRows={allRows}
+                headerRowIndex={headerRowIndex}
+              />
             )}
           </div>
         </section>
       )}
 
       {/* Global Components: Alerts & Toasts */}
-      {/* Internal Conflict Modal */}
       <InternalConflictModal
         isOpen={internalConflictOpen}
         conflictGroups={internalConflictGroups}
@@ -984,7 +1360,6 @@ Bạn có chắc chắn muốn tiếp tục?`)) {
         }}
         onSyncSelected={(selectedEvents) => {
           setInternalConflictOpen(false);
-          // Merge: events đã chọn + events không trùng
           const finalRows = [...pendingNonConflicting, ...selectedEvents];
           doSyncRows(finalRows);
         }}
@@ -1012,11 +1387,9 @@ Bạn có chắc chắn muốn tiếp tục?`)) {
         onConflictResolve={(mode) => {
           setSyncError(null);
           setConflicts([]);
-          // ✅ Dùng lastSyncedRows (rows đã lọc) thay vì gọi handleSync lại từ đầu
           doSyncRows(lastSyncedRows, false, mode);
         }}
       />
-
 
       <SyncHistoryModal
         isOpen={isHistoryOpen}
@@ -1024,6 +1397,9 @@ Bạn có chắc chắn muốn tiếp tục?`)) {
         userId={firebaseUser?.uid || ''}
         refreshTrigger={refreshHistory}
       />
+      
     </div>
   );
 };
+
+export default LecturerDashboard;

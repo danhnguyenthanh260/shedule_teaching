@@ -1,7 +1,7 @@
 /**
  * =====================================================
  * Schedule Teaching - ALL-IN-ONE BACKEND SCRIPT
- * Version: 13.6 - FULL SYSTEM WITH HYBRID RSVP
+ * Version: 14.21 - AUTH & RECALL FIX
  * =====================================================
  */
 
@@ -13,10 +13,26 @@ var CONSTANTS = {
   MAGIC_STRING: "Đồng bộ từ FPT Scheduler",
   SUCCESS: "success",
   ERROR: "error",
-  FIREBASE_WEB_API_KEY: "AIzaSyDRwHY6mgdHKjkanLJk8BFpOQSeV5sqvaY",
+  // 🛡️ SECURITY: Keys are now stored in GAS Script Properties
+  FIREBASE_WEB_API_KEY:
+    PropertiesService.getScriptProperties().getProperty(
+      "FIREBASE_WEB_API_KEY",
+    ) || "YOUR_KEY",
   FIREBASE_URL:
     "https://scheduleteaching-default-rtdb.asia-southeast1.firebasedatabase.app/",
   ADMIN_EMAILS: ["ngohoangtruongdat@gmail.com", "ngohoangtruongdat2@gmail.com"],
+  APP_URL: "https://shedule-teaching.vercel.app",
+  INVITATION_CALENDAR_NAME: "FPT Scheduler - Invitations",
+  OAUTH: {
+    CLIENT_ID:
+      PropertiesService.getScriptProperties().getProperty("OAUTH_CLIENT_ID") ||
+      "YOUR_ID.apps.googleusercontent.com",
+    CLIENT_SECRET:
+      PropertiesService.getScriptProperties().getProperty(
+        "OAUTH_CLIENT_SECRET",
+      ) || "YOUR_SECRET",
+    REDIRECT_URI: "https://shedule-teaching.vercel.app/",
+  },
 };
 
 var AppLogger = {
@@ -89,7 +105,13 @@ var GoogleCalendarAPI = {
     }
   },
 
-  listEvents: function (accessToken, calendarId, timeMin, timeMax) {
+  listEvents: function (
+    accessToken,
+    calendarId,
+    timeMin,
+    timeMax,
+    queryParams,
+  ) {
     var path =
       "/calendars/" +
       encodeURIComponent(calendarId) +
@@ -99,6 +121,11 @@ var GoogleCalendarAPI = {
       "&timeMax=" +
       encodeURIComponent(timeMax) +
       "&showDeleted=false&singleEvents=true";
+    if (queryParams) {
+      Object.keys(queryParams).forEach(function (k) {
+        path += "&" + k + "=" + encodeURIComponent(queryParams[k]);
+      });
+    }
     return this.fetch_(accessToken, path);
   },
 
@@ -114,18 +141,28 @@ var GoogleCalendarAPI = {
     });
   },
 
-  patchEvent: function (accessToken, calendarId, eventId, eventData) {
-    return this.fetch_(
-      accessToken,
+  patchEvent: function (
+    accessToken,
+    calendarId,
+    eventId,
+    eventData,
+    queryParams,
+  ) {
+    let path =
       "/calendars/" +
-        encodeURIComponent(calendarId) +
-        "/events/" +
-        encodeURIComponent(eventId),
-      {
-        method: "patch",
-        payload: eventData,
-      },
-    );
+      encodeURIComponent(calendarId) +
+      "/events/" +
+      encodeURIComponent(eventId);
+    if (queryParams) {
+      const qs = Object.keys(queryParams)
+        .map((k) => k + "=" + encodeURIComponent(queryParams[k]))
+        .join("&");
+      path += "?" + qs;
+    }
+    return this.fetch_(accessToken, path, {
+      method: "patch",
+      payload: eventData,
+    });
   },
 
   deleteEvent: function (accessToken, calendarId, eventId) {
@@ -142,9 +179,9 @@ var GoogleCalendarAPI = {
   },
 
   /**
-   * 🔍 Tìm ID của lịch theo tên (Dùng cho REST API)
+   * 🔍 Tìm ID của lịch theo tên (Dùng cho REST API). Tự động tạo nếu không thấy.
    */
-  findCalendarIdByName: function (accessToken, name) {
+  findCalendarIdByName: function (accessToken, name, autoCreate) {
     if (!name || name.toLowerCase() === "primary") return "primary";
     try {
       var list = this.fetch_(accessToken, "/users/me/calendarList");
@@ -154,8 +191,18 @@ var GoogleCalendarAPI = {
         });
         if (found) return found.id;
       }
+
+      // Nếu không tìm thấy và yêu cầu tự tạo (Chỉ dành cho Schedule Teaching)
+      if (autoCreate) {
+        AppLogger.info("Calendar not found, creating new one: " + name);
+        var newCal = this.fetch_(accessToken, "/calendars", {
+          method: "post",
+          payload: { summary: name },
+        });
+        return newCal.id;
+      }
     } catch (e) {
-      AppLogger.error("Error finding calendar by name", e);
+      AppLogger.error("Error finding/creating calendar", e);
     }
     return "primary";
   },
@@ -217,6 +264,7 @@ var CalendarService = {
         var calendarId = GoogleCalendarAPI.findCalendarIdByName(
           googleAccessToken,
           targetCalendarName,
+          true, // ✅ Tự động tạo nếu không thấy (Tránh làm bẩn Primary của Admin)
         );
 
         // 📅 1. Bán kính quét (180 ngày)
@@ -425,11 +473,17 @@ var CalendarService = {
                 payload.description;
             }
             if (ev.guests) {
-              var guestList = ev.guests.split(",");
+              var guestList = ev.guests.split(",").filter(function (e) {
+                return e && e.trim().includes("@");
+              });
+              AppLogger.info("Adding attendees to event", {
+                title: payload.summary,
+                count: guestList.length,
+                list: guestList,
+              });
               payload.attendees = guestList.map(function (email) {
                 return {
                   email: email.trim(),
-                  responseStatus: "needsAction",
                 };
               });
             }
@@ -647,12 +701,61 @@ var CalendarService = {
     googleAccessToken,
     sheetType,
     sendUpdates,
+    eventIds,
   ) {
     googleAccessToken = googleAccessToken || null;
     sheetType = sheetType || null;
     sendUpdates = sendUpdates || false;
 
     let deletedCount = 0;
+
+    // 🚀 NEW: Nếu có danh sách ID cụ thể, thực hiện xóa linh hoạt
+    if (googleAccessToken && eventIds && Array.isArray(eventIds)) {
+      // Resolve calendarId từ calendarName một lần cho toàn bộ batch
+      // (dùng khi IDs là plain format, không composite)
+      var resolvedDefaultCalId = null;
+      var needsResolve = eventIds.some(function (id) {
+        return String(id).indexOf("|") === -1;
+      });
+      if (needsResolve && calendarName) {
+        resolvedDefaultCalId = GoogleCalendarAPI.findCalendarIdByName(
+          googleAccessToken,
+          calendarName,
+        );
+      }
+
+      const deleteRequests = eventIds.map(function (compositeId) {
+        // Hỗ trợ định dạng "calendarId|eventId" để xóa đa lịch
+        var parts = String(compositeId).split("|");
+        var targetCalId, targetEventId;
+        if (parts.length > 1) {
+          targetCalId = parts[0];
+          targetEventId = parts[1];
+        } else {
+          // Plain ID: dùng calendarId đã resolve từ calendarName, fallback primary
+          targetCalId = resolvedDefaultCalId || "primary";
+          targetEventId = compositeId;
+        }
+
+        var deletePath =
+          "/calendars/" +
+          encodeURIComponent(targetCalId) +
+          "/events/" +
+          encodeURIComponent(targetEventId);
+        if (sendUpdates) deletePath += "?sendUpdates=all";
+        return { method: "delete", path: deletePath };
+      });
+
+      const BATCH_SIZE = 50;
+      for (let i = 0; i < deleteRequests.length; i += BATCH_SIZE) {
+        const chunk = deleteRequests.slice(i, i + BATCH_SIZE);
+        GoogleCalendarAPI.fetchAll_(googleAccessToken, chunk);
+        deletedCount += chunk.length;
+      }
+      return { deletedCount: deletedCount };
+    }
+
+    // 🔄 Fallback: Nếu không có ID, thực hiện quét và xóa (Logic cũ cho môi trường nội bộ)
     const now = new Date();
     const startTimeNum = now.getTime() - 365 * 24 * 60 * 60 * 1000; // Mở rộng 1 năm
     const endTimeNum = now.getTime() + 365 * 24 * 60 * 60 * 1000;
@@ -696,7 +799,8 @@ var CalendarService = {
             var isFromApp =
               privateProps[CONSTANTS.SOURCE_TAG] === "fpt_scheduler" ||
               (item.description &&
-                item.description.indexOf(CONSTANTS.MAGIC_STRING) !== -1);
+                item.description.indexOf(CONSTANTS.MAGIC_STRING) !== -1) ||
+              (item.summary && item.summary.indexOf("[Lịch Chấm]") !== -1); // Dự phòng cho bản V14.20
 
             if (
               sheetType &&
@@ -753,6 +857,98 @@ var CalendarService = {
       });
     }
     return { deletedCount: deletedCount };
+  },
+
+  /**
+   * 🔍 NEW: Quét ID của các sự kiện do App tạo ra mà không thực hiện xóa
+   */
+  getAppEventIds: function (calendarName, googleAccessToken, sheetType) {
+    if (!googleAccessToken) {
+      throw new Error(
+        "401: Google Access Token is required for this operation.",
+      );
+    }
+
+    try {
+      var calendarId = GoogleCalendarAPI.findCalendarIdByName(
+        googleAccessToken,
+        calendarName,
+      );
+      if (!calendarId) {
+        throw new Error(
+          "404: Không tìm thấy lịch: " + (calendarName || "mặc định"),
+        );
+      }
+
+      const ids = [];
+      const now = new Date();
+      const startTimeStr = new Date(
+        now.getTime() - 180 * 24 * 60 * 60 * 1000,
+      ).toISOString(); // 6 tháng trước
+      const endTimeStr = new Date(
+        now.getTime() + 365 * 24 * 60 * 60 * 1000,
+      ).toISOString(); // 1 năm sau
+
+      // 🔄 Helper function to scan a specific calendar
+      var scanCalendar = function (calId) {
+        let pageToken = null;
+        do {
+          let path =
+            "/calendars/" +
+            encodeURIComponent(calId) +
+            "/events" +
+            "?timeMin=" +
+            encodeURIComponent(startTimeStr) +
+            "&timeMax=" +
+            encodeURIComponent(endTimeStr) +
+            "&showDeleted=false&singleEvents=false&maxResults=2500";
+          if (pageToken) path += "&pageToken=" + pageToken;
+
+          const listResponse = GoogleCalendarAPI.fetch_(
+            googleAccessToken,
+            path,
+          );
+          if (listResponse.items) {
+            listResponse.items.forEach(function (item) {
+              const privateProps =
+                (item.extendedProperties && item.extendedProperties.private) ||
+                {};
+              let isFromApp =
+                privateProps[CONSTANTS.SOURCE_TAG] === "fpt_scheduler" ||
+                (item.description &&
+                  item.description.indexOf(CONSTANTS.MAGIC_STRING) !== -1) ||
+                (item.summary && item.summary.indexOf("[Lịch Chấm]") !== -1);
+
+              if (
+                sheetType &&
+                privateProps["sheet_type"] &&
+                privateProps["sheet_type"] !== sheetType
+              ) {
+                isFromApp = false;
+              }
+
+              if (isFromApp) {
+                // Trả về định dạng composite để clearEvents biết calendarId
+                ids.push(calId + "|" + item.id);
+              }
+            });
+          }
+          pageToken = listResponse.nextPageToken;
+        } while (pageToken);
+      };
+
+      // Chỉ quét lịch mục tiêu — không quét đa lịch để tránh lỗi quyền truy cập
+      scanCalendar(calendarId);
+
+      // Trả về ID đơn (không composite) vì clearEvents sẽ tự dùng calendarId từ calendarName
+      return ids.map(function (composite) {
+        var parts = String(composite).split("|");
+        return parts.length > 1 ? parts[1] : composite;
+      });
+    } catch (e) {
+      AppLogger.error("getAppEventIds Error", e.toString());
+      throw e; // Relaunch to be caught by doPost
+    }
   },
 
   getCalendarInternal: function (name) {
@@ -868,19 +1064,58 @@ function doPost(e) {
       return jsonResponse_(res);
     }
 
+    if (action === "getAppEventIds") {
+      res = CalendarService.getAppEventIds(
+        payload.calendarName,
+        payload.googleAccessToken || null,
+        payload.sheetType || null,
+      );
+      return jsonResponse_({
+        status: CONSTANTS.SUCCESS,
+        version: "16.0",
+        data: res,
+      });
+    }
+
     if (action === "clearCalendar") {
       res = CalendarService.clearEvents(
         payload.calendarName || CONSTANTS.DEFAULT_CALENDAR_NAME,
         payload.googleAccessToken || null,
         payload.sheetType || null,
         payload.sendUpdates || false,
+        payload.eventIds || null,
       );
       return jsonResponse_({
         status: CONSTANTS.SUCCESS,
-        version: "13.6",
+        version: "16.0",
         message: "Cleared",
         data: res,
       });
+    }
+
+    if (action === "notifyLecturers") {
+      res = notifyLecturersHandler_(payload);
+      return jsonResponse_(res);
+    }
+
+    if (action === "respondToInvitations") {
+      res = respondToInvitationsHandler_(payload);
+      return jsonResponse_(res);
+    }
+
+    if (action === "exchangeOAuthCode") {
+      res = exchangeOAuthCodeHandler_(payload);
+      return jsonResponse_(res);
+    }
+
+    if (action === "getLecturerTokenStatus") {
+      res = getLecturerTokenStatusHandler_(payload);
+      return jsonResponse_(res);
+    }
+
+    if (action === "globalRecall") {
+      res = globalRecallHandler_(payload);
+      return jsonResponse_(res);
     }
 
     res = CalendarService.createEvents(
@@ -1449,8 +1684,777 @@ function sendManualSummaryEmail_(toEmails, title, subEvents, calendarName) {
   }
 }
 
+/**
+ * 📧 Gửi thông báo cho giảng viên: Tự động chọn luồng tốt nhất (Hybrid Sync)
+ * Luồng 1 (Ưu tiên): Đồng bộ ngầm qua OAuth Refresh Token (Silent Sync)
+ * Luồng 2 (Dự phòng): Gửi lời mời Calendar (Proxy RSVP) kèm nút Kết nối vĩnh viễn
+ */
+function notifyLecturersHandler_(payload) {
+  var lecturers = payload.lecturers || [];
+  var sheetType = payload.sheetType || "council";
+  var results = { total: lecturers.length, success: 0, failed: 0, errors: [] };
+
+  // 🏛️ Tìm hoặc tạo Lịch phụ (Chỉ dùng cho luồng Dự phòng)
+  var invitationCalendar = getOrCreateInvitationCalendar_();
+
+  lecturers.forEach(function (lecturer) {
+    try {
+      const email = lecturer.email.trim();
+
+      // 🧹 NEW: Xóa sạch lời mời cũ của giảng viên này trước khi tạo mới
+      // Điều này ngăn chặn việc tích tụ hàng chục sự kiện trùng lặp nếu Admin bấm gửi nhiều lần.
+      clearLecturerInvitations_(invitationCalendar, email);
+
+      // 🚀 BƯỚC 1: Kiểm tra xem giảng viên đã ủy quyền vĩnh viễn chưa (Option 2)
+      const storedToken = getLecturerToken_(email);
+
+      if (storedToken && storedToken.refresh_token) {
+        AppLogger.info("Mode: SILENT SYNC (OAuth) for: " + email);
+        const lecturerAccessToken = refreshAccessToken_(
+          storedToken.refresh_token,
+        );
+
+        if (lecturerAccessToken) {
+          // Đồng bộ thẳng vào hòm thư cá nhân
+          CalendarService.createEvents(
+            "primary",
+            lecturer.events,
+            true, // force
+            lecturerAccessToken,
+            "force_all",
+            sheetType,
+            false,
+          );
+
+          // Gửi mail thông báo đơn giản (không cần bấm Có/Không nữa)
+          sendSilentSyncSuccessEmail_(
+            email,
+            lecturer.name,
+            lecturer.events,
+            sheetType,
+          );
+          results.success++;
+          return; // Kết thúc cho giảng viên này
+        } else {
+          AppLogger.error(
+            "Failed to refresh access token for: " +
+              email +
+              ". Falling back to Invitations.",
+          );
+        }
+      }
+
+      // 🛡️ BƯỚC 2: Dự phòng (NATIVE RSVP / PROXY Flow)
+      AppLogger.info("Mode: PROXY RSVP (Invitation) for: " + email);
+      createMergedCalendarInvitation_(
+        invitationCalendar,
+        email,
+        lecturer.name,
+        lecturer.events,
+        sheetType,
+      );
+      results.success++;
+    } catch (e) {
+      var errMsg = e.toString();
+      AppLogger.error("Failed to notify lecturer: " + lecturer.email, errMsg);
+      results.failed++;
+      results.errors.push({
+        email: lecturer.email,
+        error: errMsg,
+      });
+    }
+  });
+
+  results.quotaRemaining = MailApp.getRemainingDailyQuota();
+
+  return {
+    status: CONSTANTS.SUCCESS,
+    data: results,
+  };
+}
+
+/**
+ * 🧹 Xóa bỏ các lời mời cũ của một Giảng viên cụ thể trên lịch Invitation
+ * Tìm kiếm theo: Attendee email + App Tags/Magic String
+ */
+function clearLecturerInvitations_(calendar, lecturerEmail) {
+  try {
+    const calendarId = calendar.getId();
+    const accessToken = ScriptApp.getOAuthToken();
+    const now = new Date();
+    const timeMin = new Date(
+      now.getTime() - 90 * 24 * 60 * 60 * 1000,
+    ).toISOString(); // 3 tháng trước
+    const timeMax = new Date(
+      now.getTime() + 180 * 24 * 60 * 60 * 1000,
+    ).toISOString(); // 6 tháng sau
+
+    // Tìm kiếm sự kiện có email giảng viên
+    const path =
+      "/calendars/" +
+      encodeURIComponent(calendarId) +
+      "/events" +
+      "?timeMin=" +
+      encodeURIComponent(timeMin) +
+      "&timeMax=" +
+      encodeURIComponent(timeMax) +
+      "&q=" +
+      encodeURIComponent(lecturerEmail) +
+      "&singleEvents=true&maxResults=250";
+
+    const response = GoogleCalendarAPI.fetch_(accessToken, path);
+    if (!response.items || response.items.length === 0) return;
+
+    const idsToDelete = [];
+    response.items.forEach(function (item) {
+      // Kiểm tra xem sự kiện có thuộc về App này không
+      const privateProps =
+        (item.extendedProperties && item.extendedProperties.private) || {};
+      const isFromApp =
+        privateProps[CONSTANTS.SOURCE_TAG] === "fpt_scheduler" ||
+        (item.description &&
+          item.description.indexOf(CONSTANTS.MAGIC_STRING) !== -1) ||
+        (item.summary && item.summary.indexOf("[Lịch Chấm]") !== -1);
+
+      if (isFromApp) {
+        idsToDelete.push(item.id);
+      }
+    });
+
+    if (idsToDelete.length > 0) {
+      AppLogger.info(
+        "Cleaning " +
+          idsToDelete.length +
+          " old invitations for: " +
+          lecturerEmail,
+      );
+      const deleteRequests = idsToDelete.map(function (id) {
+        return {
+          method: "delete",
+          path:
+            "/calendars/" +
+            encodeURIComponent(calendarId) +
+            "/events/" +
+            encodeURIComponent(id) +
+            "?sendUpdates=all",
+        };
+      });
+
+      // Xóa hàng loạt
+      const CHUNK_SIZE = 50;
+      for (let i = 0; i < deleteRequests.length; i += CHUNK_SIZE) {
+        GoogleCalendarAPI.fetchAll_(
+          accessToken,
+          deleteRequests.slice(i, i + CHUNK_SIZE),
+        );
+      }
+    }
+  } catch (e) {
+    AppLogger.error("Failed to clear old invitations for " + lecturerEmail, e);
+  }
+}
+
+/**
+ * 🛠️ Tìm hoặc tạo một Lịch phụ riêng để gửi lời mời
+ */
+function getOrCreateInvitationCalendar_() {
+  const name = CONSTANTS.INVITATION_CALENDAR_NAME;
+  const calendars = CalendarApp.getCalendarsByName(name);
+  if (calendars.length > 0) {
+    AppLogger.info(
+      "Using existing invitation calendar: " + calendars[0].getId(),
+    );
+    return calendars[0];
+  }
+
+  AppLogger.info("Creating new secondary calendar for invitations: " + name);
+  const newCal = CalendarApp.createCalendar(name, {
+    summary: "Lịch chứa các lời mời gửi cho Giảng viên từ FPT Scheduler.",
+    timeZone: "Asia/Ho_Chi_Minh",
+  });
+  AppLogger.info("Created new calendar ID: " + newCal.getId());
+  return newCal;
+}
+
+/**
+ * 📅 Lồng 2 Email thành 1: Gửi 1 email HTML duy nhất chứa Bảng lịch + Nút RSVP Native
+ */
+function createMergedCalendarInvitation_(
+  calendar,
+  toEmail,
+  lecturerName,
+  subEvents,
+  sheetType,
+) {
+  const email = toEmail.trim();
+  const calendarId = calendar.getId();
+  const accessToken = ScriptApp.getOAuthToken();
+
+  var rowsHtml = "";
+  var firstEventId = null;
+
+  subEvents.forEach(function (s, idx) {
+    const startTime = parseDateISO_(s.start);
+    const endTime = parseDateISO_(s.end);
+    const isCouncil = sheetType === "council";
+    const defaultTitle = isCouncil ? "Hội đồng bảo vệ" : "Chấm bài Review";
+    const title = "[Lịch Chấm] " + (s.title || defaultTitle);
+
+    const eventData = {
+      summary: title,
+      description:
+        s.description ||
+        (isCouncil
+          ? "Lịch tham gia Hội đồng - Ban Đào Tạo FPT Polytechnic"
+          : "Lịch chấm bài Review - Ban Đào Tạo FPT Polytechnic"),
+      location: s.location || "N/A",
+      start: {
+        dateTime: startTime.toISOString(),
+        timeZone: "Asia/Ho_Chi_Minh",
+      },
+      end: {
+        dateTime: endTime.toISOString(),
+        timeZone: "Asia/Ho_Chi_Minh",
+      },
+      attendees: [{ email: email, responseStatus: "needsAction" }],
+      transparency: "opaque",
+      extendedProperties: {
+        private: {
+          [CONSTANTS.SOURCE_TAG]: "fpt_scheduler",
+          sheet_type: sheetType || "council",
+        },
+      },
+    };
+
+    // 🚀 Đảm bảo mô tả có MAGIC_STRING để có thể xóa bằng search
+    eventData.description =
+      CONSTANTS.MAGIC_STRING + "\n\n" + eventData.description;
+
+    // 🚀 Bước 1: Tạo lời mời và ép hiển thị ngay trong Calendar giảng viên
+    try {
+      const result = GoogleCalendarAPI.createEvent(
+        accessToken,
+        calendarId,
+        eventData,
+        true, // 📧 sendUpdates = true: Ép lời mời xuất hiện ngay trong Calendar giảng viên
+      );
+      if (idx === 0) firstEventId = result.id; // Lấy ID sự kiện đầu tiên để làm link RSVP chính
+
+      // Tạo dòng cho bảng HTML
+      var dateStr = Utilities.formatDate(
+        startTime,
+        "Asia/Ho_Chi_Minh",
+        "dd/MM/yyyy",
+      );
+      var timeStr =
+        Utilities.formatDate(startTime, "Asia/Ho_Chi_Minh", "HH:mm") +
+        " - " +
+        Utilities.formatDate(endTime, "Asia/Ho_Chi_Minh", "HH:mm");
+      rowsHtml +=
+        "<tr>" +
+        "<td style='padding: 10px; border: 1px solid #ddd;'>" +
+        (idx + 1) +
+        "</td>" +
+        "<td style='padding: 10px; border: 1px solid #ddd;'>" +
+        dateStr +
+        "</td>" +
+        "<td style='padding: 10px; border: 1px solid #ddd;'>" +
+        timeStr +
+        "</td>" +
+        "<td style='padding: 10px; border: 1px solid #ddd;'>" +
+        (s.location || "N/A") +
+        "</td>" +
+        "</tr>";
+    } catch (apiError) {
+      AppLogger.error("API error for " + email, apiError.toString());
+      throw apiError;
+    }
+  });
+
+  // 🚀 Bước 2: Tạo link Proxy RSVP (Trỏ về App của mình thay vì Google)
+  const appUrl = CONSTANTS.APP_URL;
+  const commonParams =
+    "&email=" +
+    encodeURIComponent(email) +
+    "&lecturerName=" +
+    encodeURIComponent(lecturerName);
+
+  const yesLink = appUrl + "?autoRSVP=true&action=accept" + commonParams;
+  const noLink = appUrl + "?autoRSVP=true&action=decline" + commonParams;
+  const maybeLink = appUrl + "?autoRSVP=true&action=maybe" + commonParams;
+
+  // 🚀 Bước 3: Gửi email HTML duy nhất
+  const bodyHtml =
+    "<div style='font-family: \"Segoe UI\", Roboto, Helvetica, Arial, sans-serif; color: #333; max-width: 600px; margin: 0 auto; border: 1px solid #e0e0e0; border-radius: 12px; overflow: hidden;'>" +
+    "<div style='background: linear-gradient(135deg, #F27024 0%, #fa8c41 100%); padding: 25px; text-align: center; color: white;'>" +
+    "<h1 style='margin: 0; font-size: 22px; font-weight: 600;'>Xác Nhận Lịch Chấm Mới</h1>" +
+    "</div>" +
+    "<div style='padding: 25px; background: white;'>" +
+    "<p>Chào Giảng viên <b>" +
+    lecturerName +
+    "</b>,</p>" +
+    "<p>Bộ phận Đào tạo Poly đã sắp xếp lịch chấm mới cho bạn. Vui lòng bấm <b>Có</b> để tự động đồng bộ <b>TẤT CẢ</b> lịch chấm vào Calendar của bạn.</p>" +
+    "<table style='width: 100%; border-collapse: collapse; margin: 20px 0; font-size: 14px;'>" +
+    "<thead style='background: #f8f9fa;'><tr>" +
+    "<th style='padding: 10px; border: 1px solid #ddd; text-align: left;'>STT</th>" +
+    "<th style='padding: 10px; border: 1px solid #ddd; text-align: left;'>Ngày</th>" +
+    "<th style='padding: 10px; border: 1px solid #ddd; text-align: left;'>Giờ</th>" +
+    "<th style='padding: 10px; border: 1px solid #ddd; text-align: left;'>Phòng</th>" +
+    "</tr></thead>" +
+    "<tbody>" +
+    rowsHtml +
+    "</tbody>" +
+    "</table>" +
+    "<div style='background: #fff9f5; border-left: 4px solid #F27024; padding: 15px; margin: 25px 0; border-radius: 4px;'>" +
+    "<p style='margin: 0; color: #444; font-size: 14px;'>👉 <b>Vui lòng phản hồi lời mời tại đây (Một click cho tất cả):</b></p>" +
+    "<div style='margin-top: 15px;'>" +
+    "<a href='" +
+    yesLink +
+    "' style='background-color: #1a73e8; color: white; padding: 10px 24px; text-decoration: none; border-radius: 4px; font-weight: 500; font-size: 14px; margin-right: 10px; display: inline-block;'>Có (Đồng bộ ngay)</a>" +
+    "<a href='" +
+    noLink +
+    "' style='background-color: white; color: #d93025; padding: 10px 24px; text-decoration: none; border-radius: 4px; border: 1px solid #dadce0; font-weight: 500; font-size: 14px; margin-right: 10px; display: inline-block;'>Không tham gia</a>" +
+    "</div>" +
+    "<p style='margin-top: 20px; color: #666; font-size: 13px;'>✨ <b>Tuyệt chiêu:</b> Muốn lịch tự động nhảy vào máy không cần bấm Mail nữa? Hãy <a href='" +
+    appUrl +
+    "' style='color: #F27024; font-weight: bold;'>Kết nối Calendar vĩnh viễn tại đây</a>.</p>" +
+    "</div>" +
+    "<p style='color: #F27024; font-size: 13px; font-weight: 600;'>* Lưu ý: Nút bấm trên sẽ tự động xác nhận toàn bộ danh sách lịch chấm ở trên.</p>" +
+    "<p style='color: #666; font-size: 12px; margin-top: 30px; border-top: 1px solid #eee; padding-top: 15px;'>Trân trọng,<br><b>Ban Đào Tạo FPT Polytechnic</b></p>" +
+    "</div>" +
+    "</div>";
+
+  MailApp.sendEmail({
+    to: email,
+    subject:
+      "[FPT Scheduler] Lời mời: " +
+      subEvents[0].title +
+      " (và " +
+      (subEvents.length - 1) +
+      " lịch khác)",
+    htmlBody: bodyHtml,
+    name: "FPT Scheduler Service",
+  });
+
+  AppLogger.info("Merged Proxy Invitation SENT successfully to: " + email);
+}
+
+/**
+ * ⚡ Action xử lý phản hồi RSVP hàng loạt từ Web App
+ */
+function respondToInvitationsHandler_(payload) {
+  const email = (payload.email || "").trim().toLowerCase();
+  const action = payload.actionValue || payload.action;
+
+  const invitationCalendar = getOrCreateInvitationCalendar_();
+  const calendarId = invitationCalendar.getId();
+  const accessToken = ScriptApp.getOAuthToken();
+
+  // 🛠️ STEEL CONFIG: Map Statuses
+  const statusToSet =
+    action === "accept"
+      ? CalendarApp.GuestStatus.YES
+      : action === "decline"
+        ? CalendarApp.GuestStatus.NO
+        : CalendarApp.GuestStatus.MAYBE;
+  const restStatus =
+    action === "accept"
+      ? "accepted"
+      : action === "decline"
+        ? "declined"
+        : "tentative";
+
+  const now = new Date();
+  const timeMin = new Date(now.getTime() - 110 * 24 * 60 * 60 * 1000);
+  const timeMax = new Date(now.getTime() + 400 * 24 * 60 * 60 * 1000);
+
+  AppLogger.info(">>> STEEL SYNC v14.25 for: " + email + " to " + restStatus);
+
+  const events = invitationCalendar.getEvents(timeMin, timeMax);
+  var updatedCount = 0;
+
+  events.forEach(function (event) {
+    const guests = event.getGuests();
+    // 🔍 Robust matching: Check if the lecturer's email is in the guest list
+    const hasEmail = guests.some(function (g) {
+      return g.getEmail().toLowerCase() === email;
+    });
+
+    if (hasEmail) {
+      try {
+        const eventId = event.getId().split("@")[0];
+
+        // 🥋 PUNCH 1: Internal GAS Force (This often updates the secondary calendar metadata)
+        const targetGuest = event.getGuestByEmail(email);
+        if (targetGuest) targetGuest.setStatus(statusToSet);
+
+        // 🥋 PUNCH 2: REST API Full PUT (Force overwrite all synchronization flags)
+        // We fetch the current state to preserve descriptions/times
+        const rawEvent = GoogleCalendarAPI.fetch_(
+          accessToken,
+          "/calendars/" +
+            encodeURIComponent(calendarId) +
+            "/events/" +
+            encodeURIComponent(eventId),
+        );
+
+        if (rawEvent && rawEvent.attendees) {
+          const updatedAttendees = rawEvent.attendees.map(function (a) {
+            if (a.email && a.email.toLowerCase() === email) {
+              a.responseStatus = restStatus;
+              a.optional = false; // Force visibility
+            }
+            return a;
+          });
+
+          // Perform FULL UPDATE (PUT) instead of PATCH. MUST use query param sendUpdates=all.
+          GoogleCalendarAPI.fetch_(
+            accessToken,
+            "/calendars/" +
+              encodeURIComponent(calendarId) +
+              "/events/" +
+              encodeURIComponent(eventId) +
+              "?sendUpdates=all",
+            {
+              method: "put",
+              payload: JSON.stringify({
+                summary: rawEvent.summary,
+                description: rawEvent.description,
+                location: rawEvent.location,
+                start: rawEvent.start,
+                end: rawEvent.end,
+                attendees: updatedAttendees,
+                extendedProperties: rawEvent.extendedProperties,
+                reminders: { useDefault: true }, // Trigger device notification
+              }),
+            },
+          );
+        }
+
+        updatedCount++;
+      } catch (e) {
+        AppLogger.error("Steel Sync Failure on " + event.getId(), e.toString());
+      }
+    }
+  });
+
+  return {
+    status: CONSTANTS.SUCCESS,
+    message:
+      "Hệ thống đã ÉP XÁC NHẬN " + updatedCount + " buổi chấm thành công.",
+    data: { updatedCount: updatedCount },
+  };
+}
+
+// sendDecentralizedSyncEmail_ has been replaced by createCalendarInvitation_ for Native UX.
+
 function jsonResponse_(obj) {
   return ContentService.createTextOutput(JSON.stringify(obj)).setMimeType(
     ContentService.MimeType.JSON,
   );
+}
+function AUTHORIZE_SYSTEM_V14_20() {
+  MailApp.getRemainingDailyQuota();
+  CalendarApp.getCalendarsByName(CONSTANTS.INVITATION_CALENDAR_NAME);
+  ScriptApp.getOAuthToken();
+  console.log("Xác thực V14.20 thành công! Hệ thống Proxy RSVP đã sẵn sàng.");
+}
+
+/**
+ * 🔑 OAUTH 2.0 HANDLERS (Option 2)
+ */
+
+function exchangeOAuthCodeHandler_(payload) {
+  const code = payload.code;
+  const email = payload.email;
+  // 🔑 Dùng redirect_uri do frontend truyền lên (có thể là localhost hoặc production)
+  const redirectUri = payload.redirectUri || CONSTANTS.OAUTH.REDIRECT_URI;
+
+  if (!code) throw new Error("Missing authorization code");
+  if (!email) throw new Error("Missing email for token association");
+
+  const tokenData = exchangeCodeForTokens_(code, redirectUri);
+
+  // Save to Firebase
+  saveLecturerToken_(email, tokenData);
+
+  return {
+    status: CONSTANTS.SUCCESS,
+    message: "Kết nối Google Calendar thành công và đã lưu token vĩnh viễn.",
+    data: { email: email },
+  };
+}
+
+function getLecturerTokenStatusHandler_(payload) {
+  const email = payload.email;
+  if (!email) throw new Error("Missing email");
+
+  const token = getLecturerToken_(email);
+  return {
+    status: CONSTANTS.SUCCESS,
+    connected: !!token,
+    email: email,
+  };
+}
+
+/**
+ * 🌐 OAuth Utils
+ */
+
+function exchangeCodeForTokens_(code, redirectUri) {
+  const url = "https://oauth2.googleapis.com/token";
+  // 🔑 Dùng redirectUri truyền vào; nếu không có thì dùng mặc định (production)
+  const effectiveRedirectUri = redirectUri || CONSTANTS.OAUTH.REDIRECT_URI;
+  const payload = {
+    code: code,
+    client_id: CONSTANTS.OAUTH.CLIENT_ID,
+    client_secret: CONSTANTS.OAUTH.CLIENT_SECRET,
+    redirect_uri: effectiveRedirectUri,
+    grant_type: "authorization_code",
+  };
+
+  const options = {
+    method: "post",
+    contentType: "application/x-www-form-urlencoded",
+    payload: payload,
+    muteHttpExceptions: true,
+  };
+
+  const response = UrlFetchApp.fetch(url, options);
+  const result = JSON.parse(response.getContentText());
+
+  if (result.error) {
+    throw new Error("OAuth Error: " + result.error_description || result.error);
+  }
+
+  return {
+    refresh_token: result.refresh_token,
+    access_token: result.access_token,
+    expiry_date: new Date().getTime() + result.expires_in * 1000,
+  };
+}
+
+function refreshAccessToken_(refreshToken) {
+  const url = "https://oauth2.googleapis.com/token";
+  const payload = {
+    client_id: CONSTANTS.OAUTH.CLIENT_ID,
+    client_secret: CONSTANTS.OAUTH.CLIENT_SECRET,
+    refresh_token: refreshToken,
+    grant_type: "refresh_token",
+  };
+
+  const options = {
+    method: "post",
+    contentType: "application/x-www-form-urlencoded",
+    payload: payload,
+    muteHttpExceptions: true,
+  };
+
+  const response = UrlFetchApp.fetch(url, options);
+  const result = JSON.parse(response.getContentText());
+
+  if (result.access_token) {
+    return result.access_token;
+  }
+  return null;
+}
+
+/**
+ * 🔥 Firebase Token Store Utils
+ */
+
+function saveLecturerToken_(email, tokenData) {
+  const path = "lecturer_tokens/" + email.replace(/\./g, "_") + ".json";
+  const url = CONSTANTS.FIREBASE_URL + path + "?auth=" + CONSTANTS.GAS_SECRET;
+
+  UrlFetchApp.fetch(url, {
+    method: "put",
+    contentType: "application/json",
+    payload: JSON.stringify(tokenData),
+  });
+}
+
+function getLecturerToken_(email) {
+  const path = "lecturer_tokens/" + email.replace(/\./g, "_") + ".json";
+  const url = CONSTANTS.FIREBASE_URL + path + "?auth=" + CONSTANTS.GAS_SECRET;
+
+  const response = UrlFetchApp.fetch(url, { muteHttpExceptions: true });
+  if (response.getResponseCode() === 200) {
+    const data = JSON.parse(response.getContentText());
+    if (data && data.refresh_token) return data;
+  }
+  return null;
+}
+
+/**
+ * 📩 Email Notifications for Silent Sync
+ */
+
+function sendSilentSyncSuccessEmail_(email, name, events, sheetType) {
+  var rowsHtml = "";
+  events.forEach(function (s, idx) {
+    const start = parseDateISO_(s.start);
+    const end = parseDateISO_(s.end);
+    rowsHtml +=
+      "<tr>" +
+      "<td style='padding: 8px; border: 1px solid #eee;'>" +
+      (idx + 1) +
+      "</td>" +
+      "<td style='padding: 8px; border: 1px solid #eee;'>" +
+      Utilities.formatDate(start, "GMT+7", "dd/MM/yyyy") +
+      "</td>" +
+      "<td style='padding: 8px; border: 1px solid #eee;'>" +
+      Utilities.formatDate(start, "GMT+7", "HH:mm") +
+      " - " +
+      Utilities.formatDate(end, "GMT+7", "HH:mm") +
+      "</td>" +
+      "<td style='padding: 8px; border: 1px solid #eee;'>" +
+      (s.location || "N/A") +
+      "</td>" +
+      "</tr>";
+  });
+
+  const isCouncil = sheetType === "council";
+  const bodyHtml =
+    "<div style='font-family: sans-serif; max-width: 600px; border: 1px solid #eee; border-radius: 10px; overflow: hidden;'>" +
+    "<div style='background: #4caf50; padding: 20px; color: white; text-align: center;'>" +
+    "<h2>✨ Đã Tự Động Đồng Bộ Lịch ✨</h2>" +
+    "</div>" +
+    "<div style='padding: 20px;'>" +
+    "<p>Chào Giảng viên <b>" +
+    name +
+    "</b>,</p>" +
+    "<p>Vì bạn đã kết nối Google Calendar, hệ thống đã **tự động thêm** " +
+    events.length +
+    (isCouncil ? " buổi Hội đồng" : " buổi chấm Review") +
+    " vào lịch cá nhân của bạn. <b>Bạn không cần làm gì thêm.</b></p>" +
+    "<table style='width: 100%; border-collapse: collapse; margin: 15px 0; font-size: 13px;'>" +
+    "<thead style='background: #f5f5f5;'><tr><th>STT</th><th>Ngày</th><th>Giờ</th><th>Phòng</th></tr></thead>" +
+    "<tbody>" +
+    rowsHtml +
+    "</tbody>" +
+    "</table>" +
+    "<p style='color: #666; font-size: 12px;'>Bạn có thể kiểm tra ngay trên app Calendar của điện thoại.</p>" +
+    "<hr style='border: 0; border-top: 1px solid #eee; margin: 20px 0;'>" +
+    "<p style='font-size: 12px; color: #999;'>Trân trọng,<br>Ban Đào Tạo Poly</p>" +
+    "</div></div>";
+
+  MailApp.sendEmail({
+    to: email,
+    subject: isCouncil
+      ? "✅ [Tự động] Lịch tham gia Hội đồng đã được cập nhật vào Calendar"
+      : "✅ [Tự động] Lịch chấm bài Review đã được cập nhật vào Calendar",
+    htmlBody: bodyHtml,
+    name: "FPT Scheduler (Auto-Sync)",
+  });
+}
+
+/**
+ * 💥 NUCLEAR SYNC: GLOBAL RECALL
+ * Diệt tận gốc: Quét mảng Token trên Firebase để xóa Silent Sync + xóa Proxy Invitation
+ */
+function globalRecallHandler_(payload) {
+  var sheetType = payload.sheetType || null;
+  // Mặc định luôn là true để xóa triệt để, báo người dùng
+  var sendUpdates =
+    payload.sendUpdates !== undefined ? payload.sendUpdates : true;
+  var results = {
+    totalProcessed: 0,
+    silentCleared: 0,
+    silentFailed: 0,
+    proxyCleared: 0,
+    errors: [],
+  };
+
+  try {
+    // -----------------------------------------------------------------
+    // 1. SILENT SYNC RECALL (Dọn dẹp lịch cá nhân của từng giảng viên)
+    // -----------------------------------------------------------------
+    var url =
+      CONSTANTS.FIREBASE_URL +
+      "lecturer_tokens.json?auth=" +
+      CONSTANTS.GAS_SECRET;
+    var res = UrlFetchApp.fetch(url, { muteHttpExceptions: true });
+
+    if (res.getResponseCode() === 200) {
+      var allTokens = JSON.parse(res.getContentText());
+      if (allTokens) {
+        var keys = Object.keys(allTokens);
+        results.totalProcessed = keys.length;
+
+        for (var i = 0; i < keys.length; i++) {
+          var key = keys[i];
+          var tokenData = allTokens[key];
+
+          if (tokenData && tokenData.refresh_token) {
+            AppLogger.info("Global Recall: Revoking events for " + key);
+            var lecturerAccessToken = refreshAccessToken_(
+              tokenData.refresh_token,
+            );
+            if (lecturerAccessToken) {
+              try {
+                // Diệt triệt để trên Calendar "primary" của giảng viên bằng Token của họ
+                var clearRes = CalendarService.clearEvents(
+                  "primary",
+                  lecturerAccessToken,
+                  sheetType,
+                  sendUpdates,
+                );
+                results.silentCleared += clearRes.deletedCount || 0;
+              } catch (clearErr) {
+                results.silentFailed++;
+                results.errors.push(
+                  "Recall failed for " + key + ": " + clearErr.toString(),
+                );
+              }
+            } else {
+              results.silentFailed++;
+            }
+          }
+        }
+      }
+    } else {
+      results.errors.push("Failed to fetch lecturer tokens from DB.");
+    }
+  } catch (e) {
+    results.errors.push("Silent sync recall loop error: " + e.toString());
+  }
+
+  // -----------------------------------------------------------------
+  // 2. PROXY INVITATION RECALL (Dọn dẹp trên lịch Admin)
+  // -----------------------------------------------------------------
+  try {
+    AppLogger.info("Global Recall: Revoking Proxy Invitations");
+    var proxyRes = CalendarService.clearEvents(
+      CONSTANTS.INVITATION_CALENDAR_NAME,
+      null, // Không dùng token giảng viên, dùng token Admin (ScriptApp.getOAuthToken())
+      sheetType,
+      sendUpdates,
+    );
+    results.proxyCleared += proxyRes.deletedCount || 0;
+  } catch (e) {
+    results.errors.push("Proxy recall error: " + e.toString());
+  }
+
+  // -----------------------------------------------------------------
+  // 3. ADMIN FALLBACK RECALL (Dọn dẹp lịch truyền thống - Just in case)
+  // -----------------------------------------------------------------
+  try {
+    AppLogger.info("Global Recall: Revoking Admin Default Schedule");
+    var adminRes = CalendarService.clearEvents(
+      CONSTANTS.DEFAULT_CALENDAR_NAME,
+      null,
+      sheetType,
+      sendUpdates,
+    );
+    results.proxyCleared += adminRes.deletedCount || 0;
+  } catch (e) {
+    results.errors.push("Admin recall error: " + e.toString());
+  }
+
+  return {
+    status: CONSTANTS.SUCCESS,
+    message: "Global Recall Completed",
+    data: results,
+  };
 }

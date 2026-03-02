@@ -369,7 +369,7 @@ export const AdminPage: React.FC = () => {
             return;
         }
 
-        const generatedEmail = `${newLecturer.code.trim()}@fe.edu.vn`.toLowerCase();
+        const generatedEmail = `${newLecturer.code.trim()}@gmail.com`.toLowerCase();
         
         try {
             setLoading(true);
@@ -453,7 +453,7 @@ export const AdminPage: React.FC = () => {
                     if (emailIdx !== -1 && row[emailIdx]) {
                         email = String(row[emailIdx]).trim().toLowerCase();
                     } else if (code) {
-                        email = `${code}@fe.edu.vn`.toLowerCase();
+                        email = `${code}@gmail.com`.toLowerCase();
                     }
 
                     if (name && code && email) {

@@ -20,6 +20,7 @@ export interface CalendarEvent {
     signature?: string; 
     resources?: string[]; 
     sheetType?: string; // 🚀 NEW: 'council' or 'review'
+    subEvents?: any[]; // 📧 NEW: Danh sách các buổi chấm lẻ
 }
 
 export interface SyncPayload {
@@ -37,12 +38,13 @@ export interface SyncPayload {
 
 export interface ClearPayload {
     idToken?: string;
-    action: 'clearCalendar';
+    action: 'clearCalendar' | 'getAppEventIds'; 
     calendarName: string;
     secret?: string;
     googleAccessToken?: string; 
     sheetType?: 'council' | 'review'; 
-    sendUpdates?: boolean; // 📧 NEW: Gửi mail thông báo thu hồi
+    sendUpdates?: boolean; 
+    eventIds?: string[]; // 🚀 NEW: For chunked deletion
 }
 
 export interface SyncResponse {
@@ -56,6 +58,7 @@ export interface SyncResponse {
         calendarName?: string;
         calendarId?: string;
         availableCalendars?: string[];
+        deletedCount?: number; // 🚀 NEW: For chunked clear
         errors?: Array<{
             index: number;
             title: string;
@@ -269,6 +272,9 @@ export const syncEventsToCalendar = async (
 /**
  * Clear all events created by the app
  */
+/**
+ * Clear all events created by the app (Chunked version)
+ */
 export const clearCalendar = async (
     calendarName?: string,
     googleAccessToken?: string,
@@ -278,56 +284,201 @@ export const clearCalendar = async (
     try {
         const currentUser = auth.currentUser;
         const idToken = currentUser ? await currentUser.getIdToken() : undefined;
-        
         const targetCalendar = calendarName || getCalendarName();
 
-        const payload: ClearPayload = {
+        // 1️⃣ BƯỚC 1: Lấy danh sách ID cần xóa (Rất nhanh, không gây Timeout)
+        logInfo('🔍 Đang liệt kê danh sách sự kiện cần xóa...');
+        const eventIds = await getAppEventIds(calendarName, googleAccessToken, sheetType);
+        
+        if (eventIds.length === 0) {
+            logSuccess('Không tìm thấy sự kiện nào để xóa.');
+            return {
+                status: 'success',
+                message: 'Không có sự kiện nào cần xóa.',
+                data: { total: 0, success: 0, failed: 0, skipped: 0 },
+                timestamp: new Date().toISOString(),
+                executionTime: '0ms'
+            };
+        }
+
+        logInfo(`🗑️ Tìm thấy ${eventIds.length} sự kiện. Bắt đầu xóa đợt (25 mục/đợt)...`);
+
+        // 2️⃣ BƯỚC 2: Xóa theo từng đợt (Chunks) để tránh Timeout Proxy (10s)
+        const CHUNK_SIZE = 25; 
+        const totalChunks = Math.ceil(eventIds.length / CHUNK_SIZE);
+        let deletedCount = 0;
+
+        for (let i = 0; i < totalChunks; i++) {
+            const chunk = eventIds.slice(i * CHUNK_SIZE, (i + 1) * CHUNK_SIZE);
+            logInfo(`📦 Đang xóa đợt ${i + 1}/${totalChunks} (${chunk.length} mục)...`);
+
+            const payload: ClearPayload = {
+                idToken,
+                action: 'clearCalendar',
+                calendarName: targetCalendar,
+                googleAccessToken: googleAccessToken,
+                sheetType: sheetType,
+                sendUpdates: sendUpdates,
+                eventIds: chunk,
+                ...(import.meta.env.DEV ? { secret: import.meta.env.VITE_GAS_SECRET } : {})
+            };
+
+            const ctrl = new AbortController();
+            const tid = setTimeout(() => {
+                logError(`⏳ Đợt ${i + 1} mất quá nhiều thời gian (>60s). Đang hủy...`);
+                ctrl.abort();
+            }, 60000); // 60s timeout
+            const response = await fetch(`${API_BASE_URL}/api/sync`, {
+                method: 'POST',
+                headers: addCSRFTokenToHeaders({
+                    'Content-Type': 'application/json',
+                    ...(idToken ? { 'Authorization': `Bearer ${idToken}` } : {})
+                }),
+                body: JSON.stringify(payload),
+                signal: ctrl.signal,
+            }).finally(() => clearTimeout(tid));
+
+            if (!response.ok) {
+                const errorData = await response.json().catch(() => ({}));
+                throw new Error(errorData.message || errorData.error || `Lỗi xóa ở đợt ${i + 1}`);
+            }
+
+            const resData = await response.json();
+            
+            // 🛡️ Bổ sung kiểm tra status từ Apps Script Proxy
+            if (resData.status === 'error') {
+                throw new Error(resData.message || resData.error || `Lỗi xóa ở đợt ${i + 1}`);
+            }
+
+            deletedCount += (resData.data?.deletedCount || chunk.length);
+        }
+
+        logSuccess(`Đã xóa sạch ${deletedCount} sự kiện.`);
+        return {
+            status: 'success',
+            message: `Đã xóa sạch ${deletedCount} sự kiện.`,
+            data: { 
+                total: deletedCount, 
+                success: deletedCount, 
+                failed: 0, 
+                skipped: 0,
+                deletedCount: deletedCount 
+            },
+            timestamp: new Date().toISOString(),
+            executionTime: '0ms'
+        };
+    } catch (error) {
+        const errorMessage = error instanceof Error ? error.message : 'Failed to clear calendar';
+        logError('Clear error:', errorMessage);
+        throw new Error(errorMessage);
+    }
+};
+
+/**
+ * 💥 GLOBAL RECALL: Xóa triệt để Silent Sync & Proxy Invitations
+ */
+export const globalRecallAppEvents = async (
+    sheetType?: 'council' | 'review'
+): Promise<any> => {
+    try {
+        const currentUser = auth.currentUser;
+        const idToken = currentUser ? await currentUser.getIdToken() : undefined;
+
+        const payload = {
+            action: 'globalRecall',
+            sheetType,
+            sendUpdates: true, // Xóa triệt để
             idToken,
-            action: 'clearCalendar',
-            calendarName: targetCalendar,
-            googleAccessToken: googleAccessToken,
-            sheetType: sheetType,
-            sendUpdates: sendUpdates,
-            // 🔐 Tự động thêm secret ở môi trường Local để hỗ trợ Vite Proxy
             ...(import.meta.env.DEV ? { secret: import.meta.env.VITE_GAS_SECRET } : {})
         };
 
-        const syncUrl = `${API_BASE_URL}/api/sync`;
-        logInfo(`Clearing calendar via proxy: ${syncUrl}`);
+        const ctrl = new AbortController();
+        const tid = setTimeout(() => {
+            logError("⏳ Global Recall quá lâu (>120s). Đang hủy...");
+            ctrl.abort();
+        }, 120000); // Tác vụ này có thể mất thời gian do quét Firebase + nhiều Tokens
         
-        const response = await fetch(syncUrl, {
+        const response = await fetch(`${API_BASE_URL}/api/sync`, {
             method: 'POST',
             headers: addCSRFTokenToHeaders({
                 'Content-Type': 'application/json',
                 ...(idToken ? { 'Authorization': `Bearer ${idToken}` } : {})
             }),
             body: JSON.stringify(payload),
-        });
-
-        const responseText = await response.text();
-        let data;
-        try {
-            data = JSON.parse(responseText);
-        } catch (parseErr) {
-            if (responseText.includes('<!DOCTYPE') || responseText.includes('<html')) {
-                throw new Error('Google Apps Script trả về trang HTML khi Xóa lịch. Vui lòng kiểm tra lại Deploy của Script.');
-            }
-            if (!responseText.trim()) {
-                throw new Error('Dữ kết quả trả về rỗng khi Xóa lịch. Có thể do Apps Script bị lỗi hoặc trả về 204 No Content không hợp lệ.');
-            }
-            throw new Error(`SyntaxError (Clear): Không thể parse JSON. Nội dung: ${responseText.substring(0, 100)}...`);
-        }
+            signal: ctrl.signal,
+        }).finally(() => clearTimeout(tid));
 
         if (!response.ok) {
-            throw new Error(data.message || data.error || `Proxy error! status: ${response.status}`);
+            const errorData = await response.json().catch(() => ({}));
+            throw new Error(errorData.message || errorData.error || "Failed to execute global recall");
         }
 
-        logSuccess('Calendar cleared successfully');
+        const data = await response.json();
+        if (data.status === 'error') {
+            throw new Error(data.message || data.error || "Global Recall Failed");
+        }
+
         return data;
     } catch (error) {
-        const errorMessage = error instanceof Error ? error.message : 'Failed to clear calendar';
-        logError('Clear error:', errorMessage);
+        const errorMessage = error instanceof Error ? error.message : 'Global recall failed';
+        logError('Global recall error:', errorMessage);
         throw new Error(errorMessage);
+    }
+};
+
+/**
+ * 🔍 Helper: Lấy danh sách ID các sự kiện do App tạo ra
+ */
+export const getAppEventIds = async (
+    calendarName?: string,
+    googleAccessToken?: string,
+    sheetType?: 'council' | 'review'
+): Promise<string[]> => {
+    try {
+        const currentUser = auth.currentUser;
+        const idToken = currentUser ? await currentUser.getIdToken() : undefined;
+        const targetCalendar = calendarName || getCalendarName();
+
+        const payload: ClearPayload = {
+            idToken,
+            action: 'getAppEventIds',
+            calendarName: targetCalendar,
+            googleAccessToken: googleAccessToken,
+            sheetType: sheetType,
+            ...(import.meta.env.DEV ? { secret: import.meta.env.VITE_GAS_SECRET } : {})
+        };
+
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => {
+            logError("⏳ Lấy danh sách ID mất quá nhiều thời gian (>60s). Đang hủy...");
+            controller.abort();
+        }, 60000); // 60s timeout
+        const response = await fetch(`${API_BASE_URL}/api/sync`, {
+            method: 'POST',
+            headers: addCSRFTokenToHeaders({
+                'Content-Type': 'application/json',
+                ...(idToken ? { 'Authorization': `Bearer ${idToken}` } : {})
+            }),
+            body: JSON.stringify(payload),
+            signal: controller.signal,
+        }).finally(() => clearTimeout(timeoutId));
+
+        if (!response.ok) {
+            const errorData = await response.json().catch(() => ({}));
+            throw new Error(errorData.message || errorData.error || 'Không thể lấy danh sách ID');
+        }
+
+        const resData = await response.json();
+        
+        // 🛡️ Không được nuốt lỗi (No error swallowing)
+        if (resData.status === 'error') {
+            throw new Error(resData.message || resData.error || 'Lỗi không xác định từ Apps Script');
+        }
+
+        return resData.data || [];
+    } catch (error) {
+        logError('Get App Event IDs error:', error);
+        throw error; // 🚀 Quan trọng: Phải ném lỗi để Hook xử lý Re-auth hoặc báo lỗi UI
     }
 };
 
@@ -443,8 +594,145 @@ export const disableNotifications = async (url: string, tabName?: string): Promi
         return data;
     } catch (error) {
         const errorMessage = error instanceof Error ? error.message : 'Không thể tắt thông báo';
-        logError('Disable notifications error:', errorMessage);
+            throw new Error(errorMessage);
+    }
+};
+
+export const notifyLecturers = async (
+    lecturers: Array<{ email: string; name: string; events: any[] }>,
+    sheetUrl?: string,
+    tabName?: string,
+    sheetType?: 'council' | 'review'
+): Promise<any> => {
+    try {
+        const currentUser = auth.currentUser;
+        const idToken = currentUser ? await currentUser.getIdToken() : undefined;
+
+        const payload = {
+            action: 'notifyLecturers',
+            lecturers,
+            sheetUrl,
+            tabName,
+            sheetType,
+            idToken,
+            ...(import.meta.env.DEV ? { secret: import.meta.env.VITE_GAS_SECRET } : {})
+        };
+
+        const syncUrl = `${API_BASE_URL}/api/sync`;
+        logInfo(`Sending notifications via proxy: ${syncUrl}`);
+
+        const response = await fetch(syncUrl, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload)
+        });
+
+        const data = await response.json();
+        if (data.status === 'error') {
+            throw new Error(data.message || 'Lỗi từ Backend');
+        }
+
+        logSuccess('Notification successful');
+        return data;
+    } catch (error) {
+        const errorMessage = error instanceof Error ? error.message : 'Không thể gửi thông báo';
+        logError('Send notifications error:', errorMessage);
         throw new Error(errorMessage);
+    }
+};
+
+export const respondToInvitations = async (
+    email: string,
+    action: 'accept' | 'decline' | 'maybe'
+): Promise<any> => {
+    try {
+        const payload = {
+            action: 'respondToInvitations',
+            email,
+            actionValue: action, // renamed to actionValue for safety if needed
+            ...(import.meta.env.DEV ? { secret: import.meta.env.VITE_GAS_SECRET } : {})
+        };
+
+        const syncUrl = `${API_BASE_URL}/api/sync`;
+        logInfo(`Responding to invitations for ${email} with action ${action}`);
+
+        const response = await fetch(syncUrl, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload)
+        });
+
+        const data = await response.json();
+        if (data.status === 'error') {
+            throw new Error(data.message || 'Lỗi phản hồi RSVP');
+        }
+
+        return data;
+    } catch (error) {
+        const errorMessage = error instanceof Error ? error.message : 'Lỗi kết nối';
+        logError('RespondToInvitations error:', errorMessage);
+        throw new Error(errorMessage);
+    }
+};
+
+/**
+ * 🔑 Exchange OAuth Authorization Code for Refresh Token (Option 2)
+ */
+export const exchangeOAuthCode = async (email: string, code: string): Promise<any> => {
+    try {
+        const payload = {
+            action: 'exchangeOAuthCode',
+            email,
+            code,
+            redirectUri: window.location.origin + '/', // 🔑 Pass actual URI to match what was sent to Google
+            ...(import.meta.env.DEV ? { secret: import.meta.env.VITE_GAS_SECRET } : {})
+        };
+
+        const syncUrl = `${API_BASE_URL}/api/sync`;
+        logInfo(`Exchanging OAuth code for ${email}`);
+
+        const response = await fetch(syncUrl, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload)
+        });
+
+        const data = await response.json();
+        if (data.status === 'error') {
+            throw new Error(data.message || 'Lỗi trao đổi mã OAuth');
+        }
+
+        return data;
+    } catch (error) {
+        const errorMessage = error instanceof Error ? error.message : 'Lỗi kết nối OAuth';
+        logError('exchangeOAuthCode error:', errorMessage);
+        throw new Error(errorMessage);
+    }
+};
+
+/**
+ * 📅 Check if lecturer has a valid Calendar Connection
+ */
+export const getLecturerTokenStatus = async (email: string): Promise<boolean> => {
+    try {
+        const payload = {
+            action: 'getLecturerTokenStatus',
+            email,
+            ...(import.meta.env.DEV ? { secret: import.meta.env.VITE_GAS_SECRET } : {})
+        };
+
+        const syncUrl = `${API_BASE_URL}/api/sync`;
+        const response = await fetch(syncUrl, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload)
+        });
+
+        const data = await response.json();
+        return data.connected === true;
+    } catch (error) {
+        logError('getLecturerTokenStatus error:', error);
+        return false;
     }
 };
 

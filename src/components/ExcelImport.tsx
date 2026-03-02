@@ -266,18 +266,18 @@ export const ExcelImport: React.FC<ExcelImportProps> = ({
   };
 
   return (
-    <div className="flex flex-col gap-3 p-1">
+    <div className="flex flex-col gap-2 p-0.5">
       {/* Simplify Step 1: Just Semester Selection & Auto-load status */}
       <div className="flex flex-col sm:flex-row items-end gap-3">
         <div className="flex-1 w-full">
-          <label className="block text-[10px] font-bold text-slate-400 mb-1.5 ml-1 uppercase tracking-widest">Chọn Học kỳ để lấy lịch</label>
+          <label className="block text-[10px] font-bold text-slate-400 mb-1.5 ml-1 uppercase tracking-widest leading-none">Chọn Học kỳ</label>
           <div className="relative group">
             <select
-              className="w-full pl-4 pr-10 py-2.5 bg-white border border-slate-300 rounded-xl focus:ring-2 focus:ring-fpt-orange outline-none text-sm font-bold text-slate-700 h-12 appearance-none transition-all group-hover:border-slate-400 pointer-events-auto cursor-pointer relative z-10"
+              className="w-full pl-3 pr-8 py-2 bg-white border border-slate-300 rounded-xl focus:ring-2 focus:ring-fpt-orange outline-none text-xs font-bold text-slate-700 h-10 appearance-none transition-all group-hover:border-slate-400 pointer-events-auto cursor-pointer relative z-10"
               value={tempSemesterId}
               onChange={(e) => handleSemesterChange(e.target.value)}
             >
-              <option value="">-- Chọn học kỳ --</option>
+              <option value="" className="text-xs">-- Học kỳ --</option>
               {sortedSemesters.map((s) => (
                 <option key={s.id} value={s.id}>{s.semester}</option>
               ))}

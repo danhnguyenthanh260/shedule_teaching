@@ -32,16 +32,16 @@ export const MappingTool: React.FC<MappingToolProps> = ({
   ];
 
   return (
-    <div className="flex flex-col gap-5">
+    <div className="flex flex-col gap-3">
       {/* 
          Removed Header Row Selector as per user request (Admin handles rows).
          Now focus only on Column Mapping.
       */}
 
       {/* Column Mapping Grid */}
-      <div className="flex flex-col gap-4">
+      <div className="flex flex-col gap-2">
         <div className="flex items-center justify-between">
-          <h3 className="text-[10px] font-bold text-slate-400 uppercase tracking-widest ml-1">Ánh xạ cột dữ liệu</h3>
+          <h3 className="text-[10px] font-bold text-slate-400 uppercase tracking-widest ml-1 leading-none">Cột dữ liệu</h3>
           {onApply && (
             <button
               onClick={onApply}
@@ -57,7 +57,7 @@ export const MappingTool: React.FC<MappingToolProps> = ({
           )}
         </div>
 
-        <div className="grid grid-cols-2 lg:grid-cols-5 gap-3 items-end">
+        <div className="grid grid-cols-2 lg:grid-cols-5 gap-2 items-end">
           {[
             { key: 'date', label: 'NGÀY' },
             { key: 'time', label: 'THỜI GIAN' },
@@ -71,7 +71,7 @@ export const MappingTool: React.FC<MappingToolProps> = ({
               </label>
               <div className="relative group">
                 <select
-                  className="w-full px-3 py-2.5 bg-white border border-slate-300 rounded-xl focus:ring-2 focus:ring-[#F27024] outline-none text-[11px] font-semibold text-slate-600 appearance-none group-hover:border-slate-400 pointer-events-auto cursor-pointer relative z-10"
+                  className="w-full px-2 py-2 bg-white border border-slate-300 rounded-xl focus:ring-2 focus:ring-[#F27024] outline-none text-[10px] font-semibold text-slate-600 appearance-none group-hover:border-slate-400 pointer-events-auto cursor-pointer relative z-10"
                   value={columnMap[field.key as keyof ColumnMapping] ?? ''}
                   onChange={(e) => {
                     const val = e.target.value;

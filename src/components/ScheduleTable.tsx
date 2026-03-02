@@ -78,7 +78,7 @@ export const ScheduleTable: React.FC<ScheduleTableProps> = ({
   const showDynamic = colMapping && colMapping.length > 0;
 
   return (
-    <div className="h-full overflow-auto bg-white">
+    <div className="lg:h-full min-h-0 lg:overflow-auto bg-white">
       {/* 📱 MOBILE VIEW: CLEAN CARDS */}
       <div className="block lg:hidden p-4 space-y-4">
         {/* Sticky Mobile Selection bar */}

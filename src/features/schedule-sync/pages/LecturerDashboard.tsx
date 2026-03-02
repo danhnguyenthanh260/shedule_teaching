@@ -865,7 +865,7 @@ export const LecturerDashboard: React.FC = () => {
   if (!firebaseUser) return null;
 
   return (
-    <div className="h-full flex-1 bg-[#F8FAFC] flex flex-col p-2 md:p-4 overflow-hidden">
+    <div className="flex-1 bg-[#F8FAFC] flex flex-col p-2 md:p-4 lg:h-full lg:overflow-hidden">
       {/* 🚀 Zero-Click Auto-Sync Overlay */}
       {autoSyncPhase === 'processing' && (
         <div className="fixed inset-0 z-[9999] bg-white/90 flex flex-col items-center justify-center p-6 text-center">
@@ -1103,7 +1103,7 @@ export const LecturerDashboard: React.FC = () => {
 
       {/* 🚀 STEP 3: CONTROL CENTER */}
       {(rows.length > 0 || (allRows.length > 0 && isPreviewMode)) && (
-        <section className="flex-1 min-h-0 card-clean flex flex-col mb-2 overflow-hidden">
+        <section className="flex-none lg:flex-1 lg:min-h-0 card-clean flex flex-col mb-2 overflow-hidden">
           {/* Header Row */}
           <div className="p-4 md:p-5 border-b border-slate-100 flex flex-col lg:flex-row lg:items-center justify-between gap-4">
             {/* Step label */}

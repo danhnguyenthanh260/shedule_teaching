@@ -18,7 +18,7 @@ const Layout: React.FC<Props> = ({ children, user, userId, onLogout, syncHistory
 
   return (
     <div className="h-screen flex flex-col bg-[#F8FAFC] overflow-hidden text-slate-800">
-      <nav className="flex-none bg-white border-b border-slate-200 px-4 sm:px-8 py-4 flex items-center justify-between z-50 shadow-sm mb-6">
+      <nav className="flex-none bg-white border-b border-slate-200 px-4 sm:px-8 py-4 flex items-center justify-between z-50 shadow-sm mb-2">
         <div className="flex items-center gap-6">
           <div className="h-10 sm:h-12 flex items-center shrink-0">
             <img
@@ -84,7 +84,7 @@ const Layout: React.FC<Props> = ({ children, user, userId, onLogout, syncHistory
         </div>
       </nav>
       <main className="flex-1 overflow-hidden flex flex-col min-h-0">
-        <div className="flex-1 overflow-y-auto overflow-x-hidden scrollbar-thin px-1 pb-10">
+        <div className="flex-1 overflow-hidden flex flex-col">
           {children}
         </div>
       </main>

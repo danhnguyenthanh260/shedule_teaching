@@ -1103,7 +1103,7 @@ export const LecturerDashboard: React.FC = () => {
 
       {/* 🚀 STEP 3: CONTROL CENTER */}
       {(rows.length > 0 || (allRows.length > 0 && isPreviewMode)) && (
-        <section className="flex-none lg:flex-1 lg:min-h-0 card-clean flex flex-col mb-2 overflow-hidden">
+        <section className="flex-none lg:flex-1 lg:min-h-0 card-clean flex flex-col mb-2">
           {/* Header Row */}
           <div className="p-3 md:p-5 border-b border-slate-100 flex flex-col lg:flex-row lg:items-center justify-between gap-3 sm:gap-4">
             {/* Step label */}
@@ -1170,7 +1170,7 @@ export const LecturerDashboard: React.FC = () => {
             </div>
 
             {/* Buttons Group — Scrollable on mobile if many items */}
-            <div className="flex items-center gap-1.5 shrink-0 overflow-x-auto pb-1 sm:pb-0 scrollbar-none w-full lg:w-auto overflow-y-hidden">
+            <div className="flex flex-wrap items-center gap-1.5 shrink-0 w-full lg:w-auto min-w-0">
               <button
                 onClick={() => handleSync(false)}
                 disabled={syncing || clearing || selectedIds.size === 0}

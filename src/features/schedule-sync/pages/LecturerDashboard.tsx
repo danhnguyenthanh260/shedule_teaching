@@ -980,12 +980,12 @@ export const LecturerDashboard: React.FC = () => {
       {/* 🚀 FIRST ROW: Step 1 & Step 2 */}
       <div id="config-area" className={`${isConfigExpanded ? 'flex' : 'hidden'} lg:flex flex-col lg:flex-row gap-3 mb-2 lg:mb-3 lg:min-h-0 flex-none`}>
         {/* Step 1: Import */}
-        <section className="lg:w-[40%] card-clean p-2 md:p-3 flex flex-col">
-          <div className="flex items-center gap-3 mb-1.5 px-1">
-            <div className="step-number w-6 h-6 text-[10px]">1</div>
+        <section className="lg:w-[35%] card-clean p-1.5 md:p-2 flex flex-col">
+          <div className="flex items-center gap-2 mb-1 px-1">
+            <div className="step-number w-5 h-5 text-[9px]">1</div>
             <div>
-              <h2 className="text-xs font-bold text-slate-800 uppercase tracking-widest leading-none">Dữ liệu</h2>
-              <p className="text-[9px] text-slate-400 font-bold mt-0.5 uppercase">CHỌN HỌC KỲ</p>
+              <h2 className="text-[10px] font-bold text-slate-800 uppercase tracking-widest leading-none">Dữ liệu</h2>
+              <p className="text-[8px] text-slate-400 font-bold mt-0.5 uppercase">CHỌN HỌC KỲ</p>
             </div>
           </div>
           <div className="flex-1">
@@ -1023,12 +1023,12 @@ export const LecturerDashboard: React.FC = () => {
         </section>
 
         {allRows.length > 0 && isAdmin(firebaseUser?.email) ? (
-          <section className="lg:w-[60%] card-clean p-2 md:p-3 flex flex-col">
-            <div className="flex items-center gap-3 mb-1.5 px-1">
-              <div className="step-number w-6 h-6 text-[10px]">2</div>
+          <section className="lg:w-[65%] card-clean p-1.5 md:p-2 flex flex-col">
+            <div className="flex items-center gap-2 mb-1 px-1">
+              <div className="step-number w-5 h-5 text-[9px]">2</div>
               <div>
-                <h2 className="text-xs font-bold text-slate-800 uppercase tracking-widest leading-none">Cấu hình</h2>
-                <p className="text-[9px] text-slate-400 font-bold mt-0.5 uppercase">ÁNH XẠ CỘT</p>
+                <h2 className="text-[10px] font-bold text-slate-800 uppercase tracking-widest leading-none">Cấu hình</h2>
+                <p className="text-[8px] text-slate-400 font-bold mt-0.5 uppercase">ÁNH XẠ CỘT</p>
               </div>
             </div>
             <div className="flex-1">
@@ -1065,28 +1065,25 @@ export const LecturerDashboard: React.FC = () => {
           </section>
         ) : allRows.length > 0 ? (
           /* Lecturers Manual Section */
-          <div className="lg:w-[60%] card-clean p-2 md:p-3 flex flex-col">
-            <div className="flex items-center gap-3 mb-1.5 px-1">
-              <div className="step-number w-6 h-6 text-[10px]">2</div>
+          <div className="lg:w-[65%] card-clean p-1.5 md:p-2 flex flex-col">
+            <div className="flex items-center gap-2 mb-1 px-1">
+              <div className="step-number w-5 h-5 text-[9px]">2</div>
               <div>
-                <h2 className="text-xs font-bold text-slate-800 uppercase tracking-widest leading-none">Hướng dẫn</h2>
-                <p className="text-[9px] text-slate-400 font-bold mt-0.5 uppercase">CÁCH ĐỒNG BỘ</p>
+                <h2 className="text-[10px] font-bold text-slate-800 uppercase tracking-widest leading-none">Hướng dẫn</h2>
+                <p className="text-[8px] text-slate-400 font-bold mt-0.5 uppercase">CÁCH ĐỒNG BỘ</p>
               </div>
             </div>
             
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 flex-1">
+            <div className="grid grid-cols-2 lg:grid-cols-4 gap-1.5 flex-1">
               {[
-                { id: '1', title: 'Lọc lịch cá nhân', desc: 'Sử dụng ô tìm kiếm để lọc đích danh tên của bạn trong danh sách.' },
-                { id: '2', title: 'Chọn sự kiện', desc: 'Đánh dấu vào các sự kiện bạn muốn đồng bộ lên Calendar cá nhân.' },
-                { id: '3', title: 'Kiểm tra xung đột', desc: 'Hệ thống sẽ báo nếu thời gian trùng với lịch hiện có của bạn.' },
-                { id: '4', title: 'Hoàn tất', desc: 'Nhấn nút Đồng bộ và chờ trong vài giây để lịch được cập nhật.' },
+                { id: '1', title: 'Lọc lịch cá nhân', desc: 'Dùng ô tìm kiếm để lọc tên của bạn.' },
+                { id: '2', title: 'Chọn sự kiện', desc: 'Đánh dấu sự kiện cần đồng bộ lên Calendar.' },
+                { id: '3', title: 'Kiểm tra xung đột', desc: 'Hệ thống báo nếu trùng lịch hiện có.' },
+                { id: '4', title: 'Hoàn tất', desc: 'Nhấn Đồng bộ và chờ lịch cập nhật.' },
               ].map((item) => (
-                <div key={item.id} className="p-2 px-3 rounded-xl bg-slate-50 border border-slate-100 hover:border-orange-200 transition-all group">
-                  <div className="flex items-center gap-2 mb-1">
-                    <span className="text-[10px] font-bold text-orange-500 uppercase tracking-widest">Tiêu điểm {item.id}</span>
-                  </div>
-                  <h4 className="text-[11px] font-bold text-slate-800 mb-0.5 uppercase tracking-tight">{item.title}</h4>
-                  <p className="text-[10px] text-slate-500 font-medium leading-tight">
+                <div key={item.id} className="p-1 px-2 rounded-lg bg-white/50 border border-slate-100/10 hover:border-orange-200 transition-all group flex flex-col justify-center">
+                  <h4 className="text-[9px] font-bold text-slate-800 leading-tight uppercase tracking-tight">{item.title}</h4>
+                  <p className="text-[8px] text-slate-400 font-medium leading-tight mt-0.5 line-clamp-2">
                     {item.desc}
                   </p>
                 </div>

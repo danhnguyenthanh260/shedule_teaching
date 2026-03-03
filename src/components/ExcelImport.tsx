@@ -266,14 +266,13 @@ export const ExcelImport: React.FC<ExcelImportProps> = ({
   };
 
   return (
-    <div className="flex flex-col gap-2 p-0.5">
-      {/* Simplify Step 1: Just Semester Selection & Auto-load status */}
-      <div className="flex flex-col sm:flex-row items-end gap-3">
+    <div className="flex flex-col gap-1.5 p-0.5">
+      <div className="flex flex-col sm:flex-row items-end gap-2">
         <div className="flex-1 w-full">
-          <label className="block text-[10px] font-bold text-slate-400 mb-1.5 ml-1 uppercase tracking-widest leading-none">Chọn Học kỳ</label>
+          <label className="block text-[9px] font-bold text-slate-400 mb-1 ml-1 uppercase tracking-widest leading-none">Chọn Học kỳ</label>
           <div className="relative group">
             <select
-              className="w-full pl-3 pr-8 py-2 bg-white border border-slate-300 rounded-xl focus:ring-2 focus:ring-fpt-orange outline-none text-xs font-bold text-slate-700 h-10 appearance-none transition-all group-hover:border-slate-400 pointer-events-auto cursor-pointer relative z-10"
+              className="w-full pl-3 pr-8 py-1.5 bg-white border border-slate-200 rounded-xl focus:ring-2 focus:ring-fpt-orange outline-none text-[11px] font-bold text-slate-700 h-9 appearance-none transition-all group-hover:border-slate-300 pointer-events-auto cursor-pointer relative z-10"
               value={tempSemesterId}
               onChange={(e) => handleSemesterChange(e.target.value)}
             >
@@ -282,26 +281,24 @@ export const ExcelImport: React.FC<ExcelImportProps> = ({
                 <option key={s.id} value={s.id}>{s.semester}</option>
               ))}
             </select>
-            <div className="absolute right-4 top-4.5 text-slate-400 pointer-events-none group-focus-within:text-fpt-orange transition-colors text-xs font-bold">
-              V
+            <div className="absolute right-3 top-3 text-slate-300 pointer-events-none group-focus-within:text-fpt-orange transition-colors text-[10px] font-bold">
+              ▼
             </div>
           </div>
         </div>
 
-
-        <div className="flex-none flex items-center gap-2 mb-0.5">
+        <div className="flex-none flex items-center gap-2 mb-0">
           <button
             onClick={() => handleShowData(true)}
             disabled={isProcessing || !sheetUrl}
-            className="px-6 h-11 bg-[#F27024] text-white rounded-xl hover:bg-orange-600 active:scale-95 transition-all font-bold shadow-lg shadow-orange-200 flex items-center justify-center gap-2 disabled:bg-slate-100 disabled:text-slate-400 disabled:shadow-none min-w-[140px] text-[11px] uppercase tracking-widest"
+            className="px-5 h-9 bg-[#F27024] text-white rounded-xl hover:bg-orange-600 active:scale-95 transition-all font-bold shadow-lg shadow-orange-100 flex items-center justify-center gap-2 disabled:bg-slate-50 disabled:text-slate-300 disabled:shadow-none min-w-[110px] text-[10px] uppercase tracking-widest"
           >
             {isProcessing ? (
-              <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+              <div className="w-3.5 h-3.5 border-2 border-white/30 border-t-white rounded-full animate-spin" />
             ) : (
               <>Tải lại</>
             )}
           </button>
-
         </div>
       </div>
 

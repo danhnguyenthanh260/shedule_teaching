@@ -15,7 +15,7 @@ var CONSTANTS = {
   ERROR: "error",
   FIREBASE_WEB_API_KEY:
     PropertiesService.getScriptProperties().getProperty("FIREBASE_API_KEY") ||
-    "AIzaSy...",
+    "",
   FIREBASE_URL:
     "https://scheduleteaching-default-rtdb.asia-southeast1.firebasedatabase.app/",
   ADMIN_EMAILS: ["ngohoangtruongdat@gmail.com", "ngohoangtruongdat2@gmail.com"],
@@ -23,16 +23,15 @@ var CONSTANTS = {
   INVITATION_CALENDAR_NAME: "FPT Scheduler - Invitations",
   OAUTH: {
     CLIENT_ID:
-      PropertiesService.getScriptProperties().getProperty("OAUTH_CLIENT_ID") ||
+      PropertiesService.getScriptProperties().getProperty("GOOGLE_CLIENT_ID") ||
       "",
     CLIENT_SECRET:
       PropertiesService.getScriptProperties().getProperty(
-        "OAUTH_CLIENT_SECRET",
+        "GOOGLE_CLIENT_SECRET",
       ) || "",
     REDIRECT_URI: "https://shedule-teaching.vercel.app/",
   },
   // 📧 CẤU HÌNH SMTP (SendGrid) - Để gửi số lượng lớn (>100 mail/ngày)
-  // 🛡️ BẢO MẬT: Key đã được chuyển vào Script Properties của Apps Script
   EMAIL_API: {
     SENDGRID_API_KEY:
       PropertiesService.getScriptProperties().getProperty("SENDGRID_API_KEY") ||

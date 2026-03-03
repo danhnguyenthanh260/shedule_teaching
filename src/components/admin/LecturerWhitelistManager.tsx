@@ -32,7 +32,7 @@ export const LecturerWhitelistManager: React.FC<LecturerWhitelistManagerProps> =
     loading
 }) => {
     return (
-        <div className="bg-white p-8 rounded-2xl border border-slate-100 shadow-sm">
+        <div className="bg-white p-4 md:p-8 rounded-2xl border border-slate-100 shadow-sm">
             <div className="flex flex-col md:flex-row md:items-center justify-between gap-6 mb-10">
                 <h2 className="text-[11px] font-bold text-[#F27024] flex items-center gap-3 uppercase tracking-[0.2em] font-heading">
                     <span className="w-8 h-8 bg-orange-50 text-[#F27024] rounded-lg flex items-center justify-center text-xs font-bold border border-orange-100/50">🎓</span>
@@ -102,29 +102,31 @@ export const LecturerWhitelistManager: React.FC<LecturerWhitelistManagerProps> =
             </form>
 
             <div className="bg-white border border-slate-200 rounded-xl overflow-hidden shadow-sm">
-                <div className="overflow-x-auto max-h-[500px] scrollbar-thin scrollbar-thumb-slate-200">
-                    <table className="w-full text-left border-collapse table-fixed">
+                <div className="overflow-x-auto max-h-[600px] scrollbar-thin scrollbar-thumb-slate-200">
+                    <table className="w-full text-left border-collapse min-w-[800px]">
                         <thead className="sticky top-0 z-10">
                             <tr className="bg-slate-50/80 backdrop-blur-md border-b border-slate-200">
-                                <th className="px-6 py-4 text-[10px] font-bold text-slate-500 uppercase tracking-widest w-[33%]">Họ và tên</th>
-                                <th className="px-6 py-4 text-[10px] font-bold text-slate-500 uppercase tracking-widest w-[22%]">Mã giảng viên</th>
-                                <th className="px-6 py-4 text-[10px] font-bold text-slate-500 uppercase tracking-widest w-[33%]">Mail FPT</th>
-                                <th className="px-6 py-4 text-[10px] font-bold text-slate-500 uppercase tracking-widest w-[12%] text-right">Thao tác</th>
+                                <th className="px-6 py-4 text-[10px] font-bold text-slate-500 uppercase tracking-widest w-[30%]">Họ và tên</th>
+                                <th className="px-6 py-4 text-[10px] font-bold text-slate-500 uppercase tracking-widest w-[20%]">Mã giảng viên</th>
+                                <th className="px-6 py-4 text-[10px] font-bold text-slate-500 uppercase tracking-widest w-[35%]">Mail FPT</th>
+                                <th className="px-6 py-4 text-[10px] font-bold text-slate-500 uppercase tracking-widest w-[15%] text-right">Thao tác</th>
                             </tr>
                         </thead>
                         <tbody className="divide-y divide-slate-100">
                             {Object.entries(lecturers).map(([key, lec]) => (
                                 <tr key={key} className="hover:bg-orange-50/30 transition-colors group">
                                     <td className="px-6 py-4">
-                                        <span className="text-sm font-semibold text-slate-700 truncate block">{(lec as any).name}</span>
+                                        <span className="text-sm font-semibold text-slate-700 whitespace-nowrap block">{(lec as any).name}</span>
                                     </td>
                                     <td className="px-6 py-4">
-                                        <span className="inline-block px-2 py-1 bg-slate-100 text-slate-600 text-[10px] font-bold rounded uppercase tracking-wider border border-slate-200/50">
-                                            {(lec as any).code}
-                                        </span>
+                                        <div className="flex">
+                                            <span className="inline-block px-2.5 py-1 bg-slate-100 text-slate-600 text-[10px] font-bold rounded-lg uppercase tracking-wider border border-slate-200/50">
+                                                {(lec as any).code}
+                                            </span>
+                                        </div>
                                     </td>
                                     <td className="px-6 py-4">
-                                        <span className="text-xs text-slate-500 font-medium font-mono truncate block">{(lec as any).email}</span>
+                                        <span className="text-[11px] text-slate-500 font-medium font-mono whitespace-nowrap block">{(lec as any).email}</span>
                                     </td>
                                     <td className="px-6 py-4 text-right">
                                         {confirmingDeleteKey === key ? (

@@ -543,7 +543,7 @@ export const AdminPage: React.FC = () => {
             title={getPageTitle()}
             description={getPageDescription()}
         >
-            <div className="h-full space-y-10 pb-20">
+            <div className="min-h-full space-y-10 pb-32">
 
                 {activeTab === 'semesters' && (
                     <div className="flex flex-col lg:flex-row gap-8 items-start h-full min-h-0">

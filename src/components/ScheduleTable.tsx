@@ -189,7 +189,7 @@ export const ScheduleTable: React.FC<ScheduleTableProps> = ({
                 <div className={`
                   w-9 h-9 rounded-xl flex items-center justify-center transition-all duration-500
                   ${selectedIds.size === displayRows.length && displayRows.length > 0
-                    ? 'bg-[#F27024] shadow-lg shadow-orange-200 rotate-6 scale-110' 
+                    ? 'bg-[#F27024] shadow-lg shadow-orange-200' 
                     : 'bg-white border-2 border-slate-100 group-hover:border-[#F27024]/30 shadow-sm'}
                 `}>
                   {selectedIds.size === displayRows.length && displayRows.length > 0 ? (

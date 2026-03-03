@@ -74,63 +74,44 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   try {
     // 1. Authenticate with ID Token
     const authHeader = req.headers.authorization;
-    if (!authHeader?.startsWith("Bearer ")) {
-      return res.status(401).json({ error: "Missing or invalid authorization header" });
-    }
+    const idToken = authHeader?.startsWith("Bearer ") ? authHeader.split("Bearer ")[1] : null;
 
-    const idToken = authHeader.split("Bearer ")[1];
-    const decodedToken = await admin.auth().verifyIdToken(idToken);
-    const userEmail = decodedToken.email;
-
-    // 2. Authorization Check (Whitelist)
-    const ALLOWED_EMAILS = (process.env.ALLOWED_EMAILS || "").split(",").map(e => e.trim().toLowerCase());
-    if (ALLOWED_EMAILS.length === 1 && ALLOWED_EMAILS[0] === "" && !userEmail) {
-       return res.status(403).json({ error: "Forbidden: No email in token" });
-    }
-    
-    // 5. HELPER: Forward to GAS
-    async function forwardToGAS(response: VercelResponse, payload: any) {
-      const GAS_URL = process.env.GAS_EXEC_URL;
-      const GAS_SECRET = process.env.GAS_SECRET;
-      
-      if (!GAS_URL) return response.status(500).json({ error: "GAS_EXEC_URL not configured" });
-
-      console.log(`🔗 Forwarding to GAS: ${GAS_URL}`);
-      const gasResponse = await fetch(GAS_URL, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          ...payload,
-          secret: GAS_SECRET || payload.secret
-        })
-      });
-      
-      const responseText = await gasResponse.text();
-      
-      if (!gasResponse.ok) {
-          console.error(`❌ GAS Error: ${gasResponse.status} - ${responseText.substring(0, 200)}`);
-          return response.status(gasResponse.status).json({ 
-            error: "Google Apps Script error", 
-            detail: responseText.replace(/<[^>]+>/g, ' ').substring(0, 250).trim()
-          });
-      }
-
+    let userEmail: string | undefined;
+    if (idToken) {
       try {
-        const gasResult: any = JSON.parse(responseText);
-        return response.status(200).json(gasResult);
-      } catch (parseErr) {
-        return response.status(500).json({
-          error: "Google returned non-JSON",
-          detail: responseText.replace(/<[^>]+>/g, ' ').substring(0, 250).trim()
-        });
+        const decodedToken = await admin.auth().verifyIdToken(idToken);
+        userEmail = decodedToken.email;
+      } catch (authErr) {
+        console.warn("⚠️ Token verification failed, proceeding as guest for generic actions");
       }
     }
 
-    // 3. Process Events or Clear Action
-    const { events, calendarName, action, googleAccessToken, force, conflictMode, skipCleanup, sheetType } = req.body;
+    // 2. Extract Request Data
+    let bodyData = typeof req.body === 'string' ? JSON.parse(req.body) : req.body;
+    const { events, calendarName, action, googleAccessToken, force, conflictMode, skipCleanup, sheetType, secret } = bodyData;
 
-    // Handle CLEAR action specifically
+    // 🎯 3. ACTION ROUTING
+    // Actions that don't need Firestore logging or Events validation are forwarded DIRECTLY to GAS
+    const genericActions = [
+      'getTokenStatus', 
+      'getLecturerTokenStatus',
+      'exchangeOAuthCode', 
+      'notifyLecturers', 
+      'setupNotifications', 
+      'disableNotifications',
+      'respondToInvitations',
+      'getAppEventIds'
+    ];
+
+    if (action && genericActions.includes(action)) {
+      console.log(`📡 Generic Action Proxy: ${action}`);
+      return forwardToGAS(res, bodyData);
+    }
+
+    // Handle CLEAR action specifically (Needs Auth + Firestore)
     if (action === 'clearCalendar') {
+      if (!userEmail) return res.status(401).json({ error: "Authentication required for clearing calendar" });
+      
       console.log(`🧹 Clearing Firestore slots for user: ${userEmail}`);
       const slotsToClear = await db.collection("slots")
         .where("syncedBy", "==", userEmail)
@@ -143,18 +124,18 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         chunk.forEach(doc => clearBatch.delete(doc.ref));
         await clearBatch.commit();
       }
-      console.log(`✅ Cleared ${slotsToClear.size} slots from Firestore`);
-
-      return forwardToGAS(res, {
-        action: 'clearCalendar',
-        calendarName: calendarName || "Schedule Teaching",
-        googleAccessToken: googleAccessToken,
-        sheetType: sheetType // 🚀 NEW: Cần thiết để xóa đúng phân loại (Council vs Review)
-      });
+      
+      return forwardToGAS(res, bodyData);
     }
 
+    // Default: SYNC action (Requires Events)
     if (!events || !Array.isArray(events)) {
-      return res.status(400).json({ error: "Events array is required" });
+      // If there's an action but not in our lists, just try to forward it
+      if (action) {
+         console.log(`📡 Unknown Action Proxy: ${action}`);
+         return forwardToGAS(res, bodyData);
+      }
+      return res.status(400).json({ error: "Events array is required for sync" });
     }
 
     const normalizedEvents: any[] = [];
@@ -166,47 +147,40 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         console.error(`❌ Date format error for "${title}": start=${start}, end=${end}`);
         return res.status(400).json({ 
           error: `Định dạng ngày tháng không hợp lệ cho sự kiện "${title}".`,
-          detail: `Giá trị nhận được: ${start || 'null'} - ${end || 'null'}. Hệ thống yêu cầu chuẩn ISO (YYYY-MM-DD...). Hãy tải lại trang và thử lại.`
+          detail: `Giá trị nhận được: ${start || 'null'} - ${end || 'null'}.`
         });
       }
       normalizedEvents.push(event);
     }
 
-    // 🚀 NEW: We REMOVED the internal Firestore conflict check.
-    // Why? Because Firestore can be "stale" (e.g., if you delete on Calendar manually).
-    // We let Google Apps Script (the source of truth) handle actual conflict detection.
-    const eventsToSync = normalizedEvents;
+    // 🚀 NEW: Firestore Logging for Sync
+    if (userEmail) {
+      try {
+        const batch = db.batch();
+        normalizedEvents.forEach(ev => {
+          const slotRef = db.collection("slots").doc();
+          const startTime = new Date(ev.start);
+          const endTime = new Date(ev.end);
 
-
-    const batch = db.batch();
-    const slotLogRefs: any[] = [];
-
-    eventsToSync.forEach(ev => {
-      const slotRef = db.collection("slots").doc();
-      const startTime = new Date(ev.start);
-      const endTime = new Date(ev.end);
-
-      batch.set(slotRef, {
-        title: ev.title,
-        startTime: admin.firestore.Timestamp.fromDate(isNaN(startTime.getTime()) ? new Date() : startTime),
-        endTime: admin.firestore.Timestamp.fromDate(isNaN(endTime.getTime()) ? new Date() : endTime),
-        resources: ev.resources || [],
-        status: "pending",
-        syncedBy: userEmail,
-        createdAt: admin.firestore.FieldValue.serverTimestamp()
-      });
-      slotLogRefs.push(slotRef);
-    });
-
-    await batch.commit();
+          batch.set(slotRef, {
+            title: ev.title,
+            startTime: admin.firestore.Timestamp.fromDate(isNaN(startTime.getTime()) ? new Date() : startTime),
+            endTime: admin.firestore.Timestamp.fromDate(isNaN(endTime.getTime()) ? new Date() : endTime),
+            resources: ev.resources || [],
+            status: "pending",
+            syncedBy: userEmail,
+            createdAt: admin.firestore.FieldValue.serverTimestamp()
+          });
+        });
+        await batch.commit();
+      } catch (dbErr) {
+        console.error("⚠️ Firestore log failed, but continuing sync with GAS:", dbErr);
+      }
+    }
 
     return forwardToGAS(res, {
-      calendarName: calendarName || "Schedule Teaching",
-      force: !!force,
-      conflictMode: conflictMode || null,
-      googleAccessToken: googleAccessToken,
-      skipCleanup: !!skipCleanup, // 🚀 NEW
-      events: eventsToSync.map(ev => {
+      ...bodyData,
+      events: normalizedEvents.map(ev => {
         const resList = Array.isArray(ev.resources) ? ev.resources : [];
         return {
           ...ev,
@@ -215,12 +189,58 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       })
     });
 
+    // 5. HELPER: Forward to GAS
+    async function forwardToGAS(response: VercelResponse, payload: any) {
+      const GAS_URL = process.env.GAS_EXEC_URL;
+      const GAS_SECRET = process.env.GAS_SECRET;
+      
+      if (!GAS_URL) return response.status(500).json({ error: "GAS_EXEC_URL not configured on server" });
+
+      console.log(`🔗 Proxy forwarding to GAS (Action: ${payload.action || 'sync'})`);
+      
+      try {
+        const gasResponse = await fetch(GAS_URL, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            ...payload,
+            secret: GAS_SECRET || payload.secret
+          })
+        });
+        
+        const responseText = await gasResponse.text();
+        
+        if (!gasResponse.ok) {
+            console.error(`❌ GAS Error: ${gasResponse.status} - ${responseText.substring(0, 200)}`);
+            return response.status(gasResponse.status).json({ 
+              error: "Google Apps Script error", 
+              detail: responseText.replace(/<[^>]+>/g, ' ').substring(0, 250).trim()
+            });
+        }
+
+        try {
+          const gasResult: any = JSON.parse(responseText);
+          return response.status(200).json(gasResult);
+        } catch (parseErr) {
+          return response.status(500).json({
+            error: "Google returned non-JSON response",
+            detail: responseText.replace(/<[^>]+>/g, ' ').substring(0, 250).trim()
+          });
+        }
+      } catch (fetchErr: any) {
+        console.error("❌ Fetch to GAS failed:", fetchErr);
+        return response.status(504).json({
+          error: "Gateway Timeout: Could not reach Google Apps Script",
+          message: fetchErr.message
+        });
+      }
+    }
+
   } catch (err: any) {
-    console.error("Sync Secure Error:", err);
+    console.error("Proxy handler error:", err);
     return res.status(500).json({
-      error: "Lỗi nội bộ hệ thống trong quá trình đồng bộ (Proxy 500)",
-      message: err.message,
-      hint: !process.env.FIREBASE_SERVICE_ACCOUNT ? "Thiếu FIREBASE_SERVICE_ACCOUNT trên Vercel" : "Kiểm tra Vercel Logs để biết chi tiết"
+      error: "Lỗi nội bộ hệ thống trong quá trình Proxy (500)",
+      message: err.message
     });
   }
 }

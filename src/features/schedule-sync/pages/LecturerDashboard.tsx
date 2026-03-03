@@ -865,7 +865,7 @@ export const LecturerDashboard: React.FC = () => {
   if (!firebaseUser) return null;
 
   return (
-    <div className="flex-1 bg-[#F8FAFC] flex flex-col p-2 md:p-4 lg:h-full lg:overflow-hidden">
+    <div className="flex-1 bg-[#F8FAFC] flex flex-col p-2 md:p-3 lg:h-full lg:overflow-hidden min-h-0">
       {/* 🚀 Zero-Click Auto-Sync Overlay */}
       {autoSyncPhase === 'processing' && (
         <div className="fixed inset-0 z-[9999] bg-white/90 flex flex-col items-center justify-center p-6 text-center">
@@ -903,13 +903,13 @@ export const LecturerDashboard: React.FC = () => {
 
       {/* 🏛️ OAuth Connection Banner - PROMINENT SILENT SYNC */}
       {!isAdmin(firebaseUser?.email) && isCalendarConnected === false && (
-        <section className="mb-10">
+        <section className="mb-6">
           {/* Urgent top strip */}
           <div className="flex items-center gap-2 mb-2 px-1">
             <span className="w-2 h-2 rounded-full bg-orange-500 animate-ping inline-flex" />
             <span className="text-xs font-black text-orange-600 uppercase tracking-widest">Hành động được khuyến nghị</span>
           </div>
-          <div className="relative overflow-hidden bg-gradient-to-br from-orange-50 via-white to-blue-50 border-2 border-orange-300 rounded-[2rem] p-8 md:p-10 shadow-2xl shadow-orange-100 group">
+          <div className="relative overflow-hidden bg-gradient-to-br from-orange-50 via-white to-blue-50 border-2 border-orange-300 rounded-[2rem] p-6 md:p-8 shadow-2xl shadow-orange-100 group">
             {/* Background glow */}
             <div className="absolute -top-20 -right-20 w-72 h-72 bg-orange-200 rounded-full blur-[100px] opacity-40 group-hover:opacity-70 transition-opacity duration-700" />
             <div className="absolute -bottom-20 -left-20 w-72 h-72 bg-blue-200 rounded-full blur-[100px] opacity-30" />
@@ -975,15 +975,15 @@ export const LecturerDashboard: React.FC = () => {
         </div>
       )}
 
-      {/* Hero / Header Section */}
-      <div className={`flex-none flex flex-col lg:flex-row gap-4 mb-4 transition-all duration-700 ${!isConfigExpanded ? 'max-h-0 opacity-0 mb-0' : 'max-h-[1500px] opacity-100'}`}>
+      {/* 🚀 FIRST ROW: Step 1 & Step 2 */}
+      <div id="config-area" className={`${isConfigExpanded ? 'flex' : 'hidden'} lg:flex flex-col lg:flex-row gap-3 mb-2 lg:mb-3 lg:min-h-0 flex-none`}>
         {/* Step 1: Import */}
-        <section className="lg:w-[42%] card-clean p-2 md:p-4 flex flex-col">
-          <div className="flex items-center gap-4 mb-2">
-            <div className="step-number">1</div>
+        <section className="lg:w-[40%] card-clean p-2 md:p-3 flex flex-col">
+          <div className="flex items-center gap-3 mb-1.5 px-1">
+            <div className="step-number w-6 h-6 text-[10px]">1</div>
             <div>
-              <h2 className="text-sm font-bold text-slate-800 uppercase tracking-widest leading-none">Dữ liệu</h2>
-              <p className="text-[10px] text-slate-400 font-bold mt-1 uppercase">CHỌN HỌC KỲ ĐỂ LẤY LỊCH</p>
+              <h2 className="text-xs font-bold text-slate-800 uppercase tracking-widest leading-none">Dữ liệu</h2>
+              <p className="text-[9px] text-slate-400 font-bold mt-0.5 uppercase">CHỌN HỌC KỲ</p>
             </div>
           </div>
           <div className="flex-1">
@@ -1021,12 +1021,12 @@ export const LecturerDashboard: React.FC = () => {
         </section>
 
         {allRows.length > 0 && isAdmin(firebaseUser?.email) ? (
-          <section className="lg:w-[58%] card-clean p-4 md:p-6 flex flex-col">
-            <div className="flex items-center gap-4 mb-4">
-              <div className="step-number">2</div>
+          <section className="lg:w-[60%] card-clean p-2 md:p-3 flex flex-col">
+            <div className="flex items-center gap-3 mb-1.5 px-1">
+              <div className="step-number w-6 h-6 text-[10px]">2</div>
               <div>
-                <h2 className="text-sm font-bold text-slate-800 uppercase tracking-widest leading-none">Cấu hình</h2>
-                <p className="text-[10px] text-slate-400 font-bold mt-1 uppercase">ÁNH XẠ CỘT DỮ LIỆU</p>
+                <h2 className="text-xs font-bold text-slate-800 uppercase tracking-widest leading-none">Cấu hình</h2>
+                <p className="text-[9px] text-slate-400 font-bold mt-0.5 uppercase">ÁNH XẠ CỘT</p>
               </div>
             </div>
             <div className="flex-1">
@@ -1063,12 +1063,12 @@ export const LecturerDashboard: React.FC = () => {
           </section>
         ) : allRows.length > 0 ? (
           /* Lecturers Manual Section */
-          <div className="lg:w-[58%] card-clean p-2 md:p-4 flex flex-col">
-            <div className="flex items-center gap-4 mb-2">
-              <div className="step-number">2</div>
+          <div className="lg:w-[60%] card-clean p-2 md:p-3 flex flex-col">
+            <div className="flex items-center gap-3 mb-1.5 px-1">
+              <div className="step-number w-6 h-6 text-[10px]">2</div>
               <div>
-                <h2 className="text-sm font-bold text-slate-800 uppercase tracking-widest leading-none">Hướng dẫn</h2>
-                <p className="text-[10px] text-slate-400 font-bold mt-1 uppercase">CÁCH ĐỒNG BỘ LỊCH CHUẨN</p>
+                <h2 className="text-xs font-bold text-slate-800 uppercase tracking-widest leading-none">Hướng dẫn</h2>
+                <p className="text-[9px] text-slate-400 font-bold mt-0.5 uppercase">CÁCH ĐỒNG BỘ</p>
               </div>
             </div>
             
@@ -1092,11 +1092,11 @@ export const LecturerDashboard: React.FC = () => {
             </div>
           </div>
         ) : (
-          <div className="lg:w-[58%] card-clean p-8 flex flex-col items-center justify-center border-dashed border-2">
-            <div className="w-16 h-16 rounded-full bg-slate-100 flex items-center justify-center text-slate-300 text-2xl font-bold mb-4">
+          <div className="lg:w-[60%] card-clean p-4 flex flex-col items-center justify-center border-dashed border-2">
+            <div className="w-10 h-10 rounded-full bg-slate-100 flex items-center justify-center text-slate-300 text-sm font-bold mb-2">
                2
             </div>
-            <p className="text-xs font-bold text-slate-400 uppercase tracking-widest text-center">Đang chờ cấu hình bước 1</p>
+            <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest text-center">Đang chờ cấu hình bước 1</p>
           </div>
         )}
       </div>

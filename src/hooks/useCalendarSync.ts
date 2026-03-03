@@ -120,8 +120,8 @@ export const useCalendarSync = ({ accessToken, reauthorizeGoogle }: UseCalendarS
         
         if (r.isGrouped) {
            const names = r.reviewers && r.reviewers.length > 0 ? r.reviewers : [r.person];
-           const timePart = r.timeRaw ? `(${r.timeRaw})` : '';
-           eventTitle = `${names.join(' & ')} ${timePart}`.trim();
+           const timePart = r.timeRaw ? ` - Slot(${r.timeRaw})` : '';
+           eventTitle = `${names.join(' & ')}${timePart}`.trim();
         } else {
            // For Council or simple rows: "Name - Task/Topic"
            const taskPart = r.task && r.task !== 'Nhiệm vụ' && r.task !== 'Review' ? ` - ${r.task}` : '';
@@ -226,7 +226,7 @@ export const useCalendarSync = ({ accessToken, reauthorizeGoogle }: UseCalendarS
     }
   }, [accessToken]);
 
-  const clearAppEvents = useCallback(async (sheetType?: 'council' | 'review', sendUpdates: boolean = false, calendarName?: string, retryCount: number = 0) => {
+  const clearAppEvents = useCallback(async (sheetType?: 'council' | 'review', sendUpdates: boolean = true, calendarName?: string, retryCount: number = 0) => {
     setClearing(true);
     setSyncError(null);
     setSyncResult(null);

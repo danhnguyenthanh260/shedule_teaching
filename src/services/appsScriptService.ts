@@ -602,39 +602,73 @@ export const notifyLecturers = async (
     lecturers: Array<{ email: string; name: string; events: any[] }>,
     sheetUrl?: string,
     tabName?: string,
-    sheetType?: 'council' | 'review'
+    sheetType?: 'council' | 'review',
+    forceNotify: boolean = false // 📧 Default back to false as per user request
 ): Promise<any> => {
     try {
         const currentUser = auth.currentUser;
         const idToken = currentUser ? await currentUser.getIdToken() : undefined;
 
-        const payload = {
-            action: 'notifyLecturers',
-            lecturers,
-            sheetUrl,
-            tabName,
-            sheetType,
-            idToken,
-            ...(import.meta.env.DEV ? { secret: import.meta.env.VITE_GAS_SECRET } : {})
+        // 🚀 CHUNKING: Gửi theo từng đợt 10 giảng viên để tránh Timeout (Dễ bị dính quota Mail của Google)
+        const CHUNK_SIZE = 10;
+        const totalChunks = Math.ceil(lecturers.length / CHUNK_SIZE);
+        
+        let combinedResults = {
+            status: 'success',
+            data: {
+                success: 0,
+                failed: 0,
+                total: lecturers.length,
+                errors: [] as any[],
+                quotaRemaining: 0
+            }
         };
 
-        const syncUrl = `${API_BASE_URL}/api/sync`;
-        const response = await fetch(syncUrl, {
-            method: 'POST',
-            headers: { 
-                'Content-Type': 'application/json',
-                'Authorization': idToken ? `Bearer ${idToken}` : ''
-            },
-            body: JSON.stringify(payload)
-        });
+        logInfo(`🚀 Bắt đầu gửi thông báo cho ${lecturers.length} giảng viên (Chia làm ${totalChunks} đợt)`);
 
-        const data = await response.json();
-        if (data.status === 'error') {
-            throw new Error(data.message || 'Lỗi từ Backend');
+        for (let i = 0; i < totalChunks; i++) {
+            const chunk = lecturers.slice(i * CHUNK_SIZE, (i + 1) * CHUNK_SIZE);
+            logInfo(`📦 Gửi đợt ${i + 1}/${totalChunks} (${chunk.length} giảng viên)...`);
+
+            const payload = {
+                action: 'notifyLecturers',
+                lecturers: chunk,
+                sheetUrl,
+                tabName,
+                sheetType,
+                forceNotify, // 📧 Add this
+                idToken,
+                ...(import.meta.env.DEV ? { secret: import.meta.env.VITE_GAS_SECRET } : {})
+            };
+
+            const syncUrl = `${API_BASE_URL}/api/sync`;
+            const response = await fetch(syncUrl, {
+                method: 'POST',
+                headers: { 
+                    'Content-Type': 'application/json',
+                    'Authorization': idToken ? `Bearer ${idToken}` : ''
+                },
+                body: JSON.stringify(payload)
+            });
+
+            const data = await response.json();
+            if (data.status === 'error') {
+                throw new Error(data.message || `Lỗi ở đợt ${i + 1}`);
+            }
+
+            // Merge results
+            if (data.data) {
+                combinedResults.data.success += (data.data.success || 0);
+                combinedResults.data.failed += (data.data.failed || 0);
+                if (data.data.errors) {
+                    combinedResults.data.errors = [...combinedResults.data.errors, ...data.data.errors];
+                }
+                combinedResults.data.quotaRemaining = data.data.quotaRemaining || 0;
+            }
         }
 
-        logSuccess('Notification successful');
-        return data;
+        logSuccess('All notifications processed');
+        return combinedResults;
     } catch (error) {
         const errorMessage = error instanceof Error ? error.message : 'Không thể gửi thông báo';
         logError('Send notifications error:', errorMessage);
@@ -714,7 +748,7 @@ export const exchangeOAuthCode = async (email: string, code: string): Promise<an
 /**
  * 📅 Check if lecturer has a valid Calendar Connection
  */
-export const getLecturerTokenStatus = async (email: string): Promise<boolean> => {
+export const getLecturerTokenStatus = async (email: string): Promise<{ connected: boolean; hasRefreshToken: boolean }> => {
     try {
         const payload = {
             action: 'getLecturerTokenStatus',
@@ -730,10 +764,13 @@ export const getLecturerTokenStatus = async (email: string): Promise<boolean> =>
         });
 
         const data = await response.json();
-        return data.connected === true;
+        return {
+            connected: data.connected === true,
+            hasRefreshToken: data.hasRefreshToken === true
+        };
     } catch (error) {
         logError('getLecturerTokenStatus error:', error);
-        return false;
+        return { connected: false, hasRefreshToken: false };
     }
 };
 

@@ -53,7 +53,7 @@ export const AdminLayout: React.FC<AdminLayoutProps> = ({
                     </button>
                 </div>
 
-                <div className="flex-1 flex flex-col p-6 lg:p-12 overflow-hidden">
+                <div className="flex-1 flex flex-col p-4 lg:p-12 overflow-y-auto">
                     <div className="max-w-6xl w-full mx-auto flex flex-col h-full">
                         {/* Page Header */}
                         <div className="mb-8 animate-in fade-in slide-in-from-top-4 duration-700 shrink-0">

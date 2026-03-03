@@ -78,7 +78,7 @@ export const ScheduleTable: React.FC<ScheduleTableProps> = ({
   const showDynamic = colMapping && colMapping.length > 0;
 
   return (
-    <div className="lg:h-full min-h-0 lg:overflow-auto bg-white">
+    <div className="lg:h-full min-w-full min-h-0 lg:overflow-auto bg-white">
       {/* 📱 MOBILE VIEW: PREMIUM CARDS */}
       <div className="block lg:hidden p-3 space-y-4 pb-20">
         {/* Sticky Mobile Selection bar - Premium Glassmorphism */}
@@ -172,26 +172,60 @@ export const ScheduleTable: React.FC<ScheduleTableProps> = ({
       </div>
 
       {/* 🖥️ DESKTOP VIEW: CLEAN TABLE */}
-      <table className="hidden lg:table w-full text-left border-collapse relative">
+      <table className="hidden lg:table w-full min-w-full border-collapse relative table-fixed">
         <thead className="sticky top-0 z-20">
           <tr className="bg-slate-50 border-b border-slate-200">
-            <th className="pl-6 py-4 w-16 sticky top-0">
-              <div className="flex items-center justify-center">
-                <input
-                  ref={headerCheckboxRef}
-                  type="checkbox"
-                  className="w-5 h-5 rounded border-slate-300 text-[#F27024] focus:ring-[#F27024] cursor-pointer"
-                  checked={selectedIds.size === displayRows.length && displayRows.length > 0}
-                  onChange={onToggleAll}
-                />
+            {/* Left Spacer */}
+            <th className="w-auto"></th>
+
+            <th className="px-4 py-4 w-[110px] sticky top-0 bg-slate-50/90 backdrop-blur-md z-[25] border-b border-slate-200">
+              <div 
+                className="flex items-center justify-center gap-2.5 group cursor-pointer select-none"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onToggleAll();
+                }}
+              >
+                <div className={`
+                  w-9 h-9 rounded-xl flex items-center justify-center transition-all duration-500
+                  ${selectedIds.size === displayRows.length && displayRows.length > 0
+                    ? 'bg-[#F27024] shadow-lg shadow-orange-200' 
+                    : 'bg-white border-2 border-slate-100 group-hover:border-[#F27024]/30 shadow-sm'}
+                `}>
+                  {selectedIds.size === displayRows.length && displayRows.length > 0 ? (
+                    <svg className="w-5 h-5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3.5" d="M5 13l4 4L19 7" />
+                    </svg>
+                  ) : (
+                    <div className="w-1.5 h-1.5 rounded-full bg-slate-300 group-hover:bg-[#F27024] group-hover:scale-125 transition-all"></div>
+                  )}
+                </div>
+                <div className="flex flex-col items-start">
+                  <span className="text-[10px] font-black text-slate-800 leading-none tracking-tighter uppercase">Chọn</span>
+                  <span className={`text-[9px] font-black mt-0.5 transition-colors ${selectedIds.size > 0 ? 'text-[#F27024]' : 'text-slate-400'}`}>
+                    {selectedIds.size}/{displayRows.length}
+                  </span>
+                </div>
               </div>
             </th>
 
-            {(isPreview ? (showDynamic ? colMapping.map(c => c.name) : ['Ngày', 'Thời gian', 'Tiêu đề', 'Phòng']) : [columnLabels?.date || 'Ngày', columnLabels?.time || 'Thời gian', columnLabels?.task || 'Nhiệm vụ', columnLabels?.person || 'Đối tượng', columnLabels?.location || 'Phòng']).map((h, i) => (
-              <th key={i} className="px-6 py-4 text-[11px] font-bold text-slate-500 uppercase tracking-widest">
+            {/* Header Columns */}
+            {(isPreview 
+              ? (showDynamic ? colMapping.map(m => m.name) : ['Ngày', 'Thời gian', 'Tiêu đề', 'Phòng']) 
+              : [columnLabels?.date || 'Ngày', columnLabels?.time || 'Thời gian', columnLabels?.task || 'Nhiệm vụ', columnLabels?.person || 'Giảng viên', columnLabels?.location || 'Phòng']
+            ).map((h, i) => (
+              <th 
+                key={i} 
+                className={`px-8 py-5 text-[10px] sm:text-[11px] font-black text-slate-400 uppercase tracking-widest border-b border-slate-100 text-center ${
+                  i === 2 ? 'w-[320px]' : i === 3 ? 'w-[280px]' : 'w-[200px]'
+                }`}
+              >
                 {h}
               </th>
             ))}
+
+            {/* Right Spacer */}
+            <th className="w-auto"></th>
           </tr>
         </thead>
         <tbody>
@@ -203,11 +237,14 @@ export const ScheduleTable: React.FC<ScheduleTableProps> = ({
                 selectedIds.has(row.id) ? 'bg-orange-50/50' : 'bg-white'
               }`}
             >
-              <td className="pl-6 py-4 border-b border-slate-100">
+              {/* Left Spacer Cell */}
+              <td className="w-auto border-b border-slate-100"></td>
+
+              <td className="px-8 py-5 border-b border-slate-100">
                 <div className="flex items-center justify-center">
                   <input
                     type="checkbox"
-                    className="w-4 h-4 rounded border-slate-300 text-[#F27024] focus:ring-[#F27024] pointer-events-none"
+                    className="w-5 h-5 rounded border-slate-300 text-[#F27024] focus:ring-[#F27024] pointer-events-none transition-all"
                     checked={selectedIds.has(row.id)}
                     readOnly
                   />
@@ -216,26 +253,26 @@ export const ScheduleTable: React.FC<ScheduleTableProps> = ({
 
               {!isPreview ? (
                 <>
-                  <td className="px-6 py-4 border-b border-slate-100">
+                  <td className="px-8 py-5 border-b border-slate-100 text-center">
                     <span className="text-[13px] text-slate-600 font-bold uppercase tracking-tight">{row.dateRaw || row.date}</span>
                   </td>
-                  <td className="px-6 py-4 border-b border-slate-100">
+                  <td className="px-8 py-5 border-b border-slate-100 text-center">
                     <span className="text-[13px] text-slate-900 font-bold tracking-widest whitespace-nowrap">
                       {row.timeRaw || (row.startTime?.includes('T') ? (row.startTime.split('T')[1].substring(0, 5) + ' - ' + row.endTime.split('T')[1].substring(0, 5)) : '')}
                     </span>
                   </td>
-                  <td className="px-6 py-4 border-b border-slate-100">
+                  <td className="px-8 py-5 border-b border-slate-100 text-center">
                     {columnLabels?.task && (columnLabels.task.toLowerCase().includes('reviewer') || columnLabels.task.toLowerCase().includes('gv')) ? (
-                      <div className="flex flex-col">
+                      <div className="flex flex-col items-center">
                         <span className="text-[13px] font-bold text-slate-600 uppercase tracking-tight">{row.task || '-'}</span>
                         <span className="text-[9px] font-bold text-[#F27024] mt-1 uppercase tracking-tighter">REVIEW 1</span>
                       </div>
                     ) : (
-                      <span className="text-[13px] text-slate-600 font-bold uppercase tracking-tight block max-w-xs truncate">{row.task || '-'}</span>
+                      <span className="text-[13px] text-slate-600 font-bold uppercase tracking-tight block max-w-xs mx-auto truncate">{row.task || '-'}</span>
                     )}
                   </td>
-                  <td className="px-6 py-4 border-b border-slate-100">
-                    <div className="flex flex-col">
+                  <td className="px-8 py-5 border-b border-slate-100 text-center">
+                    <div className="flex flex-col items-center">
                       <span className="text-sm font-bold text-slate-900 uppercase tracking-tight">{row.personRaw || row.person}</span>
                       {row.groupName &&
                         row.groupName.toLowerCase().trim() !== (row.personRaw || row.person).toLowerCase().trim() && (
@@ -243,55 +280,62 @@ export const ScheduleTable: React.FC<ScheduleTableProps> = ({
                         )}
                     </div>
                   </td>
-                  <td className="px-6 py-4 border-b border-slate-100">
+                  <td className="px-8 py-5 border-b border-slate-100 text-center">
                     <span className="text-[13px] font-bold text-slate-600 uppercase tracking-tight">{row.locationRaw || row.location}</span>
                   </td>
                 </>
               ) : showDynamic ? (
-                colMapping.map((col, i) => {
-                  let cellValue = '-';
-                  if (row.rawRow) {
-                    let targetIndex = col.index;
-                    if (row.isGrouped && row.blockStart !== undefined && row.blockEnd !== undefined && col.name) {
-                       const lowName = col.name.trim().toLowerCase();
-                       const blockMatch = allHeaders.findIndex((h, idx) => 
-                         idx >= row.blockStart! && idx <= row.blockEnd! && h.trim().toLowerCase() === lowName
-                       );
-                       if (blockMatch !== -1) targetIndex = blockMatch;
-                       else if (row.reviewAreaStart !== undefined && targetIndex >= row.reviewAreaStart) targetIndex = -1;
+                <>
+                  {colMapping.map((col, i) => {
+                    let cellValue = '-';
+                    if (row.rawRow) {
+                      let targetIndex = col.index;
+                      if (row.isGrouped && row.blockStart !== undefined && row.blockEnd !== undefined && col.name) {
+                         const lowName = col.name.trim().toLowerCase();
+                         const blockMatch = allHeaders.findIndex((h, idx) => 
+                           idx >= row.blockStart! && idx <= row.blockEnd! && h.trim().toLowerCase() === lowName
+                         );
+                         if (blockMatch !== -1) targetIndex = blockMatch;
+                         else if (row.reviewAreaStart !== undefined && targetIndex >= row.reviewAreaStart) targetIndex = -1;
+                      }
+                      cellValue = targetIndex !== -1 ? (row.rawRow[targetIndex] || '') : '-';
                     }
-                    cellValue = targetIndex !== -1 ? (row.rawRow[targetIndex] || '') : '-';
-                  }
 
-                  return (
-                    <td key={i} className="px-6 py-4 border-b border-slate-100">
-                      <span className="text-[13px] text-slate-800 font-bold">{cellValue}</span>
-                    </td>
-                  );
-                })
+                    return (
+                      <td key={i} className={`px-8 py-5 border-b border-slate-100 text-center ${
+                        i === 0 ? 'w-[200px]' : i === 1 ? 'w-[200px]' : i === 2 ? 'w-[320px]' : i === 3 ? 'w-[280px]' : 'w-[200px]'
+                      }`}>
+                        <span className="text-[13px] text-slate-800 font-bold">{cellValue}</span>
+                      </td>
+                    );
+                  })}
+                </>
               ) : (
                 <>
-                  <td className="px-6 py-4 border-b border-slate-100">
+                  <td className="px-8 py-5 border-b border-slate-100 text-center">
                     <span className="text-[13px] text-slate-600 font-bold uppercase tracking-tight">{row.dateRaw || row.date}</span>
                   </td>
-                  <td className="px-6 py-4 border-b border-slate-100">
+                  <td className="px-8 py-5 border-b border-slate-100 text-center">
                     <span className="text-[13px] text-slate-900 font-bold tracking-widest whitespace-nowrap">
                       {row.timeRaw || (row.startTime?.includes('T') ? (row.startTime.split('T')[1].substring(0, 5) + ' - ' + row.endTime.split('T')[1].substring(0, 5)) : '')}
                     </span>
                   </td>
-                  <td className="px-6 py-4 border-b border-slate-100">
-                    <div className="flex flex-col">
-                       <span className="text-sm font-bold text-slate-900 uppercase tracking-tight">{row.personRaw || row.person}</span>
-                       {row.groupName && (
-                          <span className="text-[9px] font-bold text-[#F27024] mt-1 uppercase tracking-tighter">{row.groupName}</span>
-                       )}
+                  <td className="px-8 py-5 border-b border-slate-100 text-center">
+                    <div className="flex flex-col items-center">
+                      <span className="text-sm font-bold text-slate-900 uppercase tracking-tight">{row.personRaw || row.person}</span>
+                      {row.groupName && (
+                        <span className="text-[9px] font-bold text-[#F27024] mt-1 uppercase tracking-tighter">{row.groupName}</span>
+                      )}
                     </div>
                   </td>
-                  <td className="px-6 py-4 border-b border-slate-100">
-                     <span className="text-[13px] font-bold text-slate-600 uppercase tracking-tight">{row.locationRaw || row.location}</span>
+                  <td className="px-8 py-5 border-b border-slate-100 text-center">
+                    <span className="text-[13px] font-bold text-slate-600 uppercase tracking-tight">{row.locationRaw || row.location}</span>
                   </td>
                 </>
               )}
+
+              {/* Right Spacer Cell */}
+              <td className="w-auto border-b border-slate-100"></td>
             </tr>
           ))}
         </tbody>

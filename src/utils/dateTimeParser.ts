@@ -41,70 +41,65 @@ export function parseDate(value: any, preferredFormat?: DateFormat): Date | null
 
   const strValue = String(value).trim();
 
+  // 🛡️ CHIẾN LƯỢC ƯU TIÊN: THÁNG TRƯỚC NGÀY SAU (MM/dd/yyyy)
+  // Theo yêu cầu: Ưu tiên MM/dd/yyyy, nếu số đầu > 12 mới hiểu là dd/MM/yyyy
+  const vnMatch = strValue.match(/^(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{4})/);
+  if (vnMatch) {
+    const first = parseInt(vnMatch[1], 10);
+    const second = parseInt(vnMatch[2], 10);
+    const y = parseInt(vnMatch[3], 10);
+    
+    let m, d;
+    if (first > 12) {
+      d = first;
+      m = second - 1;
+    } else {
+      m = first - 1;
+      d = second;
+    }
+    
+    const parsed = new Date(y, m, d);
+    if (isValid(parsed)) {
+      console.log(`📅 parseDate (US Priority): "${strValue}" → ${parsed.toLocaleDateString('vi-VN')}`);
+      return parsed;
+    }
+  }
+
   // Tránh parse các số đơn lẻ (thường là slot) thành ngày tháng
   if (strValue.length <= 2 && !isNaN(parseInt(strValue))) {
     return null;
   }
 
-  // Excel serial date number (ví dụ: 44927 = 2023-01-01)
-  // ⚠️ Excel dates are stored as days since 1900-01-01
+  // Excel serial date number
   if (typeof value === 'number' && value > 40000 && value < 60000) {
-    // Excel epoch: 1900-01-01 (but Excel incorrectly treats 1900 as a leap year)
-    // Unix epoch offset: 25569 days (from 1900-01-01 to 1970-01-01)
     const unixTimestamp = (value - 25569) * 86400 * 1000;
     const date = new Date(unixTimestamp);
-
-    // ✅ Use UTC methods to avoid timezone offset issues
     const year = date.getUTCFullYear();
     const month = date.getUTCMonth();
     const day = date.getUTCDate();
-    const correctedDate = new Date(year, month, day); // Create date in local timezone
-
-    console.log(`📅 parseDate: Excel serial ${value} → ${correctedDate.toISOString()} (${correctedDate.toLocaleDateString('vi-VN')})`);
+    const correctedDate = new Date(year, month, day);
     if (isValid(correctedDate)) return correctedDate;
   }
 
-  // ✅ Các format date thường gặp - ƯU TIÊN FORMAT VIỆT NAM
+  // ✅ Các format fallback
   let dateFormats: string[] = [
-    'dd/MM/yyyy',    // 27/01/2026 (VN) - Ưu tiên cao nhất
-    'd/M/yyyy',      // 27/1/2026 (VN) - Ưu tiên cao
-    'dd-MM-yyyy',    // 27-01-2026 (VN)
-    'd-M-yyyy',      // 27-1-2026 (VN)
-    'MM/dd/yyyy',    // 01/27/2026 (US)
-    'M/d/yyyy',      // 1/27/2026 (US)
     'yyyy-MM-dd',    // 2026-01-27 (ISO)
-    'yyyy/MM/dd',    // 2026/01/27 (ISO)
-    'M-d-yyyy',      // 1-27-2026 (US)
+    'dd/MM/yyyy',    
+    'MM/dd/yyyy',    
+    'yyyy/MM/dd',
   ];
-
-  // Nếu người dùng có format ưu tiên, đẩy lên đầu danh sách
-  if (preferredFormat) {
-    dateFormats = [preferredFormat, ...dateFormats.filter(f => f !== preferredFormat)];
-    console.log(`📅 parseDate: Using preferred format "${preferredFormat}" first`);
-  }
 
   for (const fmt of dateFormats) {
     try {
-      // 🚨 QUAN TRỌNG: parse của date-fns có thể trả về ngày "hợp lệ" nhưng sai logic 
-      // nếu format không khớp tuyệt đối (ví dụ parse 1/27/2026 với dd/MM/yyyy)
       const parsed = parse(strValue, fmt, new Date());
-      
       if (isValid(parsed)) {
-        // Kiểm tra xem chuỗi đã parse có format lại giống y hệt chuỗi gốc không
-        // Điều này đảm bảo format khớp hoàn toàn chứ không phải parse "gượng ép"
         const formattedBack = format(parsed, fmt);
-        
-        // So sánh chuỗi (lược bỏ các số 0 ở đầu để linh hoạt 1/1 vs 01/01)
         const normalize = (s: string) => s.replace(/\/0/g, '/').replace(/-0/g, '-').replace(/^0/, '');
-        
         if (normalize(formattedBack) === normalize(strValue)) {
-          console.log(`📅 parseDate: "${strValue}" MATCHED format "${fmt}" → ${parsed.toISOString()}`);
           return parsed;
         }
       }
-    } catch {
-      continue;
-    }
+    } catch { continue; }
   }
 
   // Thử parse ISO string

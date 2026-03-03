@@ -265,7 +265,7 @@ export const ScheduleTable: React.FC<ScheduleTableProps> = ({
                     {columnLabels?.task && (columnLabels.task.toLowerCase().includes('reviewer') || columnLabels.task.toLowerCase().includes('gv')) ? (
                       <div className="flex flex-col items-center">
                         <span className="text-[13px] font-bold text-slate-600 uppercase tracking-tight">{row.task || '-'}</span>
-                        <span className="text-[9px] font-bold text-[#F27024] mt-1 uppercase tracking-tighter">REVIEW 1</span>
+                        <span className="text-[9px] font-bold text-[#F27024] mt-1 uppercase tracking-tighter">{row.groupName}</span>
                       </div>
                     ) : (
                       <span className="text-[13px] text-slate-600 font-bold uppercase tracking-tight block max-w-xs mx-auto truncate">{row.task || '-'}</span>

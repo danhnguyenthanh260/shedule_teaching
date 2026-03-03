@@ -424,7 +424,7 @@ export class GoogleSyncService {
 
       finalBlockStarts.forEach((blockStart, blockIdx) => {
         const blockEnd = isTripleMode 
-          ? (blockIdx < 2 ? blockStartIndices[blockIdx + 1] - 1 : detailHeaders.length - 1)
+          ? (blockIdx < blockStartIndices.length - 1 ? blockStartIndices[blockIdx + 1] - 1 : detailHeaders.length - 1)
           : detailHeaders.length - 1;
 
         let rDate = getMappedValue('date', row, blockStart, blockEnd) || lastDate;

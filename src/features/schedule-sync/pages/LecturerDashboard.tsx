@@ -657,7 +657,7 @@ export const LecturerDashboard: React.FC = () => {
           const parts = str.split(' ');
           const handle = parts[parts.length - 1].toLowerCase().replace(/[^a-z0-9]/g, '');
           if (!handle) return null;
-          return `${handle}@gmail.com`;
+          return `${handle}@fpt.edu.vn`;
         };
 
         if (r.rawRow && Array.isArray(r.rawRow)) {
@@ -753,6 +753,7 @@ export const LecturerDashboard: React.FC = () => {
       }
 
       setConfirmNotifyData(lecturersData);
+      setIsNotifying(false);
     } catch (err: any) {
       setSyncError(err.message || "Lỗi khi thiết lập thông báo.");
       setIsNotifying(false);
@@ -760,6 +761,7 @@ export const LecturerDashboard: React.FC = () => {
   };
 
   const executeNotifyLecturers = async (lecturersData: any[]) => {
+    setIsNotifying(true);
     setConfirmNotifyData(null);
     setSyncError(null);
     setSyncResult(null);
@@ -1208,16 +1210,27 @@ export const LecturerDashboard: React.FC = () => {
                     </button>
 
                     {confirmNotifyData && (
-                      <div className="absolute bottom-full right-0 mb-4 w-72 xs:w-80 bg-white border border-slate-100 p-6 rounded-[1.5rem] shadow-[0_20px_50px_rgba(0,0,0,0.15)] z-[100] animate-in fade-in slide-in-from-bottom-2 duration-300">
+                      <div className="absolute bottom-full right-1/2 translate-x-1/2 lg:right-0 lg:translate-x-0 mb-4 w-72 xs:w-80 bg-white border border-slate-100 p-6 rounded-[1.5rem] shadow-[0_20px_50px_rgba(0,0,0,0.15)] z-[100] animate-in fade-in slide-in-from-bottom-2 duration-300">
                         <div className="text-center mb-4">
-                          <h4 className="text-sm font-black text-blue-600 uppercase tracking-tight mb-1">Gửi thư thông báo?</h4>
-                          <p className="text-[10px] text-slate-400 font-bold leading-relaxed uppercase tracking-wider">Tới {confirmNotifyData.length} GV.</p>
+                          <h4 className="text-[13px] font-black text-blue-600 uppercase tracking-tight mb-1">GỬI THÔNG BÁO?</h4>
+                          <p className="text-[10px] text-slate-400 font-extrabold uppercase tracking-widest leading-relaxed">Sẽ gửi lời mời Calendar tới {confirmNotifyData.length} giảng viên.</p>
                         </div>
                         <div className="flex gap-2">
-                          <button onClick={() => executeNotifyLecturers(confirmNotifyData)} className="flex-[1.5] py-2.5 bg-blue-600 text-white rounded-xl font-black text-[10px] uppercase tracking-widest active:scale-95 shadow-lg">Gửi</button>
-                          <button onClick={() => { setConfirmNotifyData(null); setIsNotifying(false); }} className="flex-1 py-2.5 bg-slate-50 text-slate-400 rounded-xl font-black text-[10px] uppercase tracking-widest outline-none">Hủy</button>
+                          <button 
+                            onClick={() => executeNotifyLecturers(confirmNotifyData)} 
+                            className="flex-[1.5] py-3 bg-blue-600 text-white rounded-xl font-black text-[10px] uppercase tracking-widest active:scale-95 shadow-lg shadow-blue-100 transition-all"
+                          >
+                            XÁC NHẬN
+                          </button>
+                          <button 
+                            onClick={() => { setConfirmNotifyData(null); setIsNotifying(false); }} 
+                            className="flex-1 py-3 bg-slate-50 text-slate-400 rounded-xl font-black text-[10px] uppercase tracking-widest outline-none hover:bg-slate-100 transition-all"
+                          >
+                            HỦY
+                          </button>
                         </div>
-                        <div className="absolute top-full right-8 w-4 h-4 bg-white rotate-45 -translate-y-2 border-r border-b border-slate-100"></div>
+                        {/* Triangle arrow */}
+                        <div className="absolute top-full left-1/2 -translate-x-1/2 lg:left-auto lg:right-8 w-4 h-4 bg-white rotate-45 -translate-y-2 border-r border-b border-slate-100"></div>
                       </div>
                     )}
                   </div>

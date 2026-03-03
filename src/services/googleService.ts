@@ -87,6 +87,8 @@ export function inferSchema(headers: string[], sampleRows: string[][]): Inferred
     }
     // Ưu tiên Phòng
     else if (head.includes("phòng") || head.includes("location") || head.includes("room") || head.includes("địa điểm")) mapping.location = i;
+    // Ưu tiên Email
+    else if (head.includes("email") || head.includes("thư điện tử") || head.includes("mail")) mapping.email = i;
   });
 
   // Kiểm tra dữ liệu mẫu để cải thiện độ chính xác
@@ -123,7 +125,7 @@ export class GoogleSyncService {
   }
 
   extractSheetId(url: string): string | null {
-    const match = url.match(/\/spreadsheets\/d\/([a-zA-Z0-9-_]+)/);
+    const match = url.match(/\/d\/([a-zA-Z0-9-_]+)/);
     return match ? match[1] : null;
   }
 
@@ -277,6 +279,7 @@ export class GoogleSyncService {
           person: person,
           task: (mapping.task !== undefined && mapping.task < row.length ? (row[mapping.task] || "Nhiệm vụ") : "Nhiệm vụ").toString().trim(),
           location: lastLocation || "Chưa xác định",
+          email: (mapping.email !== undefined && mapping.email < row.length ? row[mapping.email] : "").toString().trim(),
           sheetType: 'council',
           resources: [
             person ? `teacher:${person}` : null,
@@ -327,8 +330,8 @@ export class GoogleSyncService {
       
       const J_INDEX = 9;
 
-      // Strategy 1: Identical Triplets (e.g., "Code", "Code", "Code")
-      const tripleLabels = Object.keys(labels).filter(l => labels[l].filter(idx => idx >= J_INDEX).length === 3);
+      // Strategy 1: Identical Sets (e.g., "Code" appearing 3+ times)
+      const tripleLabels = Object.keys(labels).filter(l => labels[l].filter(idx => idx >= J_INDEX).length >= 3);
       if (tripleLabels.length > 0) {
         const bestLabel = tripleLabels.find(l => l.includes('code') || l.includes('reviewer') || l.includes('gv') || l.includes('slot')) || tripleLabels[0];
         return labels[bestLabel].filter(idx => idx >= J_INDEX).sort((a, b) => a - b);
@@ -357,7 +360,7 @@ export class GoogleSyncService {
       return low.includes('reviewer 1') || low.includes('gv 1') || (low.includes('reviewer') && low.includes('1'));
     });
     const suspectReview = !!isDataMau || ((tab || "").toLowerCase().includes("review") && hasReviewerHeaders);
-    const isTripleMode = suspectReview && blockStartIndices.length === 3;
+    const isTripleMode = suspectReview && blockStartIndices.length >= 3;
     const finalBlockStarts = isTripleMode ? blockStartIndices : [0]; 
 
     // 🔍 SILENT CODE DETECTION: Find the column index for "Code/ID" automatically
@@ -435,7 +438,8 @@ export class GoogleSyncService {
           time: ['slot', 'giờ', 'time'],
           location: ['phòng', 'room', 'location'],
           person: ['reviewer', 'giảng viên', 'cán bộ', 'họ tên'],
-          task: ['nhiệm vụ', 'đề tài', 'task', 'tiêu đề']
+          task: ['nhiệm vụ', 'đề tài', 'task', 'tiêu đề'],
+          email: ['email', 'thư điện tử', 'mail']
         };
 
         const autoInferList = (field: keyof ColumnMapping) => {
@@ -481,6 +485,7 @@ export class GoogleSyncService {
             endTime: end,
             task: rTask || baseTask,
             location: rLocation || "Chưa xác định",
+            email: getMappedValue('email', row, blockStart, blockEnd) || autoInferList('email')[0] || "",
             code: rCode,
             sheetType: 'review',
             resources: [

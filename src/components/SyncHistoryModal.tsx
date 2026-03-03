@@ -44,7 +44,7 @@ const SyncHistoryModal: React.FC<Props> = ({ isOpen, onClose, userId, refreshTri
                     <div>
                         <h2 className="text-xl font-bold text-slate-900">Lịch sử Import</h2>
                         <p className="text-xs text-slate-500 mt-1 font-medium">
-                            Xem tất cả lần đồng bộ lịch của bạn
+                            Xem tất cả lần đồng bộ lên Google Calendar của bạn
                         </p>
                     </div>
                     <div className="flex items-center gap-2">
@@ -119,7 +119,7 @@ const SyncHistoryModal: React.FC<Props> = ({ isOpen, onClose, userId, refreshTri
                                                                     <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                                                         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M5 13l4 4L19 7" />
                                                                     </svg>
-                                                                    Đồng bộ thành công
+                                                                    Đồng bộ lên Google Calendar thành công
                                                                 </span>
                                                             ) : (
                                                                 <span className="flex items-center gap-1 text-[10px] font-bold text-rose-600 uppercase tracking-wider">

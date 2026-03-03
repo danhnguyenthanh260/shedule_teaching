@@ -25,6 +25,17 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       payload = typeof req.body === 'string' ? JSON.parse(req.body) : req.body;
     }
 
+    // 🔍 Early URL Validation to skip 500s
+    if (payload.action === 'readSheet' || payload.action === 'getTabNames' || payload.action === 'setupNotifications') {
+      const idMatch = String(payload.url || "").match(/\/d\/([a-zA-Z0-9-_]+)/);
+      if (!idMatch) {
+        return res.status(400).json({ 
+          error: "URL Google Sheet không hợp lệ", 
+          detail: "Vui lòng kiểm tra lại đường dẫn Sheet (Cần có chứa /d/ID/)" 
+        });
+      }
+    }
+
     // 🔒 FORCE INJECT SECRET FROM ENVIRONMENT
     const finalPayload = {
       ...payload,

@@ -78,201 +78,173 @@ export const ScheduleTable: React.FC<ScheduleTableProps> = ({
   const showDynamic = colMapping && colMapping.length > 0;
 
   return (
-    <div className="h-full overflow-auto scrollbar-thin scrollbar-thumb-slate-200 scrollbar-track-transparent rounded-t-3xl border-t border-slate-100 bg-[#F8FAFC]">
+    <div className="lg:h-full min-h-0 lg:overflow-auto bg-white">
       {/* 📱 MOBILE VIEW: PREMIUM CARDS */}
-      <div className="block lg:hidden p-4 space-y-4">
-        {/* Glassmorphism Mobile Header */}
-        <div className="sticky top-0 z-30 -mt-4 -mx-4 mb-4 px-6 py-4 glass-panel flex items-center justify-between shadow-sm">
-           <div className="flex items-center gap-3">
-             <div className="relative flex items-center justify-center">
-                <input
-                    ref={headerCheckboxRef}
-                    type="checkbox"
-                    className="w-6 h-6 rounded-lg border-slate-300 text-[#F27024] focus:ring-[#F27024] cursor-pointer transition-all"
-                    checked={selectedIds.size === displayRows.length && displayRows.length > 0}
-                    onChange={onToggleAll}
-                />
-             </div>
-             <div className="flex flex-col">
-                <span className="text-[10px] font-black text-slate-800 uppercase tracking-widest leading-none">Chọn tất cả</span>
-                <span className="text-[10px] font-bold text-slate-400 uppercase tracking-tighter mt-1">{displayRows.length} sự kiện</span>
-             </div>
+      <div className="block lg:hidden p-3 space-y-4 pb-20">
+        {/* Sticky Mobile Selection bar - Premium Glassmorphism */}
+        <div className="sticky top-2 z-[60] -mx-1 mb-6 px-5 py-3.5 bg-white/80 backdrop-blur-md rounded-2xl border border-slate-200/60 flex items-center justify-between shadow-[0_8px_30px_rgb(0,0,0,0.04)]">
+           <div className="flex items-center gap-4">
+              <input
+                  ref={headerCheckboxRef}
+                  type="checkbox"
+                  className="w-5 h-5 rounded-lg border-slate-300 text-indigo-600 focus:ring-indigo-500 transition-all cursor-pointer"
+                  checked={selectedIds.size === displayRows.length && displayRows.length > 0}
+                  onChange={onToggleAll}
+              />
+              <div className="flex flex-col">
+                <span className="text-[11px] font-black text-slate-800 uppercase tracking-widest leading-none mb-0.5">Tất cả {displayRows.length}</span>
+                <span className="text-[9px] font-bold text-slate-400 uppercase tracking-tighter">Chọn nhanh toàn bộ danh sách</span>
+              </div>
            </div>
-           <div className="flex items-center gap-2 bg-orange-50 px-3 py-1.5 rounded-2xl border border-orange-100/50">
-              <div className="w-1.5 h-1.5 rounded-full bg-[#F27024] animate-pulse" />
-              <span className="text-[10px] font-black text-[#F27024] uppercase tracking-tighter">Đã chọn: {selectedIds.size}</span>
+           <div className="bg-indigo-600 px-4 py-1.5 rounded-full shadow-lg shadow-indigo-100 flex items-center gap-1.5">
+              <span className="text-[10px] font-black text-white uppercase tracking-wider">{selectedIds.size}</span>
            </div>
         </div>
 
-        {displayRows.map((row) => (
-          <div 
-            key={row.id}
-            onClick={() => onToggleSelect(row.id)}
-            className={`premium-card relative p-5 rounded-[2rem] border transition-all active:scale-[0.97] cursor-pointer ${
-              selectedIds.has(row.id)
-                ? 'premium-card-selected border-orange-200 ring-2 ring-orange-100/50'
-                : 'border-white shadow-sm hover:shadow-md'
-            }`}
-          >
-            {/* Quick Select Checkbox (Top-Right Gradient) */}
-            <div className={`absolute top-0 right-0 p-4 transition-opacity ${selectedIds.has(row.id) ? 'opacity-100' : 'opacity-40'}`}>
-               <div className={`w-6 h-6 rounded-full flex items-center justify-center border-2 ${selectedIds.has(row.id) ? 'bg-[#F27024] border-[#F27024]' : 'border-slate-200'}`}>
-                  {selectedIds.has(row.id) && (
-                    <svg className="w-4 h-4 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M5 13l4 4L19 7" /></svg>
-                  )}
-               </div>
+        {displayRows.length === 0 ? (
+          <div className="py-20 text-center flex flex-col items-center">
+            <div className="w-16 h-16 bg-slate-50 rounded-full flex items-center justify-center mb-4">
+              <svg className="w-8 h-8 text-slate-200" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path d="M4 6h16M4 12h16m-7 6h7" strokeWidth="2.5" strokeLinecap="round"/></svg>
             </div>
-
-            <div className="flex flex-col gap-4">
-              {/* Card Meta: Date & Room */}
-              <div className="flex items-center gap-4">
-                <div className="flex items-center gap-2.5 bg-slate-50 px-3 py-2 rounded-2xl border border-slate-100/50">
-                   <div className="w-6 h-6 rounded-lg fpt-gradient flex items-center justify-center text-white shadow-sm">
-                      <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" /></svg>
-                   </div>
-                   <span className="text-[11px] font-black text-slate-700 uppercase tracking-tight">{row.dateRaw || row.date}</span>
-                </div>
-
-                <div className="flex items-center gap-2 px-3 py-2 bg-blue-50/50 rounded-2xl border border-blue-100/30">
-                   <svg className="w-3.5 h-3.5 text-blue-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M17.657 16.657L13.414 20.9a1.998 1.998 0 01-2.827 0l-4.244-4.243a8 8 0 1111.314 0z" /><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M15 11a3 3 0 11-6 0 3 3 0 016 0z" /></svg>
-                   <span className="text-[10px] font-black text-blue-600/80 uppercase tracking-widest">{row.locationRaw || row.location || 'PHÒNG TRỐNG'}</span>
-                </div>
-              </div>
-
-              {/* Main Info Section */}
-              <div className="space-y-1.5 py-1">
-                 <h4 className="text-[17px] font-black text-slate-800 leading-tight tracking-tight">
-                   {row.personRaw || row.person}
-                 </h4>
-                 <div className="flex items-center gap-2 overflow-hidden">
-                    <p className="text-xs text-slate-400 font-bold uppercase tracking-wide truncate">
-                      {row.task || 'Nhiệm vụ chưa xác định'}
-                    </p>
-                    {row.groupName && row.groupName !== row.person && (
-                       <span className="shrink-0 px-2 py-0.5 bg-orange-100 text-[#F27024] text-[8px] font-black rounded-lg uppercase tracking-tighter">
-                         {row.groupName}
-                       </span>
-                    )}
-                 </div>
-              </div>
-
-              {/* Footer Divider & Time */}
-              <div className="pt-4 border-t border-slate-100 flex items-center justify-between">
-                 <div className="flex items-center gap-2">
-                    <div className="w-2 h-2 rounded-full bg-emerald-500 shadow-[0_0_8px_rgba(16,185,129,0.5)]" />
-                    <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Thời gian dự kiến</span>
-                 </div>
-                 <div className="px-4 py-2 bg-slate-900 text-white rounded-[1.25rem] text-[12px] font-black shadow-lg shadow-slate-200">
-                    {row.timeRaw || (row.startTime?.includes('T') ? (row.startTime.split('T')[1].substring(0, 5) + ' - ' + row.endTime.split('T')[1].substring(0, 5)) : 'N/A')}
-                 </div>
-              </div>
-            </div>
+            <p className="text-xs font-black text-slate-300 uppercase tracking-[0.2em]">Trống dữ liệu</p>
           </div>
-        ))}
-        {/* Bottom padding for better scroll feel */}
-        <div className="h-10" />
+        ) : (
+          displayRows.map((row) => (
+            <div 
+              key={row.id}
+              onClick={() => onToggleSelect(row.id)}
+              className={`p-5 rounded-[2rem] border-2 transition-all duration-300 cursor-pointer relative overflow-hidden group ${
+                selectedIds.has(row.id)
+                  ? 'bg-indigo-50/30 border-indigo-600 shadow-xl shadow-indigo-100/50'
+                  : 'bg-white border-slate-100 shadow-[0_4px_20px_rgba(0,0,0,0.02)] active:border-slate-300'
+              }`}
+            >
+              <div className="flex flex-col gap-4 relative z-10">
+                <div className="flex items-center justify-between">
+                  <div className="flex flex-col gap-1">
+                    <span className="text-[10px] font-black text-indigo-500 uppercase tracking-[0.2em] leading-none">
+                      {row.dateRaw || row.date}
+                    </span>
+                    <div className="flex items-center gap-1.5 text-slate-400">
+                      <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M17.657 16.657L13.414 20.9a1.998 1.998 0 01-2.827 0l-4.244-4.243a8 8 0 1111.314 0z" /><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M15 11a3 3 0 11-6 0 3 3 0 016 0z" /></svg>
+                      <span className="text-[10px] font-bold uppercase tracking-widest">{row.locationRaw || row.location || 'N/A'}</span>
+                    </div>
+                  </div>
+                  
+                  <div className={`w-6 h-6 rounded-full border-2 flex items-center justify-center transition-all duration-500 ${
+                    selectedIds.has(row.id) ? 'bg-indigo-600 border-indigo-600 scale-110' : 'bg-slate-50 border-slate-200'
+                  }`}>
+                    {selectedIds.has(row.id) && (
+                      <svg className="w-3.5 h-3.5 text-white animate-in zoom-in duration-300" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M5 13l4 4L19 7" /></svg>
+                    )}
+                  </div>
+                </div>
+
+                <div className="space-y-2">
+                   <h4 className="text-[15px] font-black text-slate-900 leading-snug uppercase tracking-tight">
+                     {row.task || '-'}
+                   </h4>
+                   <div className="flex flex-wrap items-center gap-2">
+                     <span className="text-[11px] font-black text-slate-600 bg-slate-100/50 px-3 py-1 rounded-xl uppercase tracking-tighter">
+                       {row.personRaw || row.person}
+                     </span>
+                     {row.groupName && (
+                        <span className="text-[9px] font-black text-white bg-[#F27024] px-2.5 py-0.5 rounded-lg uppercase tracking-widest">
+                          {row.groupName}
+                        </span>
+                     )}
+                   </div>
+                </div>
+
+                <div className="pt-4 mt-2 border-t border-slate-100/50 flex items-center justify-between">
+                   <span className="text-[10px] font-black text-slate-300 uppercase tracking-widest leading-none">THỜI GIAN ĐỒNG BỘ</span>
+                   <div className="px-4 py-1.5 bg-slate-900 text-white rounded-xl text-[11px] font-black tracking-[0.15em] shadow-lg shadow-slate-200">
+                      {row.timeRaw || (row.startTime?.includes('T') ? (row.startTime.split('T')[1].substring(0, 5) + ' - ' + row.endTime.split('T')[1].substring(0, 5)) : 'N/A')}
+                   </div>
+                </div>
+              </div>
+              
+              {/* Subtle background decoration */}
+              <div className="absolute top-0 right-0 -translate-y-1/2 translate-x-1/2 w-32 h-32 bg-indigo-50/20 rounded-full blur-3xl group-hover:bg-indigo-100/30 transition-all duration-700"></div>
+            </div>
+          ))
+        )}
       </div>
 
-      {/* 🖥️ DESKTOP VIEW: TABLE */}
+      {/* 🖥️ DESKTOP VIEW: CLEAN TABLE */}
       <table className="hidden lg:table w-full text-left border-collapse relative">
-        <thead className="sticky top-0 z-20 bg-white shadow-sm">
-          <tr className="border-b border-slate-200">
-            <th className="pl-8 py-4 w-12 bg-slate-50 sticky top-0 border-b border-slate-200">
-              <div className="flex items-center justify-center w-8 h-8">
+        <thead className="sticky top-0 z-20">
+          <tr className="bg-slate-50 border-b border-slate-200">
+            <th className="pl-6 py-4 w-16 sticky top-0">
+              <div className="flex items-center justify-center">
                 <input
                   ref={headerCheckboxRef}
                   type="checkbox"
-                  className="w-5 h-5 rounded-lg border-slate-300 text-[#F27024] focus:ring-[#F27024] cursor-pointer disabled:bg-slate-100 disabled:border-slate-300 transition-all shadow-sm"
+                  className="w-5 h-5 rounded border-slate-300 text-[#F27024] focus:ring-[#F27024] cursor-pointer"
                   checked={selectedIds.size === displayRows.length && displayRows.length > 0}
                   onChange={onToggleAll}
-                  disabled={false}
                 />
               </div>
             </th>
 
-            {!isPreview ? (
-              <>
-                <th className="px-4 py-4 text-[11px] font-bold text-black uppercase tracking-wider bg-slate-50 text-center sticky top-0 min-w-[120px] border-r border-slate-100/50">{columnLabels?.date || 'Ngày'}</th>
-                <th className="px-4 py-4 text-[11px] font-bold text-black uppercase tracking-wider bg-slate-50 text-center sticky top-0 min-w-[140px] border-r border-slate-100/50">{columnLabels?.time || 'Thời gian'}</th>
-                <th className="px-4 py-4 text-[11px] font-bold text-black uppercase tracking-wider bg-slate-50 text-center sticky top-0 min-w-[200px] border-r border-slate-100/50">{columnLabels?.task || 'Tiêu đề / Reviewer 1'}</th>
-                <th className="px-4 py-4 text-[11px] font-bold text-black uppercase tracking-wider bg-slate-50 text-center sticky top-0 min-w-[200px] border-r border-slate-100/50">{columnLabels?.person || 'Họ tên / Reviewer 2'}</th>
-                <th className="px-4 py-4 text-[11px] font-bold text-black uppercase tracking-wider bg-slate-50 text-center sticky top-0 min-w-[150px]">{columnLabels?.location || 'Phòng'}</th>
-              </>
-            ) : showDynamic ? (
-              colMapping.map((col, i) => (
-                <th key={i} className={`px-4 py-4 text-[10px] font-bold text-black uppercase tracking-wider bg-slate-50 text-center sticky top-0 border-r border-slate-100/50 min-w-[120px]`}>
-                  {col.name}
-                </th>
-              ))
-            ) : (
-              <>
-                <th className="px-4 py-4 text-[11px] font-bold text-black uppercase tracking-wider bg-slate-50 text-center sticky top-0 min-w-[120px] border-r border-slate-100/50">{columnLabels?.date || 'Ngày'}</th>
-                <th className="px-4 py-4 text-[11px] font-bold text-black uppercase tracking-wider bg-slate-50 text-center sticky top-0 min-w-[140px] border-r border-slate-100/50">{columnLabels?.time || 'Thời gian'}</th>
-                <th className="px-4 py-4 text-[11px] font-bold text-black uppercase tracking-wider bg-slate-50 text-center pl-6 sticky top-0 min-w-[300px] border-r border-slate-100/50">{columnLabels?.person || 'Tên đề tài'}</th>
-                <th className="px-4 py-4 text-[11px] font-bold text-black uppercase tracking-wider bg-slate-50 text-center sticky top-0 min-w-[150px]">{columnLabels?.location || 'Phòng'}</th>
-              </>
-            )}
+            {(isPreview ? (showDynamic ? colMapping.map(c => c.name) : ['Ngày', 'Thời gian', 'Tiêu đề', 'Phòng']) : [columnLabels?.date || 'Ngày', columnLabels?.time || 'Thời gian', columnLabels?.task || 'Nhiệm vụ', columnLabels?.person || 'Đối tượng', columnLabels?.location || 'Phòng']).map((h, i) => (
+              <th key={i} className="px-6 py-4 text-[11px] font-bold text-slate-500 uppercase tracking-widest">
+                {h}
+              </th>
+            ))}
           </tr>
         </thead>
-        <tbody className="divide-y divide-slate-100 bg-white">
+        <tbody>
           {displayRows.map((row) => (
             <tr
               key={row.id}
-              className={`hover:bg-orange-50/40 transition-all group relative border-l-4 ${
-                selectedIds.has(row.id) 
-                  ? 'bg-orange-100/40 border-l-[#F27024] shadow-[inset_0_1px_0_0_rgba(242,112,36,0.1),inset_0_-1px_0_0_rgba(242,112,36,0.1)]' 
-                  : 'border-l-transparent'
+              onClick={() => onToggleSelect(row.id)}
+              className={`hover:bg-slate-50 cursor-pointer transition-colors ${
+                selectedIds.has(row.id) ? 'bg-orange-50/50' : 'bg-white'
               }`}
             >
-              <td className="pl-8 py-4 relative">
-                {/* Selection Accent */}
-                <label className="flex items-center justify-center w-8 h-8 cursor-pointer pointer-events-auto relative z-10 hover:bg-orange-100/50 rounded-xl transition-all">
+              <td className="pl-6 py-4 border-b border-slate-100">
+                <div className="flex items-center justify-center">
                   <input
                     type="checkbox"
-                    className="w-5 h-5 rounded-lg border-slate-300 text-[#F27024] focus:ring-[#F27024] cursor-pointer transition-all hover:scale-110 shadow-sm disabled:bg-slate-100 disabled:border-slate-200"
+                    className="w-4 h-4 rounded border-slate-300 text-[#F27024] focus:ring-[#F27024] pointer-events-none"
                     checked={selectedIds.has(row.id)}
-                    onChange={(e) => {
-                      e.stopPropagation();
-                      onToggleSelect(row.id);
-                    }}
-                    disabled={false}
+                    readOnly
                   />
-                </label>
+                </div>
               </td>
 
               {!isPreview ? (
                 <>
-                  <td className="px-4 py-4 text-center border-r border-slate-50/50">
-                    <span className="text-sm font-medium text-slate-700 block">{row.dateRaw || row.date}</span>
+                  <td className="px-6 py-4 border-b border-slate-100">
+                    <span className="text-[13px] text-slate-600 font-bold uppercase tracking-tight">{row.dateRaw || row.date}</span>
                   </td>
-                  <td className="px-4 py-4 border-r border-slate-50/50">
-                    <div className="flex flex-col items-center">
-                      <div className="flex items-center justify-center gap-1.5">
-                        <div className="w-1.5 h-1.5 rounded-full bg-[#F27024] animate-pulse" />
-                        <span className="text-sm font-medium text-slate-800 tracking-tighter">
-                          {row.timeRaw || (row.startTime?.includes('T') ? (row.startTime.split('T')[1].substring(0, 5) + ' - ' + row.endTime.split('T')[1].substring(0, 5)) : '')}
-                        </span>
+                  <td className="px-6 py-4 border-b border-slate-100">
+                    <span className="text-[13px] text-slate-900 font-bold tracking-widest whitespace-nowrap">
+                      {row.timeRaw || (row.startTime?.includes('T') ? (row.startTime.split('T')[1].substring(0, 5) + ' - ' + row.endTime.split('T')[1].substring(0, 5)) : '')}
+                    </span>
+                  </td>
+                  <td className="px-6 py-4 border-b border-slate-100">
+                    {columnLabels?.task && (columnLabels.task.toLowerCase().includes('reviewer') || columnLabels.task.toLowerCase().includes('gv')) ? (
+                      <div className="flex flex-col">
+                        <span className="text-[13px] font-bold text-slate-600 uppercase tracking-tight">{row.task || '-'}</span>
+                        <span className="text-[9px] font-bold text-[#F27024] mt-1 uppercase tracking-tighter">REVIEW 1</span>
                       </div>
-                    </div>
+                    ) : (
+                      <span className="text-[13px] text-slate-600 font-bold uppercase tracking-tight block max-w-xs truncate">{row.task || '-'}</span>
+                    )}
                   </td>
-                  <td className="px-4 py-4 text-center border-r border-slate-50/50">
-                    <span className="text-sm font-medium text-slate-700 block">{row.task || '-'}</span>
-                  </td>
-                  <td className="px-4 py-4 text-center border-r border-slate-50/50">
-                    <div className="flex flex-col items-center">
-                      <span className="text-sm font-medium text-slate-900 tracking-tight">{row.personRaw || row.person}</span>
+                  <td className="px-6 py-4 border-b border-slate-100">
+                    <div className="flex flex-col">
+                      <span className="text-sm font-bold text-slate-900 uppercase tracking-tight">{row.personRaw || row.person}</span>
                       {row.groupName &&
                         row.groupName.toLowerCase().trim() !== (row.personRaw || row.person).toLowerCase().trim() && (
-                          <span className="inline-flex items-center px-2 py-0.5 rounded-md text-[9px] font-medium bg-slate-100 text-slate-600 border border-slate-200 w-fit mt-1.5 uppercase tracking-wider shadow-sm">
-                            {row.groupName}
-                          </span>
+                          <span className="text-[9px] font-bold text-[#F27024] mt-1 uppercase tracking-tighter">{row.groupName}</span>
                         )}
                     </div>
                   </td>
-                  <td className="px-4 py-4 text-center">
-                    <div className="flex items-center justify-center gap-2">
-                      <span className="text-sm font-medium text-slate-500">{row.locationRaw || row.location}</span>
-                    </div>
+                  <td className="px-6 py-4 border-b border-slate-100">
+                    <span className="text-[13px] font-bold text-slate-600 uppercase tracking-tight">{row.locationRaw || row.location}</span>
                   </td>
                 </>
               ) : showDynamic ? (
@@ -280,61 +252,43 @@ export const ScheduleTable: React.FC<ScheduleTableProps> = ({
                   let cellValue = '-';
                   if (row.rawRow) {
                     let targetIndex = col.index;
-                    // If row has block boundaries AND this is a Review/DataMau sheet
                     if (row.isGrouped && row.blockStart !== undefined && row.blockEnd !== undefined && col.name) {
                        const lowName = col.name.trim().toLowerCase();
                        const blockMatch = allHeaders.findIndex((h, idx) => 
                          idx >= row.blockStart! && idx <= row.blockEnd! && h.trim().toLowerCase() === lowName
                        );
-                       
-                       if (blockMatch !== -1) {
-                         targetIndex = blockMatch;
-                       } else if (row.reviewAreaStart !== undefined && targetIndex >= row.reviewAreaStart) {
-                         // 🚨 Block match failed AND original mapping is in review area -> Clear the data
-                         targetIndex = -1;
-                       }
+                       if (blockMatch !== -1) targetIndex = blockMatch;
+                       else if (row.reviewAreaStart !== undefined && targetIndex >= row.reviewAreaStart) targetIndex = -1;
                     }
                     cellValue = targetIndex !== -1 ? (row.rawRow[targetIndex] || '') : '-';
                   }
 
                   return (
-                    <td key={i} className="px-4 py-4 text-center border-r border-slate-50/50">
-                      <span className="text-xs font-medium text-slate-700 block">
-                        {cellValue}
-                      </span>
+                    <td key={i} className="px-6 py-4 border-b border-slate-100">
+                      <span className="text-[13px] text-slate-800 font-bold">{cellValue}</span>
                     </td>
                   );
                 })
               ) : (
                 <>
-                  <td className="px-4 py-4 text-center border-r border-slate-50/50">
-                    <span className="text-sm font-medium text-slate-700 block">{row.dateRaw || row.date}</span>
+                  <td className="px-6 py-4 border-b border-slate-100">
+                    <span className="text-[13px] text-slate-600 font-bold uppercase tracking-tight">{row.dateRaw || row.date}</span>
                   </td>
-                  <td className="px-4 py-4 border-r border-slate-50/50">
-                    <div className="flex flex-col items-center">
-                      <div className="flex items-center justify-center gap-1.5">
-                        <div className="w-1.5 h-1.5 rounded-full bg-[#F27024] animate-pulse" />
-                        <span className="text-sm font-medium text-slate-800 tracking-tighter">
-                          {row.timeRaw || (row.startTime?.includes('T') ? (row.startTime.split('T')[1].substring(0, 5) + ' - ' + row.endTime.split('T')[1].substring(0, 5)) : '')}
-                        </span>
-                      </div>
+                  <td className="px-6 py-4 border-b border-slate-100">
+                    <span className="text-[13px] text-slate-900 font-bold tracking-widest whitespace-nowrap">
+                      {row.timeRaw || (row.startTime?.includes('T') ? (row.startTime.split('T')[1].substring(0, 5) + ' - ' + row.endTime.split('T')[1].substring(0, 5)) : '')}
+                    </span>
+                  </td>
+                  <td className="px-6 py-4 border-b border-slate-100">
+                    <div className="flex flex-col">
+                       <span className="text-sm font-bold text-slate-900 uppercase tracking-tight">{row.personRaw || row.person}</span>
+                       {row.groupName && (
+                          <span className="text-[9px] font-bold text-[#F27024] mt-1 uppercase tracking-tighter">{row.groupName}</span>
+                       )}
                     </div>
                   </td>
-                  <td className="px-4 py-4 text-center border-r border-slate-50/50">
-                    <div className="flex flex-col items-center">
-                      <span className="text-sm font-medium text-slate-900 tracking-tight">{row.personRaw || row.person}</span>
-                      {row.groupName &&
-                        row.groupName.toLowerCase().trim() !== (row.personRaw || row.person).toLowerCase().trim() && (
-                          <span className="inline-flex items-center px-2 py-0.5 rounded-md text-[9px] font-medium bg-slate-100 text-slate-600 border border-slate-200 w-fit mt-1.5 uppercase tracking-wider shadow-sm">
-                            {row.groupName}
-                          </span>
-                        )}
-                    </div>
-                  </td>
-                  <td className="px-4 py-4 text-center">
-                    <div className="flex items-center justify-center gap-2">
-                      <span className="text-sm font-medium text-slate-500">{row.locationRaw || row.location}</span>
-                    </div>
+                  <td className="px-6 py-4 border-b border-slate-100">
+                     <span className="text-[13px] font-bold text-slate-600 uppercase tracking-tight">{row.locationRaw || row.location}</span>
                   </td>
                 </>
               )}

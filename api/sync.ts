@@ -127,7 +127,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     }
 
     // 3. Process Events or Clear Action
-    const { events, calendarName, action, googleAccessToken, force, conflictMode } = req.body;
+    const { events, calendarName, action, googleAccessToken, force, conflictMode, skipCleanup, sheetType } = req.body;
 
     // Handle CLEAR action specifically
     if (action === 'clearCalendar') {
@@ -136,15 +136,20 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         .where("syncedBy", "==", userEmail)
         .get();
       
-      const clearBatch = db.batch();
-      slotsToClear.docs.forEach(doc => clearBatch.delete(doc.ref));
-      await clearBatch.commit();
+      const docs = slotsToClear.docs;
+      for (let i = 0; i < docs.length; i += 500) {
+        const clearBatch = db.batch();
+        const chunk = docs.slice(i, i + 500);
+        chunk.forEach(doc => clearBatch.delete(doc.ref));
+        await clearBatch.commit();
+      }
       console.log(`✅ Cleared ${slotsToClear.size} slots from Firestore`);
 
       return forwardToGAS(res, {
         action: 'clearCalendar',
         calendarName: calendarName || "Schedule Teaching",
-        googleAccessToken: googleAccessToken
+        googleAccessToken: googleAccessToken,
+        sheetType: sheetType // 🚀 NEW: Cần thiết để xóa đúng phân loại (Council vs Review)
       });
     }
 
@@ -178,11 +183,14 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
     eventsToSync.forEach(ev => {
       const slotRef = db.collection("slots").doc();
+      const startTime = new Date(ev.start);
+      const endTime = new Date(ev.end);
+
       batch.set(slotRef, {
         title: ev.title,
-        startTime: admin.firestore.Timestamp.fromDate(new Date(ev.start)),
-        endTime: admin.firestore.Timestamp.fromDate(new Date(ev.end)),
-        resources: ev.resources,
+        startTime: admin.firestore.Timestamp.fromDate(isNaN(startTime.getTime()) ? new Date() : startTime),
+        endTime: admin.firestore.Timestamp.fromDate(isNaN(endTime.getTime()) ? new Date() : endTime),
+        resources: ev.resources || [],
         status: "pending",
         syncedBy: userEmail,
         createdAt: admin.firestore.FieldValue.serverTimestamp()
@@ -197,10 +205,14 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       force: !!force,
       conflictMode: conflictMode || null,
       googleAccessToken: googleAccessToken,
-      events: eventsToSync.map(ev => ({
-        ...ev,
-        description: (ev.description || "") + "\nResources: " + ev.resources.join(", ")
-      }))
+      skipCleanup: !!skipCleanup, // 🚀 NEW
+      events: eventsToSync.map(ev => {
+        const resList = Array.isArray(ev.resources) ? ev.resources : [];
+        return {
+          ...ev,
+          description: (ev.description || "") + (resList.length > 0 ? "\nResources: " + resList.join(", ") : "")
+        };
+      })
     });
 
   } catch (err: any) {

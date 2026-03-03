@@ -36,7 +36,7 @@ export const generateHeaderOptions = (
     const isStaticArea = i < 9;
     const countInReview = labelCountsInReview.get(label) || 0;
     const isMapped = Object.values(currentMapping).includes(i);
-    const isFirstTriplet = i === firstOccurrencesInReview.get(label) && countInReview === 3;
+    const isFirstTriplet = i === firstOccurrencesInReview.get(label) && countInReview >= 3;
 
     if (isReviewMode) {
       if (isUserAdmin) {

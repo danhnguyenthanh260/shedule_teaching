@@ -209,7 +209,7 @@ export const StatusAlerts: React.FC<StatusAlertsProps> = ({ error, result, onClo
                 }`} />
                 {result.type === 'clear' 
                   ? 'Đã xóa tất cả sự kiện' 
-                  : (result.created > 0 ? 'Đồng bộ thành công' : ((result.updated ?? 0) > 0 ? 'Đã thay thế thành công' : (result.failed > 0 ? 'Đồng bộ thất bại' : 'Lịch đã có sẵn')))}
+                  : (result.created > 0 ? 'Đồng bộ lên Google Calendar thành công' : ((result.updated ?? 0) > 0 ? 'Đã thay thế thành công' : (result.failed > 0 ? 'Đồng bộ lên Google Calendar thất bại' : 'Lịch đã có sẵn')))}
               </h4>
               
               {result.type === 'sync' ? (

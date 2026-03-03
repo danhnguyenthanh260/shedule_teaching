@@ -40,6 +40,8 @@ interface FirebaseContextType {
   reauthorizeGoogle: () => Promise<string | null>;
   isWhitelistLoading: boolean;
   isAdmin: boolean;
+  isLecturer: boolean;
+  isAuthorized: boolean;
 }
 
 const FirebaseContext = createContext<FirebaseContextType | undefined>(undefined);
@@ -50,8 +52,11 @@ export const FirebaseProvider: React.FC<{ children: React.ReactNode }> = ({ chil
   const [error, setError] = useState<string | null>(null);
   const [accessToken, setAccessToken] = useState<string | null>(null);
   const [isAdmin, setIsAdmin] = useState(false);
+  const [isLecturer, setIsLecturer] = useState(false);
+  const [isAuthorized, setIsAuthorized] = useState(false);
   const [isWhitelistLoading, setIsWhitelistLoading] = useState(true);
   const [adminList, setAdminList] = useState<string[]>([]);
+  const [lecturerList, setLecturerList] = useState<string[]>([]);
 
   // Check for redirect result on mount
   useEffect(() => {
@@ -128,40 +133,82 @@ export const FirebaseProvider: React.FC<{ children: React.ReactNode }> = ({ chil
 
   // Handle Admin Whitelist
   useEffect(() => {
+    logInfo('Initializing Whitelist Watcher...');
+    
+    // 🛡️ FAIL-SAFE: If Firebase doesn't respond in 5 seconds, unblock the UI
+    const timeoutId = setTimeout(() => {
+      if (isWhitelistLoading) {
+        console.warn('⚠️ Whitelist loading timed out after 5s. Unblocking UI as fall-safe.');
+        setIsWhitelistLoading(false);
+      }
+    }, 5000);
+
     const adminWhitelistRef = ref(database, 'admin_whitelist');
     const unsubscribe = onValue(adminWhitelistRef, (snapshot) => {
+      console.log('📡 Whitelist data received:', snapshot.val());
       const data = snapshot.val();
       let list: string[] = [];
       if (data && typeof data === 'object') {
         list = Object.values(data).map((v: any) => String(v).trim().toLowerCase());
       }
       setAdminList(list);
-      setDynamicAdmins(list); // 🔄 Sync with static helper for Legacy/Layout components
+      setDynamicAdmins(list);
       setIsWhitelistLoading(false);
-      logInfo('Admin Whitelist Synced in Context');
+      clearTimeout(timeoutId);
+      logInfo('Admin Whitelist Synced');
     }, (error) => {
-      console.error('Whitelist fetch error:', error);
-      setIsWhitelistLoading(false); // Unblock UI even if fetch fails
+      console.error('❌ Whitelist fetch error:', error);
+      setIsWhitelistLoading(false);
+      clearTimeout(timeoutId);
+    });
+
+    return () => {
+      unsubscribe();
+      clearTimeout(timeoutId);
+    };
+  }, []);
+
+  // Handle Lecturer Whitelist
+  useEffect(() => {
+    const lecturerWhitelistRef = ref(database, 'lecturer_whitelist');
+    const unsubscribe = onValue(lecturerWhitelistRef, (snapshot) => {
+      const data = snapshot.val();
+      let list: string[] = [];
+      if (data && typeof data === 'object') {
+        list = Object.values(data).map((v: any) => String(v.email).trim().toLowerCase());
+      }
+      setLecturerList(list);
+      logInfo('Lecturer Whitelist Synced in Context');
+    }, (error) => {
+      console.error('Lecturer whitelist fetch error:', error);
     });
 
     return () => unsubscribe();
   }, []);
 
-  // Update isAdmin whenever user or adminList changes
+  // Update isAdmin, isLecturer, isAuthorized whenever user, adminList or lecturerList changes
   useEffect(() => {
     if (!user) {
       setIsAdmin(false);
+      setIsLecturer(false);
+      setIsAuthorized(false);
       return;
     }
     const email = user.email?.trim().toLowerCase();
     if (!email) {
       setIsAdmin(false);
+      setIsLecturer(false);
+      setIsAuthorized(false);
       return;
     }
 
-    const isAuthorized = email === SUPER_ADMIN_EMAIL.toLowerCase() || adminList.includes(email);
-    setIsAdmin(isAuthorized);
-  }, [user, adminList]);
+    const checkAdmin = email === SUPER_ADMIN_EMAIL.toLowerCase() || adminList.includes(email);
+    const checkLecturer = lecturerList.includes(email);
+    
+    setIsAdmin(checkAdmin);
+    setIsLecturer(checkLecturer);
+    setIsAuthorized(checkAdmin || checkLecturer);
+  }, [user, adminList, lecturerList]);
   /* 
   // PREVIOUS REDIRECT LOGIC (Commented out per User Request):
   const loginWithGoogle = async () => {
@@ -327,6 +374,8 @@ export const FirebaseProvider: React.FC<{ children: React.ReactNode }> = ({ chil
         getAccessToken,
         isWhitelistLoading,
         isAdmin,
+        isLecturer,
+        isAuthorized,
       }}
     >
       {children}

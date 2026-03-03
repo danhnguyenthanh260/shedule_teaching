@@ -10,6 +10,7 @@ export interface SemesterConfig {
     tabName?: string;
     mapping?: import('../types').ColumnMapping;
     createdAt?: number;
+    notifEnabled?: boolean;
 }
 
 export const configService = {

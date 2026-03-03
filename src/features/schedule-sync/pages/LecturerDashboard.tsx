@@ -978,14 +978,14 @@ export const LecturerDashboard: React.FC = () => {
       )}
 
       {/* 🚀 FIRST ROW: Step 1 & Step 2 */}
-      <div id="config-area" className={`${isConfigExpanded ? 'flex' : 'hidden'} lg:flex flex-col lg:flex-row gap-3 mb-2 lg:mb-3 lg:min-h-0 flex-none`}>
+      <div id="config-area" className={`${isConfigExpanded ? 'flex flex-col lg:flex-row' : 'hidden'} gap-3 mb-2 lg:mb-3 lg:min-h-0 flex-none`}>
         {/* Step 1: Import */}
-        <section className="lg:w-[40%] card-clean p-2 md:p-3 flex flex-col">
-          <div className="flex items-center gap-3 mb-1.5 px-1">
-            <div className="step-number w-6 h-6 text-[10px]">1</div>
+        <section className="lg:w-[35%] card-clean p-1.5 md:p-2 flex flex-col">
+          <div className="flex items-center gap-2 mb-1 px-1">
+            <div className="step-number w-5 h-5 text-[9px]">1</div>
             <div>
-              <h2 className="text-xs font-bold text-slate-800 uppercase tracking-widest leading-none">Dữ liệu</h2>
-              <p className="text-[9px] text-slate-400 font-bold mt-0.5 uppercase">CHỌN HỌC KỲ</p>
+              <h2 className="text-[10px] font-bold text-slate-800 uppercase tracking-widest leading-none">Dữ liệu</h2>
+              <p className="text-[8px] text-slate-400 font-bold mt-0.5 uppercase">CHỌN HỌC KỲ</p>
             </div>
           </div>
           <div className="flex-1">
@@ -1023,12 +1023,12 @@ export const LecturerDashboard: React.FC = () => {
         </section>
 
         {allRows.length > 0 && isAdmin(firebaseUser?.email) ? (
-          <section className="lg:w-[60%] card-clean p-2 md:p-3 flex flex-col">
-            <div className="flex items-center gap-3 mb-1.5 px-1">
-              <div className="step-number w-6 h-6 text-[10px]">2</div>
+          <section className="lg:w-[65%] card-clean p-1.5 md:p-2 flex flex-col">
+            <div className="flex items-center gap-2 mb-1 px-1">
+              <div className="step-number w-5 h-5 text-[9px]">2</div>
               <div>
-                <h2 className="text-xs font-bold text-slate-800 uppercase tracking-widest leading-none">Cấu hình</h2>
-                <p className="text-[9px] text-slate-400 font-bold mt-0.5 uppercase">ÁNH XẠ CỘT</p>
+                <h2 className="text-[10px] font-bold text-slate-800 uppercase tracking-widest leading-none">Cấu hình</h2>
+                <p className="text-[8px] text-slate-400 font-bold mt-0.5 uppercase">ÁNH XẠ CỘT</p>
               </div>
             </div>
             <div className="flex-1">
@@ -1065,28 +1065,25 @@ export const LecturerDashboard: React.FC = () => {
           </section>
         ) : allRows.length > 0 ? (
           /* Lecturers Manual Section */
-          <div className="lg:w-[60%] card-clean p-2 md:p-3 flex flex-col">
-            <div className="flex items-center gap-3 mb-1.5 px-1">
-              <div className="step-number w-6 h-6 text-[10px]">2</div>
+          <div className="lg:w-[65%] card-clean p-1.5 md:p-2 flex flex-col">
+            <div className="flex items-center gap-2 mb-1 px-1">
+              <div className="step-number w-5 h-5 text-[9px]">2</div>
               <div>
-                <h2 className="text-xs font-bold text-slate-800 uppercase tracking-widest leading-none">Hướng dẫn</h2>
-                <p className="text-[9px] text-slate-400 font-bold mt-0.5 uppercase">CÁCH ĐỒNG BỘ</p>
+                <h2 className="text-[10px] font-bold text-slate-800 uppercase tracking-widest leading-none">Hướng dẫn</h2>
+                <p className="text-[8px] text-slate-400 font-bold mt-0.5 uppercase">CÁCH ĐỒNG BỘ</p>
               </div>
             </div>
             
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 flex-1">
+            <div className="grid grid-cols-2 lg:grid-cols-4 gap-1.5 flex-1">
               {[
-                { id: '1', title: 'Lọc lịch cá nhân', desc: 'Sử dụng ô tìm kiếm để lọc đích danh tên của bạn trong danh sách.' },
-                { id: '2', title: 'Chọn sự kiện', desc: 'Đánh dấu vào các sự kiện bạn muốn đồng bộ lên Calendar cá nhân.' },
-                { id: '3', title: 'Kiểm tra xung đột', desc: 'Hệ thống sẽ báo nếu thời gian trùng với lịch hiện có của bạn.' },
-                { id: '4', title: 'Hoàn tất', desc: 'Nhấn nút Đồng bộ và chờ trong vài giây để lịch được cập nhật.' },
+                { id: '1', title: 'Lọc lịch cá nhân', desc: 'Dùng ô tìm kiếm để lọc tên của bạn.' },
+                { id: '2', title: 'Chọn sự kiện', desc: 'Đánh dấu sự kiện cần đồng bộ lên Calendar.' },
+                { id: '3', title: 'Kiểm tra xung đột', desc: 'Hệ thống báo nếu trùng lịch hiện có.' },
+                { id: '4', title: 'Hoàn tất', desc: 'Nhấn Đồng bộ và chờ lịch cập nhật.' },
               ].map((item) => (
-                <div key={item.id} className="p-2 px-3 rounded-xl bg-slate-50 border border-slate-100 hover:border-orange-200 transition-all group">
-                  <div className="flex items-center gap-2 mb-1">
-                    <span className="text-[10px] font-bold text-orange-500 uppercase tracking-widest">Tiêu điểm {item.id}</span>
-                  </div>
-                  <h4 className="text-[11px] font-bold text-slate-800 mb-0.5 uppercase tracking-tight">{item.title}</h4>
-                  <p className="text-[10px] text-slate-500 font-medium leading-tight">
+                <div key={item.id} className="p-1 px-2 rounded-lg bg-white/50 border border-slate-100/10 hover:border-orange-200 transition-all group flex flex-col justify-center">
+                  <h4 className="text-[9px] font-bold text-slate-800 leading-tight uppercase tracking-tight">{item.title}</h4>
+                  <p className="text-[8px] text-slate-400 font-medium leading-tight mt-0.5 line-clamp-2">
                     {item.desc}
                   </p>
                 </div>
@@ -1210,7 +1207,7 @@ export const LecturerDashboard: React.FC = () => {
                     </button>
 
                     {confirmNotifyData && (
-                      <div className="absolute bottom-full right-1/2 translate-x-1/2 lg:right-0 lg:translate-x-0 mb-4 w-72 xs:w-80 bg-white border border-slate-100 p-6 rounded-[1.5rem] shadow-[0_20px_50px_rgba(0,0,0,0.15)] z-[100] animate-in fade-in slide-in-from-bottom-2 duration-300">
+                      <div className="absolute top-full right-1/2 translate-x-1/2 lg:right-0 lg:translate-x-0 mt-4 w-72 xs:w-80 bg-white border border-slate-100 p-6 rounded-[1.5rem] shadow-[0_20px_50px_rgba(0,0,0,0.15)] z-[100] animate-in fade-in slide-in-from-top-2 duration-300">
                         <div className="text-center mb-4">
                           <h4 className="text-[13px] font-black text-blue-600 uppercase tracking-tight mb-1">GỬI THÔNG BÁO?</h4>
                           <p className="text-[10px] text-slate-400 font-extrabold uppercase tracking-widest leading-relaxed">Sẽ gửi lời mời Calendar tới {confirmNotifyData.length} giảng viên.</p>
@@ -1229,8 +1226,8 @@ export const LecturerDashboard: React.FC = () => {
                             HỦY
                           </button>
                         </div>
-                        {/* Triangle arrow */}
-                        <div className="absolute top-full left-1/2 -translate-x-1/2 lg:left-auto lg:right-8 w-4 h-4 bg-white rotate-45 -translate-y-2 border-r border-b border-slate-100"></div>
+                        {/* Triangle arrow - Updated to point up */}
+                        <div className="absolute bottom-full left-1/2 -translate-x-1/2 lg:left-auto lg:right-8 w-4 h-4 bg-white rotate-45 translate-y-2 border-l border-t border-slate-100"></div>
                       </div>
                     )}
                   </div>
@@ -1252,7 +1249,7 @@ export const LecturerDashboard: React.FC = () => {
                     </button>
 
                     {isConfirmingGlobalRecall && (
-                      <div className="absolute bottom-full right-0 mb-4 w-72 xs:w-80 bg-white border border-slate-100 p-6 rounded-[1.5rem] shadow-[0_20px_50px_rgba(0,0,0,0.15)] z-[100] animate-in fade-in slide-in-from-bottom-2 duration-300">
+                      <div className="absolute top-full right-0 mt-4 w-72 xs:w-80 bg-white border border-slate-100 p-6 rounded-[1.5rem] shadow-[0_20px_50px_rgba(0,0,0,0.15)] z-[100] animate-in fade-in slide-in-from-top-2 duration-300">
                         <div className="text-center mb-4">
                           <h4 className="text-sm font-black text-rose-600 uppercase tracking-tight mb-1">XÓA TẤT CẢ?</h4>
                           <p className="text-[10px] text-slate-400 font-bold uppercase tracking-widest text-center">HÀNH ĐỘNG KHÔNG THỂ KHÔI PHỤC.</p>
@@ -1261,7 +1258,7 @@ export const LecturerDashboard: React.FC = () => {
                           <button onClick={async () => { setIsConfirmingGlobalRecall(false); await globalRecallEvents(); }} className="flex-[1.5] py-2.5 bg-rose-600 text-white rounded-xl font-black text-[10px] uppercase tracking-widest active:scale-95">Xác nhận</button>
                           <button onClick={() => setIsConfirmingGlobalRecall(false)} className="flex-1 py-2.5 bg-slate-50 text-slate-400 rounded-xl font-black text-[10px] uppercase tracking-widest outline-none">Hủy</button>
                         </div>
-                        <div className="absolute top-full right-8 w-4 h-4 bg-white rotate-45 -translate-y-2 border-r border-b border-slate-100"></div>
+                        <div className="absolute bottom-full right-8 w-4 h-4 bg-white rotate-45 translate-y-2 border-l border-t border-slate-100"></div>
                       </div>
                     )}
                   </div>
@@ -1293,7 +1290,7 @@ export const LecturerDashboard: React.FC = () => {
                 </button>
 
                 {isConfirmingClear && (
-                  <div className="absolute bottom-full right-0 mb-4 w-72 xs:w-80 bg-white border border-slate-100 p-6 rounded-[1.5rem] shadow-[0_20px_50px_rgba(0,0,0,0.15)] z-[100] animate-in fade-in slide-in-from-bottom-2 duration-300">
+                  <div className="absolute top-full right-0 mt-4 w-72 xs:w-80 bg-white border border-slate-100 p-6 rounded-[1.5rem] shadow-[0_20px_50px_rgba(0,0,0,0.15)] z-[100] animate-in fade-in slide-in-from-top-2 duration-300">
                     <div className="text-center mb-4">
                       <h4 className="text-sm font-black text-rose-600 uppercase tracking-tight mb-1">DỌN DẸP LỊCH</h4>
                       <p className="text-[10px] text-slate-400 font-bold uppercase tracking-widest">Sẽ xóa sạch sự kiện cũ của bạn.</p>
@@ -1302,7 +1299,7 @@ export const LecturerDashboard: React.FC = () => {
                       <button onClick={async () => { setIsConfirmingClear(false); const currentType = effectiveIsReview ? 'review' : 'council'; await clearAppEvents(currentType); }} className="flex-[1.5] py-2.5 bg-rose-600 text-white rounded-xl font-black text-[10px] uppercase tracking-widest active:scale-95">Xác nhận</button>
                       <button onClick={() => setIsConfirmingClear(false)} className="flex-1 py-2.5 bg-slate-50 text-slate-400 rounded-xl font-black text-[10px] uppercase tracking-widest outline-none">Hủy</button>
                     </div>
-                    <div className="absolute top-full right-8 w-4 h-4 bg-white rotate-45 -translate-y-2 border-r border-b border-slate-100"></div>
+                    <div className="absolute bottom-full right-8 w-4 h-4 bg-white rotate-45 translate-y-2 border-l border-t border-slate-100"></div>
                   </div>
                 )}
               </div>

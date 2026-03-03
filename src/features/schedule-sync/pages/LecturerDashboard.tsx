@@ -140,6 +140,14 @@ export const LecturerDashboard: React.FC = () => {
     fetchConfigs();
   }, []); // 👈 Fixed: Only fetch once on mount
 
+  // 🚀 Boss Requested: Reset search when semester changes
+  useEffect(() => {
+    if (selectedSemesterId) {
+      setPersonFilter('');
+      setSelectedIds(new Set());
+    }
+  }, [selectedSemesterId]);
+
   // Confirmation State
   const [isConfirmingClear, setIsConfirmingClear] = useState(false);
   const [isConfirmingGlobalRecall, setIsConfirmingGlobalRecall] = useState(false);
@@ -1115,42 +1123,44 @@ export const LecturerDashboard: React.FC = () => {
             </div>
 
             {/* Search + Action Buttons Group */}
-            <div className="flex flex-col sm:flex-row items-center gap-2 flex-1 min-w-0 w-full">
-              <div className="relative flex-1 group w-full">
-                <div className="absolute left-3 top-2.5 text-slate-300 pointer-events-none">
-                  <svg className="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
-                    <circle cx="11" cy="11" r="8"></circle>
-                    <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
-                  </svg>
+            <div className="flex flex-col lg:flex-row items-center gap-2 flex-1 min-w-0 w-full">
+              <div className="flex items-center gap-2 w-full flex-1">
+                <div className="relative flex-1 group">
+                  <div className="absolute left-3 top-2.5 text-slate-300 pointer-events-none">
+                    <svg className="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
+                      <circle cx="11" cy="11" r="8"></circle>
+                      <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
+                    </svg>
+                  </div>
+                  <input
+                    type="text"
+                    placeholder="Tìm giảng viên..."
+                    className="w-full pl-9 pr-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs text-slate-700 placeholder:text-slate-400 focus:ring-2 focus:ring-[#F27024]/10 focus:border-[#F27024] outline-none transition-all"
+                    value={personFilter}
+                    onChange={(e) => {
+                      setPersonFilter(e.target.value);
+                      updateSelections(rows, e.target.value);
+                    }}
+                  />
                 </div>
-                <input
-                  type="text"
-                  placeholder="Tìm giảng viên..."
-                  className="w-full pl-9 pr-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs text-slate-700 placeholder:text-slate-400 focus:ring-2 focus:ring-[#F27024]/10 focus:border-[#F27024] outline-none transition-all"
-                  value={personFilter}
-                  onChange={(e) => {
-                    setPersonFilter(e.target.value);
-                    updateSelections(rows, e.target.value);
-                  }}
-                />
-              </div>
-              <div className="flex items-center gap-2 w-full sm:w-auto">
+
                 <SearchColumnSelector
                   headers={searchHeaderOptions}
                   selectedIndices={searchColumnIndices}
                   onSelectionChange={setSearchColumnIndices}
                 />
-                {/* Desktop Config Button */}
-                <button
-                  onClick={() => setIsConfigExpanded(!isConfigExpanded)}
-                  className="hidden lg:flex h-10 px-4 bg-slate-50 text-slate-500 border border-slate-200 rounded-xl font-bold text-xs uppercase items-center gap-2 hover:bg-slate-100 transition-all shadow-sm"
-                >
-                  <svg className={`w-3.5 h-3.5 transition-transform ${isConfigExpanded ? 'rotate-180' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M19 9l-7 7-7-7" />
-                  </svg>
-                  <span>{isConfigExpanded ? 'Ẩn cấu hình' : 'Hiện cấu hình'}</span>
-                </button>
               </div>
+
+              {/* Desktop Config Button */}
+              <button
+                onClick={() => setIsConfigExpanded(!isConfigExpanded)}
+                className="hidden lg:flex h-10 px-4 bg-slate-50 text-slate-500 border border-slate-200 rounded-xl font-bold text-xs uppercase items-center gap-2 hover:bg-slate-100 transition-all shadow-sm"
+              >
+                <svg className={`w-3.5 h-3.5 transition-transform ${isConfigExpanded ? 'rotate-180' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M19 9l-7 7-7-7" />
+                </svg>
+                <span>{isConfigExpanded ? 'Ẩn cấu hình' : 'Hiện cấu hình'}</span>
+              </button>
             </div>
 
             {/* Buttons Group — Scrollable on mobile if many items */}

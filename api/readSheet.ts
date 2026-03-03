@@ -25,8 +25,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       payload = typeof req.body === 'string' ? JSON.parse(req.body) : req.body;
     }
 
-    // 🔍 Early URL Validation to skip 500s
-    if (payload.action === 'readSheet' || payload.action === 'getTabNames' || payload.action === 'setupNotifications') {
+    // 🎯 3. ACTION ROUTING
+    const needsUrlValidation = ['readSheet', 'getTabNames', 'setupNotifications', 'disableNotifications'];
+    
+    if (needsUrlValidation.includes(payload.action)) {
       const idMatch = String(payload.url || "").match(/\/d\/([a-zA-Z0-9-_]+)/);
       if (!idMatch) {
         return res.status(400).json({ 
@@ -42,61 +44,58 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       secret: GAS_SECRET || payload.secret
     };
 
-    console.log(`🔗 Proxy calling GAS: ${GAS_URL} (Action: ${payload.action || 'readSheet'})`);
+    console.log(`🔗 Proxy calling GAS via ReadSheet: ${GAS_URL} (Action: ${payload.action || 'readSheet'})`);
     
     // 🚀 URL Cache-buster for GAS call
     const bustUrl = `${GAS_URL}${GAS_URL.includes('?') ? '&' : '?'}t=${Date.now()}`;
 
-    const response = await fetch(bustUrl, {
-      method: "POST", // GAS handles POST better for diverse actions
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(finalPayload)
-    });
-    
-    const responseText = await response.text();
-    
-    if (!response.ok) {
-      console.error(`❌ GAS Error: ${response.status} - ${responseText.substring(0, 200)}`);
-      
-      let cleanDetail = responseText;
-      const errMatch = responseText.match(/class="errorMessage">([^<]+)</i);
-      if (errMatch) {
-        cleanDetail = `Google Error: ${errMatch[1]}`;
-      } else {
-        cleanDetail = responseText.replace(/<[^>]+>/g, ' ').substring(0, 250).trim();
-      }
-
-      return res.status(response.status).json({ 
-        error: "Google Apps Script error", 
-        detail: cleanDetail,
-        status: response.status 
-      });
-    }
-
     try {
-      const data = JSON.parse(responseText);
-      console.log(`✅ GAS Response parsed successfully. Action: ${payload.action}, Status: ${data.status}`);
-      return res.status(200).json(data);
-    } catch (parseErr) {
-      console.error(`❌ JSON Parse Error. Body starts with: ${responseText.substring(0, 200)}`);
+      const response = await fetch(bustUrl, {
+        method: "POST", // GAS handles POST better for diverse actions
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(finalPayload)
+      });
       
-      let cleanDetail = responseText;
-      const errMatch = responseText.match(/class="errorMessage">([^<]+)</i);
-      if (errMatch) {
-         cleanDetail = `Google Error: ${errMatch[1]}`;
-      } else {
-         cleanDetail = responseText.replace(/<[^>]+>/g, ' ').substring(0, 250).trim();
+      const responseText = await response.text();
+      
+      if (!response.ok) {
+        console.error(`❌ GAS Error: ${response.status} - ${responseText.substring(0, 200)}`);
+        
+        let cleanDetail = responseText;
+        const errMatch = responseText.match(/class="errorMessage">([^<]+)</i);
+        if (errMatch) {
+          cleanDetail = `Google Error: ${errMatch[1]}`;
+        } else {
+          cleanDetail = responseText.replace(/<[^>]+>/g, ' ').substring(0, 250).trim();
+        }
+
+        return res.status(response.status).json({ 
+          error: "Google Apps Script error", 
+          detail: cleanDetail,
+          status: response.status 
+        });
       }
 
-      return res.status(500).json({
-        error: "Google returned non-JSON response (likely HTML error)",
-        detail: cleanDetail
+      try {
+        const data = JSON.parse(responseText);
+        return res.status(200).json(data);
+      } catch (parseErr) {
+        return res.status(500).json({
+          error: "Google returned non-JSON response (likely HTML error)",
+          detail: responseText.replace(/<[^>]+>/g, ' ').substring(0, 250).trim()
+        });
+      }
+    } catch (fetchErr: any) {
+      console.error("❌ Fetch to GAS failed (ReadSheet Proxy):", fetchErr);
+      return res.status(504).json({
+        error: "Gateway Timeout: Could not reach Google Apps Script",
+        message: fetchErr.message
       });
     }
   } catch (err: any) {
-    console.error("Proxy error:", err);
+    console.error("Proxy error (ReadSheet):", err);
     return res.status(500).json({
-      error: "Lỗi nội bộ hệ thống trong quá trình đọc Sheet (Proxy 500)",
+      error: "Lỗi nội bộ hệ thống trong quá trình Proxy (500)",
       message: err.message
     });
   }

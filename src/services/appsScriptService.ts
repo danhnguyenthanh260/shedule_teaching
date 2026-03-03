@@ -619,11 +619,12 @@ export const notifyLecturers = async (
         };
 
         const syncUrl = `${API_BASE_URL}/api/sync`;
-        logInfo(`Sending notifications via proxy: ${syncUrl}`);
-
         const response = await fetch(syncUrl, {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
+            headers: { 
+                'Content-Type': 'application/json',
+                'Authorization': idToken ? `Bearer ${idToken}` : ''
+            },
             body: JSON.stringify(payload)
         });
 

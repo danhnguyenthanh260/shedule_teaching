@@ -113,13 +113,13 @@ export const ScheduleTable: React.FC<ScheduleTableProps> = ({
             <div 
               key={row.id}
               onClick={() => onToggleSelect(row.id)}
-              className={`p-5 rounded-[2rem] border-2 transition-all duration-300 cursor-pointer relative overflow-hidden group ${
+              className={`p-3.5 rounded-[1.5rem] border-2 transition-all duration-300 cursor-pointer relative overflow-hidden group ${
                 selectedIds.has(row.id)
                   ? 'bg-indigo-50/30 border-indigo-600 shadow-xl shadow-indigo-100/50'
                   : 'bg-white border-slate-100 shadow-[0_4px_20px_rgba(0,0,0,0.02)] active:border-slate-300'
               }`}
             >
-              <div className="flex flex-col gap-4 relative z-10">
+              <div className="flex flex-col gap-2.5 relative z-10">
                 <div className="flex items-center justify-between">
                   <div className="flex flex-col gap-1">
                     <span className="text-[10px] font-black text-indigo-500 uppercase tracking-[0.2em] leading-none">
@@ -140,8 +140,8 @@ export const ScheduleTable: React.FC<ScheduleTableProps> = ({
                   </div>
                 </div>
 
-                <div className="space-y-2">
-                   <h4 className="text-[15px] font-black text-slate-900 leading-snug uppercase tracking-tight">
+                <div className="space-y-1.5">
+                   <h4 className="text-sm font-black text-slate-900 leading-snug uppercase tracking-tight">
                      {row.task || '-'}
                    </h4>
                    <div className="flex flex-wrap items-center gap-2">
@@ -156,7 +156,7 @@ export const ScheduleTable: React.FC<ScheduleTableProps> = ({
                    </div>
                 </div>
 
-                <div className="pt-4 mt-2 border-t border-slate-100/50 flex items-center justify-between">
+                 <div className="pt-2.5 mt-1 border-t border-slate-100/50 flex items-center justify-between">
                    <span className="text-[10px] font-black text-slate-300 uppercase tracking-widest leading-none">THỜI GIAN ĐỒNG BỘ</span>
                    <div className="px-4 py-1.5 bg-slate-900 text-white rounded-xl text-[11px] font-black tracking-[0.15em] shadow-lg shadow-slate-200">
                       {row.timeRaw || (row.startTime?.includes('T') ? (row.startTime.split('T')[1].substring(0, 5) + ' - ' + row.endTime.split('T')[1].substring(0, 5)) : 'N/A')}

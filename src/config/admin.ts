@@ -4,7 +4,7 @@ import { ref, onValue } from 'firebase/database';
 /**
  * Super Admin Email - Permanent primary access
  */
-export const SUPER_ADMIN_EMAIL = 'ngohoangtruongdat2@gmail.com';
+export const SUPER_ADMIN_EMAILS = ['ngohoangtruongdat2@gmail.com', 'longt5@fpt.edu.vn'];
 
 /**
  * Static fallback admins (initial set)
@@ -29,8 +29,8 @@ export const isAdmin = (email: string | null | undefined): boolean => {
     if (!email) return false;
     const cleanEmail = email.trim().toLowerCase();
     
-    // 1. Check Super Admin (Hardcoded fallback)
-    if (cleanEmail === SUPER_ADMIN_EMAIL.toLowerCase()) return true;
+    // 1. Check Super Admins (Hardcoded fallback)
+    if (SUPER_ADMIN_EMAILS.some(e => e.toLowerCase() === cleanEmail)) return true;
 
     // 2. Check Dynamic Whitelist
     const result = dynamicAdminEmails.includes(cleanEmail);
@@ -43,5 +43,7 @@ export const isAdmin = (email: string | null | undefined): boolean => {
  * Check if the user is the Super Admin
  */
 export const isSuperAdmin = (email: string | null | undefined): boolean => {
-    return email?.trim().toLowerCase() === SUPER_ADMIN_EMAIL.toLowerCase();
+    if (!email) return false;
+    const cleanEmail = email.trim().toLowerCase();
+    return SUPER_ADMIN_EMAILS.some(e => e.toLowerCase() === cleanEmail);
 };

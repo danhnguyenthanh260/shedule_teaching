@@ -3,7 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { useFirebase } from '../context/FirebaseContext';
 import { configService, SemesterConfig } from '../services/configService';
 import { database } from '../config/firebase';
-import { SUPER_ADMIN_EMAIL, isSuperAdmin } from '../config/admin';
+import { SUPER_ADMIN_EMAILS, isSuperAdmin } from '../config/admin';
 import { ref, set, push, onValue, remove, update } from 'firebase/database';
 import * as XLSX from 'xlsx';
 import { readSheet, invalidateAdminCache, getTabNames, setupNotifications, disableNotifications } from '../services/appsScriptService';
@@ -307,7 +307,7 @@ export const AdminPage: React.FC = () => {
         const cleanEmail = newAdminEmail.trim().toLowerCase();
 
         // 1. Check if matches Super Admin
-        if (cleanEmail === SUPER_ADMIN_EMAIL.toLowerCase()) {
+        if (isSuperAdmin(cleanEmail)) {
             setToastMessage('❌ Email này là Super Admin, không cần thêm vào danh sách.');
             setTimeout(() => setToastMessage(null), 5000);
             return;

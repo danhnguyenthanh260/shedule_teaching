@@ -170,7 +170,7 @@ export const SemesterForm: React.FC<SemesterFormProps> = ({
                         </div>
                     </div>
 
-                    {formData.sheetType === 'council' && (
+                    {/* {formData.sheetType === 'council' && (
                         <div className="flex items-center justify-between p-4 bg-orange-50/30 rounded-xl border border-orange-100/50 shadow-sm transition-all hover:bg-orange-50/50">
                             <div className="flex items-center gap-3">
                                 <div className={`w-8 h-8 rounded-lg flex items-center justify-center transition-all ${formData.notifEnabled ? 'bg-orange-500 text-white shadow-md shadow-orange-200' : 'bg-white text-slate-400 border border-slate-200'}`}>
@@ -193,7 +193,7 @@ export const SemesterForm: React.FC<SemesterFormProps> = ({
                                 <div className="w-9 h-5 bg-slate-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-[#F27024]"></div>
                             </label>
                         </div>
-                    )}
+                    )} */}
 
                     <div>
                         <div className="flex items-center justify-between mb-2 ml-1">

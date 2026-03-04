@@ -484,12 +484,18 @@ export const LecturerDashboard: React.FC = () => {
     const str = val.trim();
     if (!str) return null;
     
+    // 1. Xác định "Handle" hoặc "Mã" từ chuỗi nhập vào
     let handle = "";
+    let isLikelyEmail = str.includes('@');
+
     if (str.includes('(') && str.includes(')')) {
+      // Ưu tiên lấy trong ngoặc: "Tên (abc)" -> abc
       handle = str.split('(')[1].split(')')[0].trim().toLowerCase();
-    } else if (str.includes('@')) {
+    } else if (isLikelyEmail) {
+      // Lấy phần trước @: "abc@gmail.com" -> abc
       handle = str.split('@')[0].trim().toLowerCase();
     } else {
+      // Nếu chỉ có tên: "Nguyễn Văn Đạt" -> dat
       const nonAccented = khongDau(str);
       const parts = nonAccented.split(' ');
       handle = parts[parts.length - 1].toLowerCase().replace(/[^a-z0-9]/g, '');
@@ -498,13 +504,31 @@ export const LecturerDashboard: React.FC = () => {
     if (!handle) return null;
 
     const lecturers = Object.values(lecturerWhitelist) as Array<{ name: string; code: string; email: string }>;
+    
+    // 2. CHIẾN THUẬT TÌM KIẾM: Tìm người khớp nhất trong Quản lý giảng viên
     const matchedLecturer = lecturers.find(l => {
-      const lCode = khongDau(l.code).replace(/[^a-z0-9]/g, '').toLowerCase();
-      const lEmailPrefix = l.email.split('@')[0].toLowerCase().replace(/[^a-z0-9]/g, '');
-      return lCode === handle || lEmailPrefix === handle;
+      const lCode = khongDau(l.code || "").replace(/[^a-z0-9]/g, '').toLowerCase();
+      const lEmailPrefix = (l.email || "").split('@')[0].toLowerCase().replace(/[^a-z0-9]/g, '');
+      const lNameNoDau = khongDau(l.name || "").toLowerCase().replace(/[^a-z0-9]/g, '');
+      const inputNoDau = khongDau(str).toLowerCase().replace(/[^a-z0-9]/g, '');
+
+      // So khớp Mã giảng viên hoặc Tiền tố Email
+      if (lCode === handle || lEmailPrefix === handle) return true;
+      
+      // So khớp Tên đầy đủ không dấu (Dự phòng cho hội đồng chỉ ghi tên)
+      if (lNameNoDau === inputNoDau && inputNoDau.length > 5) return true;
+
+      return false;
     });
 
-    return matchedLecturer?.email ? matchedLecturer.email.toLowerCase() : `${handle}@fpt.edu.vn`;
+    // 3. TRẢ VỀ KẾT QUẢ
+    if (matchedLecturer?.email) {
+      // Nếu tìm thấy trong Whitelist -> Lấy mail chuẩn (có thể là @gmail hoặc @fpt)
+      return matchedLecturer.email.toLowerCase();
+    }
+
+    // Nếu không thấy thì mặc định gán đuôi @fpt.edu.vn
+    return `${handle}@fpt.edu.vn`;
   }, [lecturerWhitelist]);
 
   // 📧 🚀 Reactive Notification Data: Luôn bám sát Filter & Search

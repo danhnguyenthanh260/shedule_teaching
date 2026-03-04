@@ -1,7 +1,7 @@
 import React, { createContext, useContext, useEffect, useState } from 'react';
 import { auth, db, database } from '../config/firebase';
 import { ref, onValue } from 'firebase/database';
-import { SUPER_ADMIN_EMAIL, setDynamicAdmins } from '../config/admin';
+import { SUPER_ADMIN_EMAILS, setDynamicAdmins, isSuperAdmin as checkIsSuperAdmin } from '../config/admin';
 import {
   createUserWithEmailAndPassword,
   signInWithEmailAndPassword,
@@ -202,7 +202,7 @@ export const FirebaseProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       return;
     }
 
-    const checkAdmin = email === SUPER_ADMIN_EMAIL.toLowerCase() || adminList.includes(email);
+    const checkAdmin = checkIsSuperAdmin(email) || adminList.includes(email);
     const checkLecturer = lecturerList.includes(email);
     
     setIsAdmin(checkAdmin);

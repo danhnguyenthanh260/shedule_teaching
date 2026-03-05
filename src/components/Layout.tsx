@@ -74,8 +74,12 @@ const Layout: React.FC<Props> = ({ children, user, userId, onLogout, syncHistory
           <div className="h-8 w-px bg-slate-200 mx-1 sm:mx-2 hidden xs:block"></div>
 
           <div className="flex items-center gap-1 sm:gap-3">
-            <div className="text-right hidden sm:block">
-              <div className="font-bold text-[13px] text-slate-800 leading-none truncate max-w-[100px]">{user.name}</div>
+            <div className="flex flex-col items-end hidden sm:flex">
+              <div className="font-bold text-[13px] text-slate-800 leading-none">{user.name}</div>
+              <div className="flex items-center gap-1 mt-1">
+                <div className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse"></div>
+                <span className="text-[9px] font-bold text-slate-400 uppercase tracking-widest">Đang hoạt động</span>
+              </div>
             </div>
             
             <div className="relative group shrink-0">

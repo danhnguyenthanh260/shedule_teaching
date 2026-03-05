@@ -19,7 +19,7 @@ export const LecturerCalendarPage: React.FC = () => {
   const calendarRef = useRef<FullCalendar>(null);
   const [miniCalendarDate, setMiniCalendarDate] = useState(new Date());
   const [isProfileOpen, setIsProfileOpen] = useState(false);
-  const { user: firebaseUser, accessToken, logout } = useFirebase();
+  const { user: firebaseUser, accessToken, logout, isAdmin } = useFirebase();
   const persistence = useAppPersistence();
   const {
     sheetUrl, setSheetUrl,
@@ -359,61 +359,60 @@ export const LecturerCalendarPage: React.FC = () => {
             </div>
           </div>
 
-          <div className="flex items-center gap-4">
-             {/* Lecturer Info Badge */}
-             <div className="hidden lg:flex flex-col items-end px-4 py-1.5 border-r border-slate-100">
-                <span className="text-[10px] font-black text-slate-400 uppercase tracking-tighter">Giảng viên đang xem</span>
-                <span className="text-sm font-semibold text-slate-700">{firebaseUser?.email}</span>
-             </div>
+          <div className="flex items-center gap-2 sm:gap-4">
+            {/* Navigation for Admins */}
+            {isAdmin && (
+              <>
+                <Link
+                  to="/"
+                  className="flex items-center justify-center w-10 h-10 sm:w-auto sm:px-4 sm:py-2 bg-blue-50 text-blue-600 rounded-xl font-bold text-xs border border-blue-100 transition-all"
+                >
+                  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" />
+                  </svg>
+                  <span className="hidden sm:inline ml-2">Lịch trình</span>
+                </Link>
 
-             <div className="flex items-center gap-3">
-               <div className="flex flex-col items-end hidden sm:flex">
-                  <span className="text-xs font-bold text-slate-800">{firebaseUser?.displayName}</span>
-                  <div className="flex items-center gap-1">
-                     <div className="w-1.5 h-1.5 rounded-full bg-green-500 animate-pulse"></div>
-                     <span className="text-[9px] font-bold text-slate-400 uppercase tracking-widest">Đang hoạt động</span>
-                  </div>
-               </div>
+                <Link
+                  to="/admin"
+                  className="flex items-center justify-center w-10 h-10 sm:w-auto sm:px-4 sm:py-2 bg-slate-900 text-white rounded-xl font-bold text-xs shadow-lg hover:bg-slate-800 transition-all"
+                >
+                  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" /><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+                  </svg>
+                  <span className="hidden sm:inline ml-2">Quản trị</span>
+                </Link>
+              </>
+            )}
 
-               <div className="relative ml-1">
-                 <div 
-                  onClick={() => setIsProfileOpen(!isProfileOpen)}
-                  className={`w-10 h-10 rounded-full border-2 border-white shadow-sm ring-2 ${isProfileOpen ? 'ring-blue-500' : 'ring-slate-100/50'} cursor-pointer hover:ring-blue-100 transition-all overflow-hidden bg-slate-50`}
-                 >
-                   <img src={firebaseUser?.photoURL || `https://ui-avatars.com/api/?name=${firebaseUser?.displayName || 'U'}&background=random`} className="w-full h-full object-cover" alt="avatar" />
-                 </div>
-                 
-                 {/* Click-away overlay */}
-                 {isProfileOpen && (
-                   <div 
-                    className="fixed inset-0 z-[998]" 
-                    onClick={() => setIsProfileOpen(false)}
-                   ></div>
-                 )}
+            <div className="flex items-center gap-3 ml-2">
+              <div className="hidden md:flex flex-col items-end">
+                <span className="text-xs font-bold text-slate-800 leading-none truncate max-w-[120px]">{firebaseUser?.displayName}</span>
+                <span className="text-[9px] font-bold text-slate-400 mt-1 uppercase tracking-tighter">Đang hoạt động</span>
+              </div>
 
-                 {/* Logout/Profile Overlay */}
-                 <div className={`absolute top-full right-0 mt-3 w-64 bg-white border border-slate-200 rounded-2xl shadow-2xl ${isProfileOpen ? 'opacity-100 translate-y-0 pointer-events-auto' : 'opacity-0 translate-y-2 pointer-events-none'} transition-all duration-300 z-[999] p-3 overflow-hidden`}>
-                    <div className="bg-slate-50 -m-3 p-4 mb-3 flex flex-col items-center border-b border-slate-100">
-                       <img src={firebaseUser?.photoURL || `https://ui-avatars.com/api/?name=${firebaseUser?.displayName || 'U'}&background=random`} className="w-16 h-16 rounded-full border-4 border-white shadow-lg mb-3" alt="avatar-large" />
-                       <p className="text-sm font-black text-slate-900 leading-tight">{firebaseUser?.displayName}</p>
-                       <p className="text-xs font-medium text-slate-500">{firebaseUser?.email}</p>
-                    </div>
+              <div className="relative">
+                <img 
+                  src={firebaseUser?.photoURL || `https://ui-avatars.com/api/?name=${firebaseUser?.displayName || 'U'}&background=random`} 
+                  className="w-9 h-9 sm:w-10 sm:h-10 rounded-full border border-slate-200 shadow-sm object-cover" 
+                  alt="avatar" 
+                />
+                <div className="absolute -bottom-0.5 -right-0.5 w-3 h-3 bg-emerald-500 border-2 border-white rounded-full"></div>
+              </div>
 
-                    <div className="space-y-1">
-                      <button 
-                        onClick={() => {
-                          persistence.clearPersistence();
-                          logout();
-                        }} 
-                        className="w-full text-left px-4 py-2.5 text-sm font-bold text-red-500 hover:bg-red-50 rounded-xl flex items-center gap-3 transition-colors"
-                      >
-                        <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M17 16l4-4m0 0l-4-4m4 4H7" /></svg>
-                        Đăng xuất hệ thống
-                      </button>
-                    </div>
-                 </div>
-               </div>
-             </div>
+              <button 
+                onClick={() => {
+                  persistence.clearPersistence();
+                  logout();
+                }}
+                className="p-2 text-slate-300 hover:text-rose-500 transition-colors"
+                title="Đăng xuất"
+              >
+                <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1" />
+                </svg>
+              </button>
+            </div>
           </div>
         </header>
 
@@ -517,6 +516,11 @@ export const LecturerCalendarPage: React.FC = () => {
           font-family: 'Roboto', 'Inter', -apple-system, sans-serif;
         }
 
+        /* 🛠️ FIX ICON DISPLAY: Ensure FullCalendar icons use their own font */
+        .google-style .fc-icon {
+          font-family: 'fcicons' !important;
+        }
+
         /* REMOVE YELLOW HIGHLIGHT FOR TODAY */
         .google-style .fc-day-today {
           background-color: transparent !important;
@@ -553,6 +557,21 @@ export const LecturerCalendarPage: React.FC = () => {
 
         .google-style .fc-button:hover { background: #f8f9fa !important; border-color: #dadce0 !important; }
         .google-style .fc-button-active { background: #e8f0fe !important; color: #1a73e8 !important; border-color: #e8f0fe !important; }
+
+        /* 🔘 SPECIAL STYLING FOR PREV/NEXT BUTTONS */
+        .google-style .fc-prev-button, 
+        .google-style .fc-next-button {
+          border: none !important;
+          background: transparent !important;
+          padding: 8px !important;
+          border-radius: 50% !important;
+          margin: 0 4px !important;
+        }
+        
+        .google-style .fc-prev-button:hover, 
+        .google-style .fc-next-button:hover {
+          background-color: #f1f3f4 !important;
+        }
 
         /* GOOGLE STYLE TIME AXIS (GMT+07) */
         .google-style .fc-timegrid-axis-cushion::before {

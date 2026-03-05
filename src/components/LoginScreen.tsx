@@ -25,11 +25,25 @@ export const LoginScreen: React.FC = () => {
 
   return (
     <div className="min-h-screen flex items-center justify-center p-4 bg-slate-50 relative overflow-hidden">
-      {/* Clean Aesthetic Background */}
+      {/* Background Slideshow */}
       <div className="absolute inset-0 z-0">
-        <div className="absolute top-0 left-0 w-full h-full bg-[radial-gradient(#e5e7eb_1px,transparent_1px)] [background-size:16px_16px] [mask-image:radial-gradient(ellipse_50%_50%_at_50%_50%,#000_70%,transparent_100%)] opacity-50" />
-        <div className="absolute -top-[10%] -left-[10%] w-[40%] h-[40%] bg-orange-100 rounded-full blur-[120px] opacity-40" />
-        <div className="absolute -bottom-[10%] -right-[10%] w-[40%] h-[40%] bg-blue-100 rounded-full blur-[120px] opacity-40" />
+        {BACKGROUND_IMAGES.map((img, idx) => (
+          <div
+            key={img}
+            className={`absolute inset-0 bg-cover bg-center transition-all duration-[3000ms] ease-in-out ${
+              idx === currentIdx ? 'opacity-100 scale-110 rotate-1' : 'opacity-0 scale-100 rotate-0'
+            }`}
+            style={{ 
+              backgroundImage: `url(${img})`,
+              transitionDelay: idx === currentIdx ? '0ms' : '500ms'
+            }}
+          />
+        ))}
+        {/* Subtle Dark Vignette for contrast without blurring */}
+        <div className="absolute inset-0 bg-gradient-to-b from-black/20 via-transparent to-black/40 z-10" />
+        
+        {/* Dot pattern - more subtle */}
+        <div className="absolute inset-0 bg-[radial-gradient(#fff_1px,transparent_1px)] [background-size:24px_24px] opacity-10 z-10" />
       </div>
 
       <div className="max-w-md w-full relative z-20">

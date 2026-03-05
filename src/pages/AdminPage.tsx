@@ -3,10 +3,10 @@ import { useNavigate } from 'react-router-dom';
 import { useFirebase } from '../context/FirebaseContext';
 import { configService, SemesterConfig } from '../services/configService';
 import { database } from '../config/firebase';
-import { SUPER_ADMIN_EMAIL, isSuperAdmin } from '../config/admin';
+import { isSuperAdmin, SUPER_ADMIN_EMAILS } from '../config/admin';
 import { ref, set, push, onValue, remove, update } from 'firebase/database';
 import * as XLSX from 'xlsx';
-import { readSheet, invalidateAdminCache, getTabNames, setupNotifications, disableNotifications } from '../services/appsScriptService';
+import { readSheet, getTabNames, setupNotifications, disableNotifications, invalidateAdminCache } from '../services/appsScriptService';
 import { MappingTool } from '../components/MappingTool';
 import { ColumnMapping } from '../types';
 import { generateHeaderOptions } from '../utils/headerUtils';
@@ -26,7 +26,9 @@ export const AdminPage: React.FC = () => {
     const navigate = useNavigate();
     const [semesters, setSemesters] = useState<Record<string, SemesterConfig>>({});
     const [adminWhitelist, setAdminWhitelist] = useState<Record<string, string>>({});
+    const [superAdminWhitelist, setSuperAdminWhitelist] = useState<Record<string, string>>({});
     const [newAdminEmail, setNewAdminEmail] = useState('');
+    const [newSuperAdminEmail, setNewSuperAdminEmail] = useState('');
     const [loading, setLoading] = useState(false);
     const [lecturerWhitelist, setLecturerWhitelist] = useState<Record<string, { name: string; code: string; email: string }>>({});
     const [newLecturer, setNewLecturer] = useState({ name: '', code: '', email: '' });
@@ -38,6 +40,7 @@ export const AdminPage: React.FC = () => {
     // Inline Confirmation state
     const [confirmingDeleteSemesterId, setConfirmingDeleteSemesterId] = useState<string | null>(null);
     const [confirmingDeleteAdminKey, setConfirmingDeleteAdminKey] = useState<string | null>(null);
+    const [confirmingDeleteSuperAdminKey, setConfirmingDeleteSuperAdminKey] = useState<string | null>(null);
 
     const [newSemester, setNewSemester] = useState({
         semester: '',
@@ -76,6 +79,7 @@ export const AdminPage: React.FC = () => {
     useEffect(() => {
         fetchConfigs();
         fetchAdminWhitelist();
+        fetchSuperAdminWhitelist();
         fetchLecturerWhitelist();
     }, []);
 
@@ -125,6 +129,16 @@ export const AdminPage: React.FC = () => {
         onValue(whitelistRef, (snapshot) => {
             const data = snapshot.val();
             setAdminWhitelist(data || {});
+        });
+    };
+
+    const fetchSuperAdminWhitelist = () => {
+        // Only super admins should even fetch this? 
+        // Actually, for UI consistency we fetch it, but filter it in config/admin.ts
+        const whitelistRef = ref(database, 'super_admin_whitelist');
+        onValue(whitelistRef, (snapshot) => {
+            const data = snapshot.val();
+            setSuperAdminWhitelist(data || {});
         });
     };
 
@@ -307,7 +321,7 @@ export const AdminPage: React.FC = () => {
         const cleanEmail = newAdminEmail.trim().toLowerCase();
 
         // 1. Check if matches Super Admin
-        if (cleanEmail === SUPER_ADMIN_EMAIL.toLowerCase()) {
+        if (isSuperAdmin(cleanEmail)) {
             setToastMessage('❌ Email này là Super Admin, không cần thêm vào danh sách.');
             setTimeout(() => setToastMessage(null), 5000);
             return;
@@ -350,6 +364,49 @@ export const AdminPage: React.FC = () => {
             setTimeout(() => setToastMessage(null), 5000);
         } finally {
             setConfirmingDeleteAdminKey(null);
+        }
+    };
+
+    const handleAddSuperAdmin = async (e: React.FormEvent) => {
+        e.preventDefault();
+        if (!newSuperAdminEmail) return;
+
+        const cleanEmail = newSuperAdminEmail.trim().toLowerCase();
+
+        const isDuplicate = Object.values(superAdminWhitelist).some(
+            (email: any) => String(email).toLowerCase() === cleanEmail
+        );
+
+        if (isDuplicate) {
+            setToastMessage('❌ Email này đã có trong danh sách Super Admin.');
+            setTimeout(() => setToastMessage(null), 5000);
+            return;
+        }
+
+        try {
+            const whitelistRef = ref(database, 'super_admin_whitelist');
+            const newRef = push(whitelistRef);
+            await set(newRef, cleanEmail);
+            setNewSuperAdminEmail('');
+            setToastMessage('✅ Đã thêm Super Admin mới');
+            setTimeout(() => setToastMessage(null), 5000);
+        } catch (err: any) {
+            setToastMessage('❌ Lỗi: ' + err.message);
+            setTimeout(() => setToastMessage(null), 5000);
+        }
+    };
+
+    const handleDeleteSuperAdmin = async (key: string) => {
+        try {
+            const adminRef = ref(database, `super_admin_whitelist/${key}`);
+            await remove(adminRef);
+            setToastMessage('✅ Đã xóa Super Admin');
+            setTimeout(() => setToastMessage(null), 5000);
+        } catch (err: any) {
+            setToastMessage('❌ Lỗi khi xóa: ' + err.message);
+            setTimeout(() => setToastMessage(null), 5000);
+        } finally {
+            setConfirmingDeleteSuperAdminKey(null);
         }
     };
 
@@ -568,7 +625,8 @@ export const AdminPage: React.FC = () => {
                                     setEditMode(null);
                                     setNewSemester({ 
                                         semester: '', sheetUrl: '', startRow: '1', columns: '', 
-                                        dateFormat: 'dd/MM/yyyy', sheetType: 'council', tabName: '', mapping: {} 
+                                        dateFormat: 'dd/MM/yyyy', sheetType: 'council', tabName: '', mapping: {},
+                                        notifEnabled: false
                                     });
                                 }}
                             />
@@ -600,16 +658,35 @@ export const AdminPage: React.FC = () => {
                     </div>
                 )}
 
-                {activeTab === 'admins' && isSuperAdmin(user.email) && (
-                    <AdminWhitelistManager 
-                        adminEmails={adminWhitelist}
-                        newAdminEmail={newAdminEmail}
-                        onNewAdminEmailChange={setNewAdminEmail}
-                        onAddAdmin={handleAddAdmin}
-                        onDeleteAdmin={handleDeleteAdmin}
-                        confirmingDeleteKey={confirmingDeleteAdminKey}
-                        setConfirmingDeleteKey={setConfirmingDeleteAdminKey}
-                    />
+                {activeTab === 'admins' && (
+                    <div className="space-y-8">
+                        <AdminWhitelistManager 
+                            adminEmails={adminWhitelist}
+                            newAdminEmail={newAdminEmail}
+                            onNewAdminEmailChange={setNewAdminEmail}
+                            onAddAdmin={handleAddAdmin}
+                            onDeleteAdmin={handleDeleteAdmin}
+                            confirmingDeleteKey={confirmingDeleteAdminKey}
+                            setConfirmingDeleteKey={setConfirmingDeleteAdminKey}
+                        />
+
+                        {isSuperAdmin(user.email) && (
+                            <AdminWhitelistManager 
+                                adminEmails={superAdminWhitelist}
+                                newAdminEmail={newSuperAdminEmail}
+                                onNewAdminEmailChange={setNewSuperAdminEmail}
+                                onAddAdmin={handleAddSuperAdmin}
+                                onDeleteAdmin={handleDeleteSuperAdmin}
+                                confirmingDeleteKey={confirmingDeleteSuperAdminKey}
+                                setConfirmingDeleteKey={setConfirmingDeleteSuperAdminKey}
+                                title="Quản lý Super Admin"
+                                roleLabel="Owner / Super Admin"
+                                icon="👑"
+                                primaryColor="#8b5cf6" // Purple for super
+                                protectedEmails={SUPER_ADMIN_EMAILS}
+                            />
+                        )}
+                    </div>
                 )}
 
                 {activeTab === 'lecturers' && (

@@ -676,6 +676,94 @@ export const notifyLecturers = async (
     }
 };
 
+/**
+ * 📧 NEW: ĐỒNG BỘ THEO LỜI MỜI TỔNG HỢP (Force Invitation Batch)
+ * Bypasses silent sync and sends a single summary invitation email.
+ */
+export const batchInvitationNotifyLecturers = async (
+    lecturers: Array<{ email: string; name: string; events: any[] }>,
+    sheetUrl?: string,
+    tabName?: string,
+    sheetType?: 'council' | 'review',
+    forceNotify: boolean = true // Luôn force khi dùng button này
+): Promise<any> => {
+    try {
+        const currentUser = auth.currentUser;
+        const idToken = currentUser ? await currentUser.getIdToken() : undefined;
+
+        const CHUNK_SIZE = 10;
+        const totalChunks = Math.ceil(lecturers.length / CHUNK_SIZE);
+        
+        let combinedResults = {
+            status: 'success',
+            data: {
+                success: 0,
+                failed: 0,
+                total: lecturers.length,
+                errors: [] as any[],
+                quotaRemaining: 0,
+                mailSent: 0,
+                mailSkipped: 0,
+                debugLogs: [] as string[]
+            }
+        };
+
+        logInfo(`🚀 Bắt đầu gửi lời mời tổng hợp cho ${lecturers.length} giảng viên (Chia làm ${totalChunks} đợt)`);
+
+        for (let i = 0; i < totalChunks; i++) {
+            const chunk = lecturers.slice(i * CHUNK_SIZE, (i + 1) * CHUNK_SIZE);
+            logInfo(`📦 Gửi đợt ${i + 1}/${totalChunks} (${chunk.length} giảng viên)...`);
+
+            const payload = {
+                action: 'batchInvitationNotify',
+                lecturers: chunk,
+                sheetUrl,
+                tabName,
+                sheetType,
+                forceNotify,
+                idToken,
+                ...(import.meta.env.DEV ? { secret: import.meta.env.VITE_GAS_SECRET } : {})
+            };
+
+            const syncUrl = `${API_BASE_URL}/api/sync`;
+            const response = await fetch(syncUrl, {
+                method: 'POST',
+                headers: { 
+                    'Content-Type': 'application/json',
+                    'Authorization': idToken ? `Bearer ${idToken}` : ''
+                },
+                body: JSON.stringify(payload)
+            });
+
+            const data = await response.json();
+            if (data.status === 'error') {
+                throw new Error(data.message || `Lỗi ở đợt ${i + 1}`);
+            }
+
+            if (data.data) {
+                combinedResults.data.success += (data.data.success || 0);
+                combinedResults.data.failed += (data.data.failed || 0);
+                combinedResults.data.mailSent += (data.data.mailSent || 0);
+                combinedResults.data.mailSkipped += (data.data.mailSkipped || 0);
+                if (data.data.errors) {
+                    combinedResults.data.errors = [...combinedResults.data.errors, ...data.data.errors];
+                }
+                if (data.data.debugLogs) {
+                    combinedResults.data.debugLogs = [...combinedResults.data.debugLogs, ...data.data.debugLogs];
+                }
+                combinedResults.data.quotaRemaining = data.data.quotaRemaining || 0;
+            }
+        }
+
+        logSuccess('All batch invitations processed');
+        return combinedResults;
+    } catch (error) {
+        const errorMessage = error instanceof Error ? error.message : 'Không thể gửi lời mời tổng hợp';
+        logError('Batch invitation error:', errorMessage);
+        throw new Error(errorMessage);
+    }
+};
+
 export const respondToInvitations = async (
     email: string,
     action: 'accept' | 'decline' | 'maybe'

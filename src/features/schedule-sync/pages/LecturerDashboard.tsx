@@ -1,5 +1,6 @@
 
 import React, { useEffect, useState, useMemo, useRef, useCallback } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { ExcelImport } from '../../../components/ExcelImport';
 import { MappingTool } from '../../../components/MappingTool';
 import { ScheduleTable } from '../../../components/ScheduleTable';
@@ -15,7 +16,7 @@ import { useSheetParser } from '../../../hooks/useSheetParser';
 import { useSyncLogs } from '../../../hooks/useSyncLogs';
 import { useCalendarSync } from '../../../hooks/useCalendarSync';
 import { khongDau } from '../../../utils/stringUtils';
-import { notifyLecturers, respondToInvitations, exchangeOAuthCode, getLecturerTokenStatus } from '../../../services/appsScriptService';
+import { notifyLecturers, batchInvitationNotifyLecturers, respondToInvitations, exchangeOAuthCode, getLecturerTokenStatus } from '../../../services/appsScriptService';
 import { googleService, inferSchema } from '../../../services/googleService';
 import { SearchColumnSelector } from '../../../components/SearchColumnSelector';
 import { isAdmin, isSuperAdmin } from '../../../config/admin';
@@ -24,6 +25,7 @@ import { ref, set, get, onValue } from 'firebase/database';
 import { configService, SemesterConfig } from '../../../services/configService';
 
 export const LecturerDashboard: React.FC = () => {
+  const navigate = useNavigate();
   const { user: firebaseUser, accessToken, reauthorizeGoogle } = useFirebase();
   const [isHistoryOpen, setIsHistoryOpen] = useState(false);
   const [refreshHistory, setRefreshHistory] = useState(0);
@@ -153,6 +155,8 @@ export const LecturerDashboard: React.FC = () => {
   const [isConfirmingGlobalRecall, setIsConfirmingGlobalRecall] = useState(false);
   const [isNotifying, setIsNotifying] = useState(false); // 📧 New notification state
   const [showNotifyConfirm, setShowNotifyConfirm] = useState(false); // 📧 Toggle for notification modal
+  const [isInvitingBatch, setIsInvitingBatch] = useState(false); // 📧 NEW: Đang gửi mời tổng hợp
+  const [showBatchInvitationConfirm, setShowBatchInvitationConfirm] = useState(false); // 📧 NEW: Hiện modal xác nhận mời tổng hợp
   
   // 🎓 Lecturer Whitelist for Email Mapping
   const [lecturerWhitelist, setLecturerWhitelist] = useState<Record<string, { name: string; code: string; email: string }>>({});
@@ -837,6 +841,59 @@ export const LecturerDashboard: React.FC = () => {
     }
   };
 
+  /**
+   * 📧 NEW: Thực thi gửi mời tổng hợp (Force Batch Invitation)
+   */
+  const executeBatchInvitationNotify = async (lecturersData: any[]) => {
+    setIsInvitingBatch(true);
+    setShowBatchInvitationConfirm(false);
+    setSyncError(null);
+    setSyncResult(null);
+    try {
+      const currentType = effectiveIsReview ? 'review' : 'council';
+      const result = await batchInvitationNotifyLecturers(lecturersData, sheetUrl, tabName, currentType);
+      
+      if (result.status === 'success') {
+        const { success, failed, total, errors, quotaRemaining, mailSent, mailSkipped, debugLogs } = result.data;
+        
+        const logEntries = [
+          `CHẾ ĐỘ: LỜI MỜI TỔNG HỢP (SUMMARY INVITATION)`,
+          `Tổng số giảng viên xử lý: ${total}`,
+          `Email đã gửi: ${mailSent || 0}`,
+          `Bỏ qua (Do không đổi): ${mailSkipped || 0}`,
+          `Hạn ngạch (Quota) còn: ${quotaRemaining}`
+        ];
+
+        if (debugLogs && debugLogs.length > 0) {
+          logEntries.push("--- Nhật ký chi tiết ---");
+          logEntries.push(...debugLogs);
+        }
+
+        if (failed > 0) {
+          const errorMsgs = errors.map((e: any) => `${e.title || 'GV'}: ${e.message || 'Lỗi không xác định'}`).join('\n');
+          setSyncError(`Hoàn tất mời tổng hợp với một số lỗi. Đã xử lý: ${success}/${total}.\nLỗi chi tiết:\n${errorMsgs}\n\n${logEntries.slice(0, 5).join('\n')}`);
+        } else if (success === 0) {
+          setSyncError(`Không có dữ liệu nào được mời. Quota gửi mail còn: ${quotaRemaining}`);
+        } else {
+          setSyncResult({
+             type: 'sync',
+             created: success,
+             updated: 0,
+             skipped: 0,
+             failed: 0,
+             logs: logEntries
+          });
+        }
+      } else {
+        throw new Error(result.message || "Lỗi không xác định từ Backend");
+      }
+    } catch (err: any) {
+      setSyncError("Lỗi gửi lời mời: " + (err.message || String(err)));
+    } finally {
+      setIsInvitingBatch(false);
+    }
+  };
+
   // Magic Link (autoRSVP) Check
   const isAutoRSVPMood = useMemo(() => {
     const params = new URLSearchParams(window.location.search);
@@ -1204,6 +1261,16 @@ export const LecturerDashboard: React.FC = () => {
                 )}
               </button>
 
+              <button
+                onClick={() => navigate('/calendar')}
+                className="h-10 px-4 bg-slate-900 hover:bg-slate-800 text-white rounded-xl font-bold transition-all flex items-center justify-center gap-2 shadow-sm uppercase text-[10px] sm:text-xs tracking-wider whitespace-nowrap"
+              >
+                <svg className="w-4 h-4 text-orange-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" />
+                </svg>
+                <span>Xem dạng lịch</span>
+              </button>
+
               {isAdmin(firebaseUser?.email) && (
                 <>
                   <div className="relative group shrink-0">
@@ -1262,6 +1329,74 @@ export const LecturerDashboard: React.FC = () => {
                            </button>
                            <button 
                              onClick={() => { setShowNotifyConfirm(false); setIsNotifying(false); }} 
+                             className="flex-1 py-3 bg-slate-50 text-slate-400 rounded-xl font-black text-[10px] uppercase tracking-widest outline-none hover:bg-slate-100 transition-all font-bold"
+                           >
+                             HỦY
+                           </button>
+                         </div>
+                        <div className="absolute bottom-full left-1/2 -translate-x-1/2 lg:left-auto lg:right-8 w-4 h-4 bg-white rotate-45 translate-y-2 border-l border-t border-slate-100"></div>
+                      </div>
+                    )}
+                  </div>
+
+                  {/* 📧 NEW: Batch Invitation Button */}
+                  <div className="relative group shrink-0">
+                     <button
+                       onClick={() => {
+                         setShowNotifyConfirm(false);
+                         setShowBatchInvitationConfirm(true);
+                         setSyncError(null);
+                       }}
+                       disabled={isInvitingBatch || syncing || clearing}
+                       className={`h-10 px-3 rounded-xl font-bold transition-all shadow-sm flex items-center justify-center gap-1.5 text-[10px] sm:text-xs uppercase whitespace-nowrap ${
+                         showBatchInvitationConfirm ? 'bg-orange-600 text-white' : 'bg-orange-50 text-orange-600 border border-orange-100 hover:bg-orange-100'
+                       }`}
+                     >
+                       {isInvitingBatch ? (
+                         <div className="w-3.5 h-3.5 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                       ) : (
+                         <>
+                           <svg className="w-3.5 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" /></svg>
+                           <span className="hidden sm:inline">Mời giảng viên (Gửi mail mời)</span>
+                           <span className="sm:hidden">Mời GV (Batch)</span>
+                         </>
+                       )}
+                     </button>
+ 
+                     {showBatchInvitationConfirm && (
+                       <div className="absolute top-full right-1/2 translate-x-1/2 lg:right-0 lg:translate-x-0 mt-4 w-72 xs:w-96 bg-white border border-slate-100 p-6 rounded-[2rem] shadow-[0_20px_60px_rgba(0,0,0,0.18)] z-[100] animate-in fade-in slide-in-from-top-2 duration-300">
+                         <div className="text-center mb-4">
+                           <h4 className="text-sm font-black text-orange-600 uppercase tracking-tight mb-1">XÁC NHẬN GỬI MỜI?</h4>
+                           <p className="text-[10px] text-slate-400 font-extrabold uppercase tracking-widest leading-relaxed">
+                             Gửi 1 email tổng hợp cho {notifiableLecturers.length} giảng viên. Họ chỉ cần nhấn "Có" trong mail để xác nhận toàn bộ lịch.
+                           </p>
+                         </div>
+                         
+                          {/* 📋 NEW: List of lecturers to notify */}
+                          <div className="max-h-48 overflow-y-auto mb-5 px-1 scrollbar-thin scrollbar-thumb-slate-200">
+                            <div className="space-y-2">
+                              {notifiableLecturers.map((lecturer, idx) => (
+                                <div key={idx} className="flex flex-col p-2 bg-orange-50/50 rounded-xl border border-orange-100">
+                                  <div className="flex justify-between items-start">
+                                    <span className="text-[10px] font-bold text-slate-700 truncate max-w-[150px]">{lecturer.name}</span>
+                                    <span className="text-[9px] font-black text-orange-500 bg-orange-50 px-1.5 py-0.5 rounded-md uppercase">{lecturer.events.length} LỊCH</span>
+                                  </div>
+                                  <span className="text-[9px] text-slate-400 font-medium truncate italic">{lecturer.email}</span>
+                                </div>
+                              ))}
+                            </div>
+                          </div>
+
+                         <div className="flex gap-2">
+                           <button 
+                             onClick={() => executeBatchInvitationNotify(notifiableLecturers)} 
+                             disabled={notifiableLecturers.length === 0}
+                             className="flex-[1.5] py-3 bg-orange-600 text-white rounded-xl font-black text-[10px] uppercase tracking-widest active:scale-95 shadow-lg shadow-orange-100 transition-all disabled:opacity-50 disabled:bg-slate-300"
+                           >
+                             XÁC NHẬN GỬI MỜI
+                           </button>
+                           <button 
+                             onClick={() => { setShowBatchInvitationConfirm(false); setIsInvitingBatch(false); }} 
                              className="flex-1 py-3 bg-slate-50 text-slate-400 rounded-xl font-black text-[10px] uppercase tracking-widest outline-none hover:bg-slate-100 transition-all font-bold"
                            >
                              HỦY

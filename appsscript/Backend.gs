@@ -15,7 +15,7 @@ var CONSTANTS = {
   ERROR: "error",
   FIREBASE_WEB_API_KEY:
     PropertiesService.getScriptProperties().getProperty("FIREBASE_API_KEY") ||
-    "",
+    "AIzaSy...",
   FIREBASE_URL:
     "https://scheduleteaching-default-rtdb.asia-southeast1.firebasedatabase.app/",
   ADMIN_EMAILS: ["ngohoangtruongdat@gmail.com", "ngohoangtruongdat2@gmail.com"],
@@ -23,8 +23,8 @@ var CONSTANTS = {
   INVITATION_CALENDAR_NAME: "FPT Scheduler - Invitations",
   OAUTH: {
     CLIENT_ID:
-      PropertiesService.getScriptProperties().getProperty("GOOGLE_CLIENT_ID") ||
-      "",
+      "468852322434-cq03ofd3mulpl7v29tqr1qhgkh96pts1.apps.googleusercontent.com",
+    // 🔐 LẤY TỪ SCRIPT PROPERTIES (Settings -> Script Properties)
     CLIENT_SECRET:
       PropertiesService.getScriptProperties().getProperty(
         "GOOGLE_CLIENT_SECRET",
@@ -33,6 +33,7 @@ var CONSTANTS = {
   },
   // 📧 CẤU HÌNH SMTP (SendGrid) - Để gửi số lượng lớn (>100 mail/ngày)
   EMAIL_API: {
+    // 🔐 LẤY TỪ SCRIPT PROPERTIES (Settings -> Script Properties)
     SENDGRID_API_KEY:
       PropertiesService.getScriptProperties().getProperty("SENDGRID_API_KEY") ||
       "",
@@ -1320,6 +1321,11 @@ function doPost(e) {
       return jsonResponse_(res);
     }
 
+    if (action === "batchInvitationNotify") {
+      res = batchInvitationNotifyHandler_(payload);
+      return jsonResponse_(res);
+    }
+
     if (action === "respondToInvitations") {
       res = respondToInvitationsHandler_(payload);
       return jsonResponse_(res);
@@ -2351,12 +2357,15 @@ function notifyLecturersHandler_(payload) {
           clearLecturerInvitations_(invitationCalendar, email, existingItems);
         }
 
+        const isUpdate = existingItems.length > 0; // Nếu đã có lịch cũ thì là Cập nhật
+
         createMergedCalendarInvitation_(
           invitationCalendar,
           email,
           lecturer.name,
           lecturer.events,
           sheetType,
+          isUpdate, // 📧 NEW: Truyền cờ phân biệt Mới/Cập nhật
         );
         results.success++;
         results.mailSent++;
@@ -2414,10 +2423,10 @@ function getLecturerInvitations_(calendar, lecturerEmail) {
   const accessToken = ScriptApp.getOAuthToken();
   const now = new Date();
   const timeMin = new Date(
-    now.getTime() - 90 * 24 * 60 * 60 * 1000,
+    now.getTime() - 180 * 24 * 60 * 60 * 1000, // Lùi 6 tháng
   ).toISOString();
   const timeMax = new Date(
-    now.getTime() + 180 * 24 * 60 * 60 * 1000,
+    now.getTime() + 180 * 24 * 60 * 60 * 1000, // Tiến 6 tháng
   ).toISOString();
 
   const path =
@@ -2568,6 +2577,7 @@ function createMergedCalendarInvitation_(
   lecturerName,
   subEvents,
   sheetType,
+  isUpdate, // 📧 NEW: Nhận cờ phân biệt Mới/Cập nhật
 ) {
   const email = toEmail.trim();
   const calendarId = calendar.getId();
@@ -2654,16 +2664,27 @@ function createMergedCalendarInvitation_(
   const yesLink = appUrl + "?autoRSVP=true&action=accept" + commonParams;
   const noLink = appUrl + "?autoRSVP=true&action=decline" + commonParams;
 
+  const typeLabel = isUpdate ? "CẬP NHẬT" : "MỚI";
+  const typeColor = isUpdate ? "#E67E22" : "#F27024"; // Màu cam đậm hơn cho Cập nhật
+
   const bodyHtml =
     "<div style='font-family: sans-serif; max-width: 600px; margin: 0 auto; border: 1px solid #eee; border-radius: 12px; overflow: hidden;'>" +
-    "<div style='background: #F27024; padding: 25px; text-align: center; color: white;'><h2>Xác Nhận Lịch Chấm Mới</h2></div>" +
+    "<div style='background: " +
+    typeColor +
+    "; padding: 25px; text-align: center; color: white;'><h2>THÔNG BÁO LỊCH " +
+    typeLabel +
+    "</h2></div>" +
     "<div style='padding: 25px;'>" +
     "<p>Chào Giảng viên <b>" +
     lecturerName +
     "</b>,</p>" +
-    "<p>Admin đã gửi lịch chấm mới vào Calendar của bạn. Vui lòng bấm <b>Có</b> để xác nhận tham gia.</p>" +
+    "<p>" +
+    (isUpdate
+      ? "Admin vừa cập nhật thay đổi cho lịch trình của bạn. Vui lòng xác nhận lại bản lịch mới nhất dưới đây."
+      : "Admin đã gửi lịch trình bảo vệ/chấm mới cho bạn. Vui lòng bấm <b>Có</b> để xác nhận và đồng bộ vào Calendar cá nhân.") +
+    "</p>" +
     "<table style='width: 100%; border-collapse: collapse; margin: 20px 0; font-size: 13px;'>" +
-    "<thead style='background: #f8f9fa;'><tr><th>STT</th><th>Ngày</th><th>Giờ</th><th>Phòng</th></tr></thead>" +
+    "<thead style='background: #f8f9fa;'><tr><th style='padding: 10px; border: 1px solid #ddd;'>STT</th><th style='padding: 10px; border: 1px solid #ddd;'>Ngày</th><th style='padding: 10px; border: 1px solid #ddd;'>Giờ</th><th style='padding: 10px; border: 1px solid #ddd;'>Phòng</th></tr></thead>" +
     "<tbody>" +
     rowsHtml +
     "</tbody></table>" +
@@ -2680,9 +2701,11 @@ function createMergedCalendarInvitation_(
 
   const isCouncil = sheetType === "council";
   const subject =
-    (isCouncil ? "[HỘI ĐỒNG]" : "[REVIEW]") + " Xác nhận Lịch bảo vệ mới";
+    (isCouncil ? "[HỘI ĐỒNG]" : "[REVIEW]") +
+    " Thông báo lịch bảo vệ " +
+    typeLabel;
 
-  return EmailService.send(email, subject, {
+  return EmailService.send(email, subject, bodyHtml, {
     name: "FPT Scheduler Service",
   });
 }
@@ -2692,7 +2715,9 @@ function createMergedCalendarInvitation_(
  */
 function respondToInvitationsHandler_(payload) {
   const rawEmail = (payload.email || "").trim().toLowerCase();
-  const handle = rawEmail.split("@")[0]; // baoh14908
+  // 🛡️ BƯỚC 1: Giải mã email và trích xuất handle
+  const cleanEmail = decodeURIComponent(rawEmail).toLowerCase();
+  const handle = cleanEmail.split("@")[0];
   const action = payload.actionValue || payload.action;
 
   const invitationCalendar = getOrCreateInvitationCalendar_();
@@ -2701,99 +2726,135 @@ function respondToInvitationsHandler_(payload) {
 
   const statusToSet =
     action === "accept"
-      ? CalendarApp.GuestStatus.YES
-      : action === "decline"
-        ? CalendarApp.GuestStatus.NO
-        : CalendarApp.GuestStatus.MAYBE;
-  const restStatus =
-    action === "accept"
       ? "accepted"
       : action === "decline"
         ? "declined"
         : "tentative";
 
+  // 📅 Phạm vi tìm kiếm: 1 năm (6 tháng trước/sau)
   const now = new Date();
-  const timeMin = new Date(now.getTime() - 48 * 60 * 60 * 1000);
-  const timeMax = new Date(now.getTime() + 180 * 24 * 60 * 60 * 1000);
+  const timeMin = new Date(
+    now.getTime() - 180 * 24 * 60 * 60 * 1000,
+  ).toISOString();
+  const timeMax = new Date(
+    now.getTime() + 180 * 24 * 60 * 60 * 1000,
+  ).toISOString();
 
-  AppLogger.info(">>> RSVP v15.00 for Handle: " + handle + " via " + rawEmail);
+  let searchResults = [];
 
-  const events = invitationCalendar.getEvents(timeMin, timeMax);
+  // 🔍 TÌM KIẾM CHIẾN THUẬT:
+  try {
+    // 1. Tìm theo Email chuẩn
+    const res = GoogleCalendarAPI.fetch_(
+      accessToken,
+      "/calendars/" +
+        encodeURIComponent(calendarId) +
+        "/events?timeMin=" +
+        encodeURIComponent(timeMin) +
+        "&timeMax=" +
+        encodeURIComponent(timeMax) +
+        "&q=" +
+        encodeURIComponent(cleanEmail) +
+        "&singleEvents=true&maxResults=250",
+    );
+    if (res.items && res.items.length > 0) {
+      searchResults = res.items;
+    } else {
+      // 2. Nếu không thấy theo email, tìm theo handle
+      const resHandle = GoogleCalendarAPI.fetch_(
+        accessToken,
+        "/calendars/" +
+          encodeURIComponent(calendarId) +
+          "/events?timeMin=" +
+          encodeURIComponent(timeMin) +
+          "&timeMax=" +
+          encodeURIComponent(timeMax) +
+          "&q=" +
+          encodeURIComponent(handle) +
+          "&singleEvents=true&maxResults=250",
+      );
+      if (resHandle.items) searchResults = resHandle.items;
+    }
+  } catch (e) {
+    AppLogger.error("RSVP Search Error", e.toString());
+  }
+
   var updatedCount = 0;
+  var alreadySetCount = 0;
 
-  events.forEach(function (event) {
-    if (!event) return;
-    try {
-      // 🔍 Tìm theo Handel thay vì Email chuẩn
-      const guests = event.getGuests();
-      const targetGuest = guests.find(function (g) {
-        return g.getEmail().toLowerCase().split("@")[0] === handle;
-      });
+  searchResults.forEach(function (rawEvent) {
+    if (!rawEvent.attendees) return;
 
-      if (targetGuest) {
-        const eventId = event.getId().split("@")[0];
-        AppLogger.info("Updating Event: " + event.getSummary());
+    let hasTarget = false;
+    let needsUpdate = false;
 
-        targetGuest.setStatus(statusToSet);
+    const updatedAttendees = rawEvent.attendees.map(function (a) {
+      const aEmail = (a.email || "").toLowerCase();
+      if (aEmail === cleanEmail || aEmail.split("@")[0] === handle) {
+        hasTarget = true;
+        if (a.responseStatus !== statusToSet) {
+          needsUpdate = true;
+          return {
+            email: a.email,
+            responseStatus: statusToSet,
+            optional: false,
+          };
+        } else {
+          alreadySetCount++;
+        }
+      }
+      return a;
+    });
 
-        const rawEvent = GoogleCalendarAPI.fetch_(
+    if (hasTarget && needsUpdate) {
+      try {
+        // 🚀 DÙNG PATCH: Chỉ cập nhật danh sách khách mời (Sửa lỗi double stringify)
+        GoogleCalendarAPI.fetch_(
           accessToken,
           "/calendars/" +
             encodeURIComponent(calendarId) +
             "/events/" +
-            encodeURIComponent(eventId),
+            encodeURIComponent(rawEvent.id) +
+            "?sendUpdates=all",
+          {
+            method: "patch",
+            payload: { attendees: updatedAttendees },
+          },
         );
-
-        if (rawEvent && rawEvent.attendees) {
-          const updatedAttendees = rawEvent.attendees.map(function (a) {
-            if (a.email && a.email.toLowerCase().split("@")[0] === handle) {
-              a.responseStatus = restStatus;
-              a.optional = false;
-            }
-            return a;
-          });
-
-          GoogleCalendarAPI.fetch_(
-            accessToken,
-            "/calendars/" +
-              encodeURIComponent(calendarId) +
-              "/events/" +
-              encodeURIComponent(eventId) +
-              "?sendUpdates=all",
-            {
-              method: "put",
-              payload: JSON.stringify({
-                summary: rawEvent.summary,
-                description: rawEvent.description,
-                location: rawEvent.location,
-                start: rawEvent.start,
-                end: rawEvent.end,
-                attendees: updatedAttendees,
-                extendedProperties: rawEvent.extendedProperties,
-                reminders: { useDefault: true },
-              }),
-            },
-          );
-        }
         updatedCount++;
+      } catch (e) {
+        AppLogger.error("RSVP Patch Failure: " + rawEvent.id, e.toString());
       }
-    } catch (e) {
-      AppLogger.error("RSVP Failure: " + handle, e.toString());
     }
   });
+
+  if (updatedCount > 0) {
+    return {
+      status: CONSTANTS.SUCCESS,
+      message:
+        "Tuyệt vời! Hệ thống đã xác nhận thành công " +
+        updatedCount +
+        " buổi chấm cho bạn.",
+      data: { updatedCount: updatedCount },
+    };
+  }
+
+  if (alreadySetCount > 0) {
+    return {
+      status: CONSTANTS.SUCCESS,
+      message:
+        "Bạn đã xác nhận '" + action + "' cho các buổi chấm này trước đó rồi.",
+      data: { updatedCount: 0 },
+    };
+  }
 
   return {
     status: CONSTANTS.SUCCESS,
     message:
-      updatedCount > 0
-        ? "Thành công! Hệ thống đã ghi nhận " +
-          updatedCount +
-          " buổi giảng dạy cho giảng viên: " +
-          handle
-        : "Không tìm thấy lời mời nào cho mã " +
-          handle +
-          " trong vòng 48h qua.",
-    data: { updatedCount: updatedCount },
+      "Không tìm thấy lời mời nào cho '" +
+      handle +
+      "'. Vui lòng kiểm tra lại hoặc liên hệ Admin.",
+    data: { updatedCount: 0 },
   };
 }
 
@@ -3450,5 +3511,98 @@ function globalRecallHandler_(payload) {
     message: "Đã hoàn tất quy trình thu hồi",
     data: results,
     logs: finalLogs,
+  };
+}
+
+/**
+ * 📧 NEW: HÀM ĐỒNG BỘ THEO LỜI MỜI TỔNG HỢP (Force Invitation Batch)
+ * Chức năng: Tạo các sự kiện âm thầm (sendUpdates: 'none') và gửi 1 email tổng hợp duy nhất.
+ */
+function batchInvitationNotifyHandler_(payload) {
+  var lecturers = (payload.lecturers || []).filter(
+    (l) => (l.events || []).length > 0,
+  );
+  var sheetType = payload.sheetType || "council";
+  var results = {
+    total: lecturers.length,
+    success: 0,
+    failed: 0,
+    mailSent: 0,
+    mailSkipped: 0,
+    errors: [],
+    debugLogs: [],
+  };
+
+  const addLog = function (msg) {
+    results.debugLogs.push(new Date().toLocaleTimeString() + ": " + msg);
+    AppLogger.info(msg);
+  };
+
+  addLog(
+    "Starting Batch Invitation process for " + lecturers.length + " lecturers.",
+  );
+
+  var invitationCalendar = getOrCreateInvitationCalendar_();
+
+  lecturers.forEach(function (lecturer) {
+    try {
+      const email = lecturer.email.trim();
+
+      // 🔍 Kiểm tra thay đổi để tránh gửi mail spam
+      const existingItems = getLecturerInvitations_(invitationCalendar, email);
+      const isChanged = compareSchedules_(existingItems, lecturer.events);
+      const forceNotify =
+        payload.forceNotify === true || payload.force === true;
+      const isUpdate = existingItems.length > 0; // Nếu đã có lịch cũ thì là Cập nhật
+
+      if (isChanged || forceNotify) {
+        // 🧹 Dọn dẹp cũ
+        if (existingItems.length > 0) {
+          clearLecturerInvitations_(invitationCalendar, email, existingItems);
+        }
+
+        // ✍️ Tạo sự kiện mới - KHÔNG GỬI MAIL MẶC ĐỊNH CỦA GOOGLE
+        // (Hàm này đã có sendUpdates=none trong createMergedCalendarInvitation_)
+        createMergedCalendarInvitation_(
+          invitationCalendar,
+          email,
+          lecturer.name,
+          lecturer.events,
+          sheetType,
+          isUpdate, // 📧 NEW: Truyền cờ phân biệt Mới/Cập nhật
+        );
+
+        results.success++;
+        results.mailSent++;
+        addLog("Batch Invitation Email sent to " + email);
+
+        // 🔄 CẬP NHẬT CACHE
+        updateLecturerCacheFromPayload_(
+          email,
+          payload.sheetUrl,
+          payload.tabName,
+        );
+      } else {
+        results.success++;
+        results.mailSkipped++;
+        addLog("Skipped " + email + " - No changes.");
+      }
+    } catch (e) {
+      AppLogger.error(
+        "Batch Notify Error: " + (lecturer.email || ""),
+        e.toString(),
+      );
+      results.failed++;
+      results.errors.push({
+        title: lecturer.email || "Hệ thống",
+        message: e.toString(),
+      });
+    }
+  });
+
+  results.quotaRemaining = Math.max(0, MailApp.getRemainingDailyQuota());
+  return {
+    status: CONSTANTS.SUCCESS,
+    data: results,
   };
 }

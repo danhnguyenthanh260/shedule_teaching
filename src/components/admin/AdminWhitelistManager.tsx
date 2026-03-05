@@ -8,6 +8,11 @@ interface AdminWhitelistManagerProps {
     onDeleteAdmin: (key: string) => void;
     confirmingDeleteKey: string | null;
     setConfirmingDeleteKey: (key: string | null) => void;
+    title?: string;
+    roleLabel?: string;
+    icon?: string;
+    primaryColor?: string;
+    protectedEmails?: string[];
 }
 
 export const AdminWhitelistManager: React.FC<AdminWhitelistManagerProps> = ({
@@ -17,13 +22,19 @@ export const AdminWhitelistManager: React.FC<AdminWhitelistManagerProps> = ({
     onAddAdmin,
     onDeleteAdmin,
     confirmingDeleteKey,
-    setConfirmingDeleteKey
+    setConfirmingDeleteKey,
+    title = "Quản lý Admin phụ",
+    roleLabel = "Contributor",
+    icon = "🛡️",
+    primaryColor = "#F27024",
+    protectedEmails = []
 }) => {
+    const isProtected = (email: string) => protectedEmails.some(pe => pe.toLowerCase() === email.toLowerCase());
     return (
         <div className="bg-white p-8 rounded-2xl border border-slate-100 shadow-sm">
-            <h2 className="text-[11px] font-bold text-[#F27024] mb-8 flex items-center gap-3 uppercase tracking-[0.2em] font-heading">
-                <span className="w-8 h-8 bg-orange-50 text-[#F27024] rounded-lg flex items-center justify-center text-xs font-bold border border-orange-100/50">🛡️</span>
-                Quản lý Admin phụ
+            <h2 className={`text-[11px] font-bold mb-8 flex items-center gap-3 uppercase tracking-[0.2em] font-heading`} style={{ color: primaryColor }}>
+                <span className="w-8 h-8 bg-slate-50 rounded-lg flex items-center justify-center text-xs font-bold border border-slate-100/50">{icon}</span>
+                {title}
             </h2>
 
             <form onSubmit={onAddAdmin} className="flex flex-col sm:flex-row gap-4 mb-10">
@@ -47,32 +58,40 @@ export const AdminWhitelistManager: React.FC<AdminWhitelistManagerProps> = ({
                 {Object.entries(adminEmails).map(([key, email]) => (
                     <div key={key} className="flex items-center justify-between p-4 bg-slate-50/50 border border-slate-100 rounded-xl group hover:border-orange-200/50 hover:bg-white transition-all">
                         <div className="flex flex-col overflow-hidden">
-                            <span className="text-xs font-semibold text-slate-700 truncate">{email}</span>
-                            <span className="text-[9px] font-bold text-slate-400 uppercase tracking-widest mt-1 font-heading">Contributor</span>
+                            <span className="text-xs font-semibold text-slate-700 truncate">{email as string}</span>
+                            <span className="text-[9px] font-bold text-slate-400 uppercase tracking-widest mt-1 font-heading">{roleLabel}</span>
                         </div>
                         
-                        {confirmingDeleteKey === key ? (
-                            <div className="flex items-center gap-1.5 animate-in fade-in slide-in-from-right-2 duration-300">
+                        {!isProtected(email as string) && (
+                            confirmingDeleteKey === key ? (
+                                <div className="flex items-center gap-1.5 animate-in fade-in slide-in-from-right-2 duration-300">
+                                    <button
+                                        onClick={() => onDeleteAdmin(key)}
+                                        className="px-2.5 py-1.5 bg-rose-500 text-white rounded-lg text-[9px] font-bold uppercase tracking-wider hover:bg-rose-600 transition-all shadow-sm"
+                                    >
+                                        Xóa
+                                    </button>
+                                    <button
+                                        onClick={() => setConfirmingDeleteKey(null)}
+                                        className="px-2.5 py-1.5 bg-white text-slate-400 border border-slate-100 rounded-lg text-[9px] font-bold uppercase tracking-wider hover:text-slate-600 transition-all"
+                                    >
+                                        Hủy
+                                    </button>
+                                </div>
+                            ) : (
                                 <button
-                                    onClick={() => onDeleteAdmin(key)}
-                                    className="px-2.5 py-1.5 bg-rose-500 text-white rounded-lg text-[9px] font-bold uppercase tracking-wider hover:bg-rose-600 transition-all shadow-sm"
+                                    onClick={() => setConfirmingDeleteKey(key)}
+                                    className="p-2 text-slate-300 hover:text-rose-500 hover:bg-rose-50 rounded-xl transition-all opacity-0 group-hover:opacity-100"
                                 >
-                                    Xóa
+                                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg>
                                 </button>
-                                <button
-                                    onClick={() => setConfirmingDeleteKey(null)}
-                                    className="px-2.5 py-1.5 bg-white text-slate-400 border border-slate-100 rounded-lg text-[9px] font-bold uppercase tracking-wider hover:text-slate-600 transition-all"
-                                >
-                                    Hủy
-                                </button>
+                            )
+                        )}
+                        
+                        {isProtected(email as string) && (
+                            <div className="p-2 text-slate-200 cursor-help" title="Email hệ thống cố định">
+                                <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 20 20"><path fillRule="evenodd" d="M5 9V7a5 5 0 0110 0v2a2 2 0 012 2v5a2 2 0 01-2 2H5a2 2 0 01-2-2v-5a2 2 0 012-2zm8-2v2H7V7a3 3 0 016 0z" clipRule="evenodd" /></svg>
                             </div>
-                        ) : (
-                            <button
-                                onClick={() => setConfirmingDeleteKey(key)}
-                                className="p-2 text-slate-300 hover:text-rose-500 hover:bg-rose-50 rounded-xl transition-all opacity-0 group-hover:opacity-100"
-                            >
-                                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg>
-                            </button>
                         )}
                     </div>
                 ))}

@@ -46,6 +46,17 @@ const Layout: React.FC<Props> = ({ children, user, userId, onLogout, syncHistory
             <span className="hidden sm:inline ml-2">Lịch sử</span>
           </button>
 
+          <Link
+            to="/"
+            className="flex items-center justify-center w-10 h-10 sm:w-auto sm:px-4 sm:py-2 bg-blue-50 hover:bg-blue-100 text-blue-600 rounded-xl transition-all font-bold text-sm border border-blue-200"
+            title="Quay lại Lịch trình"
+          >
+            <svg className="w-5 h-5 sm:w-4 sm:h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" />
+            </svg>
+            <span className="hidden sm:inline ml-2">Lịch trình</span>
+          </Link>
+
           {isAdmin(user.email) && (
             <Link
               to="/admin"
@@ -63,8 +74,12 @@ const Layout: React.FC<Props> = ({ children, user, userId, onLogout, syncHistory
           <div className="h-8 w-px bg-slate-200 mx-1 sm:mx-2 hidden xs:block"></div>
 
           <div className="flex items-center gap-1 sm:gap-3">
-            <div className="text-right hidden sm:block">
-              <div className="font-bold text-[13px] text-slate-800 leading-none truncate max-w-[100px]">{user.name}</div>
+            <div className="flex flex-col items-end hidden sm:flex">
+              <div className="font-bold text-[13px] text-slate-800 leading-none">{user.name}</div>
+              <div className="flex items-center gap-1 mt-1">
+                <div className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse"></div>
+                <span className="text-[9px] font-bold text-slate-400 uppercase tracking-widest">Đang hoạt động</span>
+              </div>
             </div>
             
             <div className="relative group shrink-0">

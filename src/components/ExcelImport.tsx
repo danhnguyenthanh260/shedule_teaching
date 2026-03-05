@@ -266,13 +266,12 @@ export const ExcelImport: React.FC<ExcelImportProps> = ({
   };
 
   return (
-    <div className="flex flex-col gap-1.5 p-0.5">
-      <div className="flex flex-col sm:flex-row items-end gap-2">
-        <div className="flex-1 w-full">
-          <label className="block text-[9px] font-bold text-slate-400 mb-1 ml-1 uppercase tracking-widest leading-none">Chọn Học kỳ</label>
+    <div className="flex flex-col gap-3">
+      <div className="flex flex-col gap-4">
+        <div className="w-full">
           <div className="relative group">
             <select
-              className="w-full pl-3 pr-8 py-1.5 bg-white border border-slate-200 rounded-xl focus:ring-2 focus:ring-fpt-orange outline-none text-[11px] font-bold text-slate-700 h-9 appearance-none transition-all group-hover:border-slate-300 pointer-events-auto cursor-pointer relative z-10"
+              className="w-full pl-10 pr-8 py-2.5 bg-white border border-slate-200 rounded-2xl focus:ring-2 focus:ring-blue-100 focus:border-blue-400 outline-none text-[12px] font-semibold text-slate-700 h-11 appearance-none transition-all group-hover:border-slate-300 cursor-pointer shadow-sm relative z-10"
               value={tempSemesterId}
               onChange={(e) => handleSemesterChange(e.target.value)}
             >
@@ -281,32 +280,37 @@ export const ExcelImport: React.FC<ExcelImportProps> = ({
                 <option key={s.id} value={s.id}>{s.semester}</option>
               ))}
             </select>
-            <div className="absolute right-3 top-3 text-slate-300 pointer-events-none group-focus-within:text-fpt-orange transition-colors text-[10px] font-bold">
+            <div className="absolute left-3.5 top-3.5 text-slate-400 z-20">
+              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" /></svg>
+            </div>
+            <div className="absolute right-3.5 top-4 text-slate-300 pointer-events-none group-focus-within:text-blue-500 transition-colors text-[10px] font-bold z-20">
               ▼
             </div>
           </div>
         </div>
 
-        <div className="flex-none flex items-center gap-2 mb-0">
-          <button
-            onClick={() => handleShowData(true)}
-            disabled={isProcessing || !sheetUrl}
-            className="px-5 h-9 bg-[#F27024] text-white rounded-xl hover:bg-orange-600 active:scale-95 transition-all font-bold shadow-lg shadow-orange-100 flex items-center justify-center gap-2 disabled:bg-slate-50 disabled:text-slate-300 disabled:shadow-none min-w-[110px] text-[10px] uppercase tracking-widest"
-          >
-            {isProcessing ? (
-              <div className="w-3.5 h-3.5 border-2 border-white/30 border-t-white rounded-full animate-spin" />
-            ) : (
-              <>Tải lại</>
-            )}
-          </button>
-        </div>
+        <button
+          onClick={() => handleShowData(true)}
+          disabled={isProcessing || !sheetUrl}
+          className="w-full h-11 bg-white hover:bg-slate-50 border border-slate-200 text-slate-700 rounded-2xl active:scale-[0.98] transition-all font-bold shadow-sm flex items-center justify-center gap-2.5 disabled:bg-slate-50 disabled:text-slate-300 disabled:shadow-none min-w-[110px] text-[11px] uppercase tracking-wider relative overflow-hidden"
+        >
+          {isProcessing ? (
+            <div className="flex items-center gap-2">
+              <div className="w-4 h-4 border-2 border-blue-100 border-t-blue-600 rounded-full animate-spin" />
+              <span className="text-blue-600">Đang đồng bộ</span>
+            </div>
+          ) : (
+            <>
+              <svg className="w-4 h-4 text-orange-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" /></svg>
+              <span>Tải lại</span>
+            </>
+          )}
+        </button>
       </div>
 
-
       {isProcessing && (
-        <div className="flex items-center gap-2 px-3 py-2 bg-orange-50 rounded-lg animate-pulse border border-orange-100">
-          <div className="w-2 h-2 bg-orange-400 rounded-full animate-bounce"></div>
-          <span className="text-[9px] font-bold text-orange-600 uppercase tracking-widest">Đang tải dữ liệu từ Google Sheets...</span>
+        <div className="px-3 py-2 bg-blue-50/50 border border-blue-100/50 rounded-xl animate-pulse">
+          <p className="text-[9px] font-bold text-blue-600 uppercase tracking-widest text-center">Đang nạp dữ liệu từ Cloud...</p>
         </div>
       )}
     </div>

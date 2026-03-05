@@ -4,7 +4,8 @@ import { useFirebase } from './context/FirebaseContext';
 import { LoginScreen } from './components/LoginScreen';
 import { AdminPage } from './pages/AdminPage';
 import { LecturerApp } from './LecturerApp';
-import { isAdmin } from './config/admin';
+import { LecturerCalendarPage } from './features/schedule-sync/pages/LecturerCalendarPage';
+import Layout from './components/Layout';
 
 const AccessDenied: React.FC<{ email: string | null; logout: () => void }> = ({ email, logout }) => (
   <div className="min-h-screen bg-[#0F172A] flex items-center justify-center p-6">
@@ -70,7 +71,8 @@ const App: React.FC = () => {
           path="/admin" 
           element={isUserAdmin ? <AdminPage /> : <Navigate to="/" />} 
         />
-        <Route path="/" element={<LecturerApp />} />
+        <Route path="/dashboard" element={<LecturerApp />} />
+        <Route path="/" element={<LecturerCalendarPage />} />
         <Route path="*" element={<Navigate to="/" />} />
       </Routes>
     </BrowserRouter>

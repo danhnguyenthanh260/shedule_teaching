@@ -1,5 +1,6 @@
 
 import React, { useEffect, useState, useMemo, useRef, useCallback } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { ExcelImport } from '../../../components/ExcelImport';
 import { MappingTool } from '../../../components/MappingTool';
 import { ScheduleTable } from '../../../components/ScheduleTable';
@@ -24,6 +25,7 @@ import { ref, set, get, onValue } from 'firebase/database';
 import { configService, SemesterConfig } from '../../../services/configService';
 
 export const LecturerDashboard: React.FC = () => {
+  const navigate = useNavigate();
   const { user: firebaseUser, accessToken, reauthorizeGoogle } = useFirebase();
   const [isHistoryOpen, setIsHistoryOpen] = useState(false);
   const [refreshHistory, setRefreshHistory] = useState(0);
@@ -1257,6 +1259,16 @@ export const LecturerDashboard: React.FC = () => {
                     <span>Đồng bộ lên Calendar ({selectedIds.size})</span>
                   </>
                 )}
+              </button>
+
+              <button
+                onClick={() => navigate('/calendar')}
+                className="h-10 px-4 bg-slate-900 hover:bg-slate-800 text-white rounded-xl font-bold transition-all flex items-center justify-center gap-2 shadow-sm uppercase text-[10px] sm:text-xs tracking-wider whitespace-nowrap"
+              >
+                <svg className="w-4 h-4 text-orange-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" />
+                </svg>
+                <span>Xem dạng lịch</span>
               </button>
 
               {isAdmin(firebaseUser?.email) && (

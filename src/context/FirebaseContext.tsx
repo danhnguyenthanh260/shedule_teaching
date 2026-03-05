@@ -1,7 +1,7 @@
 import React, { createContext, useContext, useEffect, useState } from 'react';
 import { auth, db, database } from '../config/firebase';
 import { ref, onValue } from 'firebase/database';
-import { SUPER_ADMIN_EMAILS, setDynamicAdmins, isSuperAdmin as checkIsSuperAdmin } from '../config/admin';
+import { SUPER_ADMIN_EMAILS, setAdminWhitelists, isSuperAdmin as checkIsSuperAdmin } from '../config/admin';
 import {
   createUserWithEmailAndPassword,
   signInWithEmailAndPassword,
@@ -56,6 +56,7 @@ export const FirebaseProvider: React.FC<{ children: React.ReactNode }> = ({ chil
   const [isAuthorized, setIsAuthorized] = useState(false);
   const [isWhitelistLoading, setIsWhitelistLoading] = useState(true);
   const [adminList, setAdminList] = useState<string[]>([]);
+  const [superAdminList, setSuperAdminList] = useState<string[]>([]);
   const [lecturerList, setLecturerList] = useState<string[]>([]);
 
   // Check for redirect result on mount
@@ -131,43 +132,50 @@ export const FirebaseProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     return unsubscribe;
   }, [accessToken]);
 
-  // Handle Admin Whitelist
+  // Handle Admin & Super Admin Whitelists
   useEffect(() => {
-    logInfo('Initializing Whitelist Watcher...');
+    logInfo('Initializing Admin Whitelist Watcher...');
     
-    // 🛡️ FAIL-SAFE: If Firebase doesn't respond in 5 seconds, unblock the UI
     const timeoutId = setTimeout(() => {
       if (isWhitelistLoading) {
-        console.warn('⚠️ Whitelist loading timed out after 5s. Unblocking UI as fall-safe.');
+        console.warn('⚠️ Whitelist loading timed out after 5s. Unblocking UI.');
         setIsWhitelistLoading(false);
       }
     }, 5000);
 
-    const adminWhitelistRef = ref(database, 'admin_whitelist');
-    const unsubscribe = onValue(adminWhitelistRef, (snapshot) => {
-      console.log('📡 Whitelist data received:', snapshot.val());
+    const adminsRef = ref(database, 'admin_whitelist');
+    const supersRef = ref(database, 'super_admin_whitelist');
+
+    let localAdminList: string[] = [];
+    let localSuperList: string[] = [];
+
+    const handleUpdate = () => {
+      setAdminWhitelists(localAdminList, localSuperList);
+      setIsWhitelistLoading(false);
+      clearTimeout(timeoutId);
+    };
+
+    const unsubAdmins = onValue(adminsRef, (snapshot) => {
       const data = snapshot.val();
-      let list: string[] = [];
-      if (data && typeof data === 'object') {
-        list = Object.values(data).map((v: any) => String(v).trim().toLowerCase());
-      }
-      setAdminList(list);
-      setDynamicAdmins(list);
-      setIsWhitelistLoading(false);
-      clearTimeout(timeoutId);
-      logInfo('Admin Whitelist Synced');
-    }, (error) => {
-      console.error('❌ Whitelist fetch error:', error);
-      setIsWhitelistLoading(false);
-      clearTimeout(timeoutId);
+      localAdminList = data ? Object.values(data).map((v: any) => String(v).trim().toLowerCase()) : [];
+      setAdminList(localAdminList);
+      handleUpdate();
+    });
+
+    const unsubSupers = onValue(supersRef, (snapshot) => {
+      const data = snapshot.val();
+      localSuperList = data ? Object.values(data).map((v: any) => String(v).trim().toLowerCase()) : [];
+      setSuperAdminList(localSuperList);
+      handleUpdate();
     });
 
     return () => {
-      unsubscribe();
+      unsubAdmins();
+      unsubSupers();
       clearTimeout(timeoutId);
     };
   }, []);
-
+    
   // Handle Lecturer Whitelist
   useEffect(() => {
     const lecturerWhitelistRef = ref(database, 'lecturer_whitelist');
@@ -263,15 +271,9 @@ export const FirebaseProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       console.log('Starting Google login with popup...');
 
       const provider = new GoogleAuthProvider();
-      provider.addScope('https://www.googleapis.com/auth/spreadsheets.readonly');
-      provider.addScope('https://www.googleapis.com/auth/calendar.events');
-      provider.addScope('https://www.googleapis.com/auth/calendar.readonly');
-
-      /* 
-       * 🚀 OPTIMIZATION: Removed prompt: 'select_account'
-       * This allows the browser to auto-select if only one account exists, 
-       * making the re-auth popup close almost instantly.
-       */
+      // 🛡️ NO EXTRA SCOPES: Lecturers only need identity.
+      // We removed Spreadsheet and Calendar scopes to avoid permission prompts.
+      provider.setCustomParameters({ prompt: 'select_account' });
 
       const result = await signInWithPopup(auth, provider);
       setUserUID(result.user.uid);

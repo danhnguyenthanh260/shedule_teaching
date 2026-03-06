@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { GoogleLoginButton } from './FirebaseAuth';
+import { Link } from 'react-router-dom';
 
 const BACKGROUND_IMAGES = [
   '/assets/bg1.jpg',
@@ -61,10 +62,10 @@ export const LoginScreen: React.FC = () => {
           </div>
           
           <h1 className="text-3xl md:text-4xl font-bold text-slate-900 mb-2 tracking-tight uppercase">
-            FPTU <span className="text-[#F27024]">SYNC</span>
+            ADMIN <span className="text-[#F27024]">PORTAL</span>
           </h1>
           <p className="text-slate-500 font-bold text-[10px] mb-10 leading-relaxed px-4 uppercase tracking-widest opacity-70">
-            Hệ thống quản lý & đồng bộ lịch trình <br className="hidden md:block"/> dành cho Giảng viên FPT
+            Hệ thống quản lý lịch trình <br className="hidden md:block"/> Dành cho Quản trị viên FPT
           </p>
           
           <div className="space-y-6">
@@ -74,20 +75,29 @@ export const LoginScreen: React.FC = () => {
             
             <div className="relative flex items-center gap-4">
               <div className="flex-1 h-px bg-slate-100" />
-              <span className="text-[10px] font-bold text-slate-300 uppercase tracking-widest">Protected Access</span>
+              <span className="text-[10px] font-bold text-slate-300 uppercase tracking-widest">Restricted Access</span>
               <div className="flex-1 h-px bg-slate-100" />
             </div>
             
             <div className="pt-2">
               <p className="text-[10px] text-[#F27024] font-bold uppercase tracking-widest">
-                Đăng nhập để tiếp tục
+                Vui lòng đăng nhập bằng tài khoản Admin
               </p>
             </div>
           </div>
         </div>
         
-        <div className="mt-8 text-center">
-          <p className="text-slate-400 text-[9px] font-bold uppercase tracking-widest">
+        <div className="mt-8 text-center space-y-4">
+          <Link 
+            to="/" 
+            className="inline-flex items-center gap-2 px-6 py-2.5 bg-white/10 hover:bg-white/20 border border-white/20 text-white rounded-xl font-bold text-[10px] uppercase tracking-widest transition-all active:scale-95 backdrop-blur-md"
+          >
+            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3m-6 0a1 1 0 001-1v-4a1 1 0 011-1h2a1 1 0 011 1v4a1 1 0 001 1m-6 0h6" />
+            </svg>
+            Về trang chủ
+          </Link>
+          <p className="text-white/40 text-[9px] font-bold uppercase tracking-widest">
             © {new Date().getFullYear()} FPT University • Teaching Schedule
           </p>
         </div>

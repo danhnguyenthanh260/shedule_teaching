@@ -3,7 +3,7 @@ import { NavLink } from 'react-router-dom';
 import { useFirebase } from '../../context/FirebaseContext';
 import { isSuperAdmin } from '../../config/admin';
 
-type AdminTab = 'semesters' | 'admins' | 'lecturers';
+type AdminTab = 'semesters' | 'admins';
 
 interface AdminSidebarProps {
     activeTab: AdminTab;
@@ -19,11 +19,6 @@ export const AdminSidebar: React.FC<AdminSidebarProps> = ({ activeTab, onTabChan
         { id: 'semesters' as AdminTab, label: 'Học kỳ', icon: (
             <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" />
-            </svg>
-        )},
-        { id: 'lecturers' as AdminTab, label: 'Giảng viên', icon: (
-            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 4.354a4 4 0 110 5.292M15 21H3v-1a6 6 0 0112 0v1zm0 0h6v-1a6 6 0 00-9-5.197M13 7a4 4 0 11-8 0 4 4 0 018 0z" />
             </svg>
         )},
         { id: 'admins' as AdminTab, label: 'Quản trị viên', icon: (
@@ -101,15 +96,7 @@ export const AdminSidebar: React.FC<AdminSidebarProps> = ({ activeTab, onTabChan
                 </div>
                 
                 <div className="flex flex-col gap-2">
-                    <NavLink
-                        to="/dashboard"
-                        className="flex items-center justify-center gap-2 py-2.5 bg-slate-900/50 hover:bg-[#F27024] text-slate-400 hover:text-white rounded-lg text-[10px] font-bold transition-all border border-slate-800 hover:border-[#F27024] w-full"
-                    >
-                        <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M4 6a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2V6zM14 6a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2V6zM4 16a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2v-2zM14 16a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2v-2z" />
-                        </svg>
-                        BẢNG ĐIỀU KHIỂN
-                    </NavLink>
+
                     <NavLink
                         to="/"
                         className="flex items-center justify-center gap-2 py-2.5 bg-blue-600/10 hover:bg-blue-600 text-blue-500 hover:text-white rounded-lg text-[10px] font-bold transition-all border border-blue-500/10 hover:border-blue-600 w-full"

@@ -19,7 +19,7 @@ import { SemesterList } from '../components/admin/SemesterList';
 import { AdminWhitelistManager } from '../components/admin/AdminWhitelistManager';
 import { LecturerWhitelistManager } from '../components/admin/LecturerWhitelistManager';
 
-type AdminTab = 'semesters' | 'admins' | 'lecturers';
+type AdminTab = 'semesters' | 'admins';
 
 export const AdminPage: React.FC = () => {
     const { user, logout } = useFirebase();
@@ -30,10 +30,6 @@ export const AdminPage: React.FC = () => {
     const [newAdminEmail, setNewAdminEmail] = useState('');
     const [newSuperAdminEmail, setNewSuperAdminEmail] = useState('');
     const [loading, setLoading] = useState(false);
-    const [lecturerWhitelist, setLecturerWhitelist] = useState<Record<string, { name: string; code: string; email: string }>>({});
-    const [newLecturer, setNewLecturer] = useState({ name: '', code: '', email: '' });
-    const [editingLecturerKey, setEditingLecturerKey] = useState<string | null>(null);
-    const [confirmingDeleteLecturerKey, setConfirmingDeleteLecturerKey] = useState<string | null>(null);
     const [toastMessage, setToastMessage] = useState<string | null>(null);
     const lecturerFileInputRef = React.useRef<HTMLInputElement>(null);
 
@@ -80,7 +76,6 @@ export const AdminPage: React.FC = () => {
         fetchConfigs();
         fetchAdminWhitelist();
         fetchSuperAdminWhitelist();
-        fetchLecturerWhitelist();
     }, []);
 
     // ✅ Effect to auto-fetch tabs when URL changes
@@ -410,136 +405,6 @@ export const AdminPage: React.FC = () => {
         }
     };
 
-    const fetchLecturerWhitelist = () => {
-        const lecturerRef = ref(database, 'lecturer_whitelist');
-        onValue(lecturerRef, (snapshot) => {
-            const data = snapshot.val();
-            setLecturerWhitelist(data || {});
-        });
-    };
-
-    const handleAddLecturer = async (e: React.FormEvent) => {
-        e.preventDefault();
-        if (!newLecturer.name || !newLecturer.code) {
-            setToastMessage('❌ Vui lòng điền Họ tên và Mã giảng viên');
-            setTimeout(() => setToastMessage(null), 3000);
-            return;
-        }
-
-        const generatedEmail = `${newLecturer.code.trim()}@fpt.edu.vn`.toLowerCase();
-        
-        try {
-            setLoading(true);
-            if (editingLecturerKey) {
-                const lecturerRef = ref(database, `lecturer_whitelist/${editingLecturerKey}`);
-                await update(lecturerRef, {
-                    ...newLecturer,
-                    email: generatedEmail
-                });
-                setToastMessage('✅ Đã cập nhật thông tin giảng viên');
-            } else {
-                const lecturerRef = ref(database, 'lecturer_whitelist');
-                const newRef = push(lecturerRef);
-                await set(newRef, {
-                    ...newLecturer,
-                    email: generatedEmail
-                });
-                setToastMessage('✅ Đã thêm giảng viên mới');
-            }
-            
-            setNewLecturer({ name: '', code: '', email: '' });
-            setEditingLecturerKey(null);
-            setTimeout(() => setToastMessage(null), 3000);
-        } catch (err: any) {
-            setToastMessage('❌ Lỗi: ' + err.message);
-            setTimeout(() => setToastMessage(null), 5000);
-        } finally {
-            setLoading(false);
-        }
-    };
-
-    const handleDeleteLecturer = async (key: string) => {
-        try {
-            const lecturerRef = ref(database, `lecturer_whitelist/${key}`);
-            await remove(lecturerRef);
-            setToastMessage('✅ Đã xóa giảng viên');
-            setTimeout(() => setToastMessage(null), 3000);
-        } catch (err: any) {
-            setToastMessage('❌ Lỗi khi xóa: ' + err.message);
-            setTimeout(() => setToastMessage(null), 5000);
-        } finally {
-            setConfirmingDeleteLecturerKey(null);
-        }
-    };
-
-    const handleLecturerExcelImport = (e: React.ChangeEvent<HTMLInputElement>) => {
-        const file = e.target.files?.[0];
-        if (!file) return;
-
-        const reader = new FileReader();
-        reader.onload = async (evt) => {
-            try {
-                setLoading(true);
-                const bstr = evt.target?.result;
-                const wb = XLSX.read(bstr, { type: 'binary' });
-                const wsname = wb.SheetNames[0];
-                const ws = wb.Sheets[wsname];
-                const data = XLSX.utils.sheet_to_json(ws, { header: 1 }) as any[][];
-
-                if (data.length < 2) throw new Error('File Excel trống hoặc thiếu dữ liệu');
-
-                const headers = data[0].map(h => String(h || "").toLowerCase().trim());
-                
-                // Map columns
-                const nameIdx = headers.findIndex(h => h.includes('họ tên') || h.includes('name') || h.includes('giảng viên'));
-                const codeIdx = headers.findIndex(h => h.includes('mã gv') || h.includes('mã giảng viên') || h.includes('code') || h.includes('mã nv'));
-                const emailIdx = headers.findIndex(h => h.includes('email') || h.includes('gmail') || h.includes('thư điện tử') || h.includes('mail edu'));
-
-                if (nameIdx === -1 || codeIdx === -1) {
-                    throw new Error('Không nhận diện được các cột bắt buộc: Họ tên, Mã GV. Vui lòng kiểm tra tiêu đề file.');
-                }
-
-                const lecturersToAdd: any[] = [];
-                for (let i = 1; i < data.length; i++) {
-                    const row = data[i];
-                    const name = String(row[nameIdx] || "").trim();
-                    const code = String(row[codeIdx] || "").trim();
-                    
-                    // Email logic: Use Excel email if exists, otherwise generate from code
-                    let email = "";
-                    if (emailIdx !== -1 && row[emailIdx]) {
-                        email = String(row[emailIdx]).trim().toLowerCase();
-                    } else if (code) {
-                        email = `${code}@fpt.edu.vn`.toLowerCase();
-                    }
-
-                    if (name && code && email) {
-                        lecturersToAdd.push({ name, code, email });
-                    }
-                }
-
-                if (lecturersToAdd.length === 0) throw new Error('Không tìm thấy dữ liệu giảng viên hợp lệ trong file');
-
-                const updates: any = {};
-                lecturersToAdd.forEach(lec => {
-                    const newKey = push(ref(database, 'lecturer_whitelist')).key;
-                    if (newKey) updates[`lecturer_whitelist/${newKey}`] = lec;
-                });
-
-                await update(ref(database), updates);
-                setToastMessage(`✅ Đã import thành công ${lecturersToAdd.length} giảng viên!`);
-                setTimeout(() => setToastMessage(null), 5000);
-            } catch (err: any) {
-                setToastMessage('❌ Lỗi Import: ' + err.message);
-                setTimeout(() => setToastMessage(null), 5000);
-            } finally {
-                setLoading(false);
-                if (lecturerFileInputRef.current) lecturerFileInputRef.current.value = '';
-            }
-        };
-        reader.readAsBinaryString(file);
-    };
-
     const [activeTab, setActiveTab] = useState<AdminTab>('semesters');
 
 
@@ -547,7 +412,6 @@ export const AdminPage: React.FC = () => {
         switch (activeTab) {
             case 'semesters': return 'Quản lý học kỳ';
             case 'admins': return 'Quản trị viên';
-            case 'lecturers': return 'Quản lý Giảng viên';
             default: return 'Admin Dashboard';
         }
     };
@@ -556,7 +420,6 @@ export const AdminPage: React.FC = () => {
         switch (activeTab) {
             case 'semesters': return 'Cấu hình Google Sheet và ánh xạ cột';
             case 'admins': return 'Danh sách email có quyền quản trị';
-            case 'lecturers': return 'Danh sách giảng viên được phép truy cập';
             default: return 'Cấu hình hệ thống';
         }
     };
@@ -689,30 +552,7 @@ export const AdminPage: React.FC = () => {
                     </div>
                 )}
 
-                {activeTab === 'lecturers' && (
-                    <LecturerWhitelistManager 
-                        lecturers={lecturerWhitelist}
-                        newLecturer={newLecturer}
-                        onNewLecturerChange={(data) => setNewLecturer({ ...newLecturer, ...data })}
-                        onAddLecturer={handleAddLecturer}
-                        onDeleteLecturer={handleDeleteLecturer}
-                        onEditLecturer={(key, data) => {
-                            setNewLecturer(data);
-                            setEditingLecturerKey(key);
-                            window.scrollTo({ top: 0, behavior: 'smooth' });
-                        }}
-                        onImportExcel={handleLecturerExcelImport}
-                        confirmingDeleteKey={confirmingDeleteLecturerKey}
-                        setConfirmingDeleteKey={setConfirmingDeleteLecturerKey}
-                        editingKey={editingLecturerKey}
-                        onCancelEdit={() => {
-                            setEditingLecturerKey(null);
-                            setNewLecturer({ name: '', code: '', email: '' });
-                        }}
-                        fileInputRef={lecturerFileInputRef}
-                        loading={loading}
-                    />
-                )}
+
             </div>
 
             {/* Global Toast */}

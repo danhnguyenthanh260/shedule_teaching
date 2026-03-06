@@ -725,16 +725,17 @@ export const LecturerCalendarPage: React.FC = () => {
         }
 
         /* 🔘 View Switcher Buttons (Month, Week, Day) - Premium Redesign */
-        .google-style .fc-button-group {
-          background: #f1f3f4;
+        .google-style .fc-toolbar-chunk:last-child .fc-button-group {
+          background: #f8f9fa;
           padding: 3px;
           border-radius: 12px;
-          border: 1px solid #e8eaed;
+          border: 1px solid #dadce0;
           display: flex !important;
           gap: 2px;
+          box-shadow: inset 0 1px 2px rgba(0,0,0,0.02);
         }
 
-        .google-style .fc-button-group .fc-button {
+        .google-style .fc-toolbar-chunk:last-child .fc-button-group .fc-button {
           background: transparent !important;
           border: none !important;
           color: #5f6368 !important;
@@ -754,19 +755,28 @@ export const LecturerCalendarPage: React.FC = () => {
         }
 
         /* 🛠️ Navigator Group (Prev/Next) specific - Keep it compact */
-        .google-style .fc-toolbar-chunk .fc-button-group:first-child {
+        .google-style .fc-toolbar-chunk:first-child .fc-button-group {
           background: transparent !important;
           border: none !important;
           padding: 0 !important;
+          box-shadow: none !important;
         }
 
 
-        .google-style .fc-button-group .fc-button:hover {
+        .google-style .fc-toolbar-chunk:last-child .fc-button-group .fc-button:hover {
           background: rgba(60, 64, 67, 0.08) !important;
           color: #202124 !important;
         }
 
-        .google-style .fc-button-group .fc-button-active {
+        .google-style .fc-toolbar-title {
+          font-size: 20px !important;
+          font-weight: 400 !important;
+          color: #3c4043 !important;
+          text-transform: capitalize !important;
+          margin-left: 16px !important;
+        }
+
+        .google-style .fc-toolbar-chunk:last-child .fc-button-group .fc-button-active {
           background: #1a73e8 !important;
           color: white !important;
           box-shadow: 0 4px 10px rgba(26, 115, 232, 0.3) !important;
@@ -804,15 +814,41 @@ export const LecturerCalendarPage: React.FC = () => {
         .google-style .fc-next-button {
           border: none !important;
           background: transparent !important;
+          color: #5f6368 !important; /* Đảm bảo icon có màu đậm để không bị trùng nền */
           padding: 8px !important;
           border-radius: 50% !important;
           margin: 0 4px !important;
+          display: flex !important;
+          align-items: center !important;
+          justify-content: center !important;
         }
         
         .google-style .fc-prev-button:hover, 
         .google-style .fc-next-button:hover {
           background-color: #f1f3f4 !important;
         }
+
+        /* 🛠️ FIX ICONS FOR PRODUCTION (VERCEL): Use SVG masks instead of font files */
+        .google-style .fc-icon-chevron-left::before {
+          content: "" !important;
+          display: block !important;
+          width: 20px !important;
+          height: 20px !important;
+          background-color: currentColor !important;
+          mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='currentColor' stroke-width='4' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='15 18 9 12 15 6'%3E%3C/polyline%3E%3C/svg%3E") no-repeat center !important;
+          -webkit-mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='currentColor' stroke-width='4' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='15 18 9 12 15 6'%3E%3C/polyline%3E%3C/svg%3E") no-repeat center !important;
+        }
+
+        .google-style .fc-icon-chevron-right::before {
+          content: "" !important;
+          display: block !important;
+          width: 20px !important;
+          height: 20px !important;
+          background-color: currentColor !important;
+          mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='currentColor' stroke-width='4' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='9 18 15 12 9 6'%3E%3C/polyline%3E%3C/svg%3E") no-repeat center !important;
+          -webkit-mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='currentColor' stroke-width='4' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='9 18 15 12 9 6'%3E%3C/polyline%3E%3C/svg%3E") no-repeat center !important;
+        }
+
 
         /* GOOGLE STYLE TIME AXIS (GMT+07) */
         .google-style .fc-timegrid-axis-cushion::before {

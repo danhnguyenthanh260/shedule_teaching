@@ -478,8 +478,45 @@ export const LecturerDashboard: React.FC = () => {
 
   const baseRows = isPreviewMode ? previewRows : rows;
 
+  // Detect lecturers from data
+  const availableLecturers = useMemo(() => {
+    const map = new Map<string, string>(); // handle -> original string
+    const addPerson = (val: string) => {
+      if (!val || typeof val !== 'string') return;
+      const str = val.trim();
+      if (!str) return;
+
+      let handle = "";
+      if (str.includes('(') && str.includes(')')) {
+        handle = str.split('(')[1].split(')')[0].trim().toLowerCase();
+      } else if (str.includes('@')) {
+        handle = str.split('@')[0].trim().toLowerCase();
+      } else {
+        const nonAccented = khongDau(str);
+        const parts = nonAccented.split(' ');
+        handle = parts[parts.length - 1].toLowerCase().replace(/[^a-z0-9]/g, '');
+      }
+
+      if (handle && !map.has(handle)) {
+        map.set(handle, str);
+      }
+    };
+
+    rows.forEach(r => {
+      if (r.person) addPerson(r.person);
+      if (r.reviewers) r.reviewers.forEach(addPerson);
+      if (r.email) addPerson(r.email);
+    });
+
+    return Array.from(map.entries())
+      .map(([handle, label]) => ({ handle, label }))
+      .sort((a, b) => a.label.localeCompare(b.label));
+  }, [rows]);
+
   const filteredRows = useMemo(() => {
-    return baseRows.filter(row => rowMatchesFilter(row, personFilter));
+    // 🚀 Update: In Dashboard, personFilter still holds the handle
+    const filterHandle = personFilter?.toLowerCase().replace(/[^a-z0-9]/g, '');
+    return baseRows.filter(row => rowMatchesFilter(row, filterHandle));
   }, [baseRows, personFilter, rowMatchesFilter]);
 
   // 📧 Logic trích xuất Email & Gom nhóm (Dùng chung cho cả sync & notify)
@@ -1213,16 +1250,24 @@ export const LecturerDashboard: React.FC = () => {
                       <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
                     </svg>
                   </div>
-                  <input
-                    type="text"
-                    placeholder="Tìm giảng viên..."
-                    className="w-full pl-9 pr-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs text-slate-700 placeholder:text-slate-400 focus:ring-2 focus:ring-[#F27024]/10 focus:border-[#F27024] outline-none transition-all"
+                  <select
+                    className="w-full pl-9 pr-8 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs text-slate-700 focus:ring-2 focus:ring-[#F27024]/10 focus:border-[#F27024] outline-none transition-all appearance-none cursor-pointer font-bold"
                     value={personFilter}
                     onChange={(e) => {
                       setPersonFilter(e.target.value);
                       updateSelections(rows, e.target.value);
                     }}
-                  />
+                  >
+                    <option value="">-- Tất cả giảng viên / Tìm kiếm --</option>
+                    {availableLecturers.map(lec => (
+                      <option key={lec.handle} value={lec.handle}>
+                        {lec.label}
+                      </option>
+                    ))}
+                  </select>
+                  <div className="absolute right-3 top-2.5 text-slate-300 pointer-events-none">
+                    <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M19 9l-7 7-7-7" /></svg>
+                  </div>
                 </div>
 
                 <SearchColumnSelector

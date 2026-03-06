@@ -19,6 +19,7 @@ export const LecturerCalendarPage: React.FC = () => {
   const calendarRef = useRef<FullCalendar>(null);
   const [miniCalendarDate, setMiniCalendarDate] = useState(new Date());
   const [isProfileOpen, setIsProfileOpen] = useState(false);
+  const [isMobileSidebarOpen, setIsMobileSidebarOpen] = useState(false);
   const { user: firebaseUser, accessToken, logout, isAdmin } = useFirebase();
   const persistence = useAppPersistence();
   const {
@@ -154,21 +155,57 @@ export const LecturerCalendarPage: React.FC = () => {
     return `${handle}@fpt.edu.vn`;
   }, [lecturerWhitelist]);
 
-  // Filter rows for current user
+  // Detect lecturers from data
+  const availableLecturers = useMemo(() => {
+    const map = new Map<string, string>(); // handle -> original string
+    
+    const addPerson = (val: string) => {
+      if (!val || typeof val !== 'string') return;
+      const str = val.trim();
+      if (!str) return;
+
+      let handle = "";
+      if (str.includes('(') && str.includes(')')) {
+        handle = str.split('(')[1].split(')')[0].trim().toLowerCase();
+      } else if (str.includes('@')) {
+        handle = str.split('@')[0].trim().toLowerCase();
+      } else {
+        const nonAccented = khongDau(str);
+        const parts = nonAccented.split(' ');
+        handle = parts[parts.length - 1].toLowerCase().replace(/[^a-z0-9]/g, '');
+      }
+
+      if (handle && !map.has(handle)) {
+        map.set(handle, str);
+      }
+    };
+
+    rows.forEach(r => {
+      if (r.person) addPerson(r.person);
+      if (r.reviewers) r.reviewers.forEach(addPerson);
+      if (r.email) addPerson(r.email);
+    });
+
+    return Array.from(map.entries())
+      .map(([handle, label]) => ({ handle, label }))
+      .sort((a, b) => a.label.localeCompare(b.label));
+  }, [rows]);
+
+  // Filter rows for selected lecturer
   const calendarEvents = useMemo(() => {
-    if (!firebaseUser?.email || rows.length === 0) return [];
+    const filterHandle = persistence.personFilter?.toLowerCase().replace(/[^a-z0-9]/g, '');
+    if (!filterHandle || rows.length === 0) return [];
     
-    // Get the identifying handle of the current user (e.g. 'ngohoangtruongdat')
-    const userHandle = firebaseUser.email.split('@')[0].toLowerCase().replace(/[^a-z0-9]/g, '');
-    
-    // Filter rows where user is involved by checking handle
     const userRows = rows.filter(r => {
       const identifiers: string[] = [];
       
-      // Get handles from available fields
       const getHandle = (s: string) => {
         if (!s || typeof s !== 'string') return '';
-        return s.split('@')[0].split('(')[0].trim().toLowerCase().replace(/[^a-z0-9]/g, '');
+        const str = s.trim();
+        if (str.includes('(') && str.includes(')')) {
+          return str.split('(')[1].split(')')[0].trim().toLowerCase().replace(/[^a-z0-9]/g, '');
+        }
+        return str.split('@')[0].split('(')[0].trim().toLowerCase().replace(/[^a-z0-9]/g, '');
       };
       
       if (r.email) identifiers.push(getHandle(r.email));
@@ -179,34 +216,30 @@ export const LecturerCalendarPage: React.FC = () => {
       }
       if (r.person) identifiers.push(getHandle(r.person));
       
-      // Also check if the raw row has the handle anywhere just in case
-      const hasInIdentifiers = identifiers.some(id => id && id === userHandle);
-      const hasInRaw = r.rawRow && typeof r.rawRow === 'string' && r.rawRow.toLowerCase().includes(userHandle);
+      const hasInIdentifiers = identifiers.some(id => id && id === filterHandle);
+      const hasInRaw = r.rawRow && typeof r.rawRow === 'string' && r.rawRow.toLowerCase().includes(filterHandle);
       
       return hasInIdentifiers || hasInRaw;
     });
 
-    // Map to FullCalendar format
-    return userRows.map(r => {
-      // Always display the logged-in user's handle as the event title for clarity
-      return {
-        id: r.id,
-        title: userHandle,
-        start: r.startTime,
-        end: r.endTime,
-        extendedProps: {
-          location: r.location,
-          group: r.groupName,
-          person: r.person,
-          reviewers: r.reviewers,
-          rawRow: r.rawRow
-        },
-        backgroundColor: '#3f51b5',
-        borderColor: 'transparent',
-        textColor: '#ffffff'
-      };
-    });
-  }, [rows, firebaseUser?.email, extractEmail, effectiveIsReview]);
+    return userRows.map(r => ({
+      id: r.id,
+      title: filterHandle,
+      start: r.startTime,
+      end: r.endTime,
+      extendedProps: {
+        location: r.location,
+        group: r.groupName,
+        person: r.person,
+        reviewers: r.reviewers,
+        subCodes: r.subCodes,
+        rawRow: r.rawRow
+      },
+      backgroundColor: r.sheetType === 'council' ? '#ef4444' : '#3f51b5',
+      borderColor: 'transparent',
+      textColor: '#ffffff'
+    }));
+  }, [rows, persistence.personFilter]);
 
   // Mini-calendar logic
   const miniCalendarDays = useMemo(() => {
@@ -246,10 +279,35 @@ export const LecturerCalendarPage: React.FC = () => {
     setMiniCalendarDate(prev => new Date(prev.getFullYear(), prev.getMonth() + 1, 1));
   };
 
+  // Auto-switch to Day view on small screens
+  useEffect(() => {
+    const handleResize = () => {
+      const calendarApi = calendarRef.current?.getApi();
+      if (window.innerWidth < 768 && calendarApi?.view.type === 'timeGridWeek') {
+        calendarApi.changeView('timeGridDay');
+      }
+    };
+    handleResize();
+    window.addEventListener('resize', handleResize);
+    return () => window.removeEventListener('resize', handleResize);
+  }, []);
+
   return (
-    <div className="flex h-screen w-screen bg-white overflow-hidden font-sans text-slate-900">
-      {/* 🟢 LEFT SIDEBAR - Slimmer & Cleaner */}
-      <aside className="hidden lg:flex w-64 flex-col border-r border-slate-200 p-0 bg-white shrink-0">
+    <div className="flex h-screen w-screen bg-white overflow-hidden font-sans text-slate-900 relative">
+      {/* 🟢 MOBILE OVERLAY */}
+      {isMobileSidebarOpen && (
+        <div 
+          className="fixed inset-0 bg-slate-900/40 backdrop-blur-sm z-[250] lg:hidden animate-in fade-in duration-300"
+          onClick={() => setIsMobileSidebarOpen(false)}
+        />
+      )}
+
+      {/* 🟢 LEFT SIDEBAR - Drawer on Mobile, Fixed on Desktop */}
+      <aside className={`
+        fixed inset-y-0 left-0 w-72 bg-white z-[300] transform transition-transform duration-300 ease-in-out border-r border-slate-200
+        lg:translate-x-0 lg:static lg:flex lg:w-64 lg:shrink-0 lg:z-auto
+        ${isMobileSidebarOpen ? 'translate-x-0 shadow-2xl' : '-translate-x-full lg:translate-x-0'}
+       flex flex-col p-0`}>
         <div className="p-4 pt-8">
           {/* Mini Calendar Container */}
           <div className="px-1">
@@ -307,8 +365,8 @@ export const LecturerCalendarPage: React.FC = () => {
               </div>
           </div>
 
-          {/* Moved Semester Selection Here */}
-          <div className="mt-10 px-4">
+          {/* 1. Semester Selection - MOVED TOP */}
+          <div className="mt-8 px-4">
              <div className="flex items-center gap-2 mb-4 px-1">
                 <div className="w-1 h-4 bg-blue-600 rounded-full"></div>
                 <h3 className="text-[11px] font-black text-slate-800 uppercase tracking-widest">Học kỳ giảng dạy</h3>
@@ -339,22 +397,63 @@ export const LecturerCalendarPage: React.FC = () => {
                 />
              </div>
           </div>
+
+          {/* 2. Search Box - MOVED BOTTOM & REDESIGNED */}
+          <div className="mt-10 px-4">
+             <div className="flex items-center gap-2 mb-4 px-1">
+                <div className="w-1 h-4 bg-orange-500 rounded-full"></div>
+                <h3 className="text-[11px] font-black text-slate-800 uppercase tracking-widest">Chọn giảng viên</h3>
+             </div>
+             <div className="relative group">
+                <select
+                  value={persistence.personFilter}
+                  onChange={(e) => persistence.setPersonFilter(e.target.value)}
+                  className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 text-xs focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all outline-none font-bold text-slate-700 appearance-none cursor-pointer hover:bg-slate-100"
+                >
+                  <option value="">-- Chọn tên giảng viên --</option>
+                  {availableLecturers.map(lec => (
+                    <option key={lec.handle} value={lec.handle}>
+                      {lec.label}
+                    </option>
+                  ))}
+                </select>
+                <div className="absolute right-4 top-1/2 -translate-y-1/2 pointer-events-none text-slate-400">
+                  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M19 9l-7 7-7-7" /></svg>
+                </div>
+             </div>
+             
+             {rows.length > 0 && availableLecturers.length === 0 && (
+               <p className="mt-2 text-[10px] text-rose-500 font-medium px-1 flex gap-1 items-center">
+                 <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" /></svg>
+                 Không tìm thấy tên giảng viên trong dữ liệu.
+               </p>
+             )}
+
+             {rows.length > 0 && availableLecturers.length > 0 && (
+               <p className="mt-2 text-[10px] text-slate-400 italic px-1">
+                 Có {availableLecturers.length} giảng viên được phát hiện.
+               </p>
+             )}
+          </div>
         </div>
       </aside>
 
       {/* 🔵 RIGHT MAIN CONTENT */}
-      <div className="flex-1 flex flex-col min-w-0 h-full">
+      <div className="flex-1 flex flex-col min-w-0 h-full relative">
         {/* Top Header - Premium Redesign */}
-        <header className="flex-none h-16 flex items-center justify-between px-6 border-b border-slate-200 bg-white/80 backdrop-blur-md sticky top-0 z-[100]">
-          <div className="flex items-center gap-5">
-            <div className="p-2.5 text-slate-400">
-              <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M4 6h16M4 12h16M4 18h16" /></svg>
-            </div>
-            <div className="flex items-center gap-3">
-              <img src="https://www.gstatic.com/calendar/images/dynamiclogo_2020q4/calendar_5_2x.png" className="w-8 h-8 drop-shadow-sm" alt="logo" />
+        <header className="flex-none h-16 flex items-center justify-between px-4 sm:px-6 border-b border-slate-200 bg-white/80 backdrop-blur-md sticky top-0 z-[100]">
+          <div className="flex items-center gap-2 sm:gap-5">
+            <button 
+              onClick={() => setIsMobileSidebarOpen(true)}
+              className="p-2 text-slate-500 hover:bg-slate-100 rounded-xl lg:hidden"
+            >
+              <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M4 6h16M4 12h16M4 18h16" /></svg>
+            </button>
+            <div className="flex items-center gap-2 sm:gap-3">
+              <img src="https://www.gstatic.com/calendar/images/dynamiclogo_2020q4/calendar_5_2x.png" className="w-7 h-7 sm:w-8 sm:h-8 drop-shadow-sm" alt="logo" />
               <div className="flex flex-col">
-                <span className="text-xl text-slate-800 font-semibold tracking-tight leading-none">Lịch trình</span>
-                <span className="text-[10px] font-bold text-blue-600 uppercase tracking-widest mt-0.5">FPT University</span>
+                <span className="text-base sm:text-xl text-slate-800 font-semibold tracking-tight leading-none">Lịch trình</span>
+                <span className="hidden sm:inline text-[10px] font-bold text-blue-600 uppercase tracking-widest mt-0.5">FPT University</span>
               </div>
             </div>
           </div>
@@ -362,59 +461,36 @@ export const LecturerCalendarPage: React.FC = () => {
           <div className="flex items-center gap-2 sm:gap-4">
             {/* Navigation for Admins */}
             {isAdmin && (
-              <>
-                <Link
-                  to="/dashboard"
-                  className="flex items-center justify-center w-10 h-10 sm:w-auto sm:px-4 sm:py-2 bg-blue-50 text-blue-600 rounded-xl font-bold text-sm border border-blue-100 transition-all hover:bg-blue-100"
-                >
-                  <svg className="w-5 h-5 sm:w-4 sm:h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M4 6a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2V6zM14 6a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2V6zM4 16a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2v-2zM14 16a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2v-2z" />
-                  </svg>
-                  <span className="hidden sm:inline ml-2">Bảng điều khiển</span>
-                </Link>
-
-                <Link
-                  to="/admin"
-                  className="flex items-center justify-center w-10 h-10 sm:w-auto sm:px-4 sm:py-2 bg-slate-800 text-white rounded-xl font-bold text-sm shadow-md hover:bg-slate-900 transition-all"
-                >
-                  <svg className="w-5 h-5 sm:w-4 sm:h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" /><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
-                  </svg>
-                  <span className="hidden sm:inline ml-2">Quản trị</span>
-                </Link>
-              </>
+              <Link
+                to="/admin"
+                className="flex items-center justify-center w-10 h-10 sm:w-auto sm:px-4 sm:py-2 bg-slate-800 text-white rounded-xl font-bold text-sm shadow-md hover:bg-slate-900 transition-all"
+              >
+                <svg className="w-5 h-5 sm:w-4 sm:h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" /><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+                </svg>
+                <span className="hidden sm:inline ml-2">Quản trị</span>
+              </Link>
             )}
 
             <div className="flex items-center gap-3 ml-2">
-              <div className="hidden sm:flex flex-col items-end">
-                <span className="text-[13px] font-bold text-slate-800 leading-none">{firebaseUser?.displayName}</span>
-                <div className="flex items-center gap-1 mt-1">
-                  <div className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse"></div>
-                  <span className="text-[9px] font-bold text-slate-400 uppercase tracking-widest">Đang hoạt động</span>
-                </div>
-              </div>
-
-              <div className="relative">
-                <img 
-                  src={firebaseUser?.photoURL || `https://ui-avatars.com/api/?name=${firebaseUser?.displayName || 'U'}&background=random`} 
-                  className="w-9 h-9 sm:w-10 sm:h-10 rounded-full border border-slate-200 shadow-sm object-cover" 
-                  alt="avatar" 
-                />
-                <div className="absolute -bottom-0.5 -right-0.5 w-3 h-3 bg-emerald-500 border-2 border-white rounded-full"></div>
-              </div>
-
-              <button 
-                onClick={() => {
-                  persistence.clearPersistence();
-                  logout();
-                }}
-                className="p-2 text-slate-300 hover:text-rose-500 transition-colors"
-                title="Đăng xuất"
-              >
-                <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1" />
-                </svg>
-              </button>
+              {firebaseUser ? (
+                <button 
+                  onClick={() => {
+                    persistence.clearPersistence();
+                    logout();
+                  }}
+                  className="px-4 py-2 text-slate-500 hover:text-rose-500 hover:bg-rose-50 rounded-xl font-bold text-sm transition-all"
+                >
+                  Đăng xuất
+                </button>
+              ) : (
+                <Link
+                  to="/admin"
+                  className="px-6 py-2.5 bg-blue-600 text-white rounded-xl font-bold text-sm shadow-md hover:bg-blue-700 transition-all active:scale-95"
+                >
+                  Đăng nhập
+                </Link>
+              )}
             </div>
           </div>
         </header>
@@ -437,11 +513,10 @@ export const LecturerCalendarPage: React.FC = () => {
                 <div className="w-20 h-20 bg-blue-50/50 rounded-full flex items-center justify-center mb-6 overflow-hidden">
                   <img src="https://www.gstatic.com/calendar/images/dynamiclogo_2020q4/calendar_5_2x.png" className="w-10 h-10" alt="calendar-icon" />
                 </div>
-                <h3 className="text-lg font-bold text-slate-800 mb-2 uppercase tracking-tight">Không tìm thấy lịch dạy</h3>
+                <h3 className="text-lg font-bold text-slate-800 mb-2 uppercase tracking-tight">Vui lòng chọn giảng viên</h3>
                 <p className="max-w-xs text-xs text-slate-400 leading-relaxed font-medium">
-                  Hệ thống đã nạp dữ liệu học kỳ nhưng không tìm thấy sự kiện nào khớp với tài khoản <span className="text-blue-600 font-bold">{firebaseUser?.email}</span>.
+                  Hệ thống đã nạp {rows.length} dòng dữ liệu. <br/> Hãy chọn tên của bạn hoặc bất kỳ giảng viên nào trong danh sách bên trái để xem lịch.
                 </p>
-                <p className="mt-4 text-[10px] text-slate-400 italic">Mẹo: Hãy kiểm tra xem bạn đã đăng nhập đúng tài khoản email công vụ chưa.</p>
              </div>
           ) : (
              <div className="h-full custom-calendar google-style">
@@ -452,7 +527,7 @@ export const LecturerCalendarPage: React.FC = () => {
                  nowIndicator={false}
                  firstDay={1}
                  headerToolbar={{
-                   left: 'today prev,next title',
+                   left: 'prev,next today title',
                    center: '',
                    right: 'dayGridMonth,timeGridWeek,timeGridDay'
                  }}
@@ -466,9 +541,9 @@ export const LecturerCalendarPage: React.FC = () => {
                    const dayName = arg.date.toLocaleDateString('vi-VN', { weekday: 'short' }).toUpperCase();
                    const dayNum = arg.date.getDate();
                    return (
-                     <div className={`flex flex-col items-center py-2 ${isToday ? 'text-[#1a73e8]' : 'text-[#70757a]'}`}>
-                       <span className="text-[10px] font-bold mb-1 tracking-wider">{dayName}</span>
-                       <span className={`text-[20px] font-normal w-10 h-10 flex items-center justify-center rounded-full transition-colors ${isToday ? 'bg-[#1a73e8] text-white' : 'hover:bg-[#f1f3f4]'}`}>
+                     <div className={`flex flex-col items-center py-1 ${isToday ? 'text-[#1a73e8]' : 'text-[#70757a]'}`}>
+                       <span className="text-[10px] font-bold mb-0.5 tracking-wider">{dayName}</span>
+                       <span className={`text-[14px] font-normal w-7 h-7 flex items-center justify-center rounded-full transition-colors ${isToday ? 'bg-[#1a73e8] text-white' : 'hover:bg-[#f1f3f4]'}`}>
                          {dayNum}
                        </span>
                      </div>
@@ -479,13 +554,49 @@ export const LecturerCalendarPage: React.FC = () => {
                    const props = event.extendedProps;
                    const timeText = event.start ? event.start.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true }).toLowerCase().replace(' ', '') : '';
                    const endTimeText = event.end ? event.end.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true }).toLowerCase().replace(' ', '') : '';
+                   const isMobile = window.innerWidth < 768;
+                   const isDayView = arg.view.type === 'timeGridDay';
+                   const hasSubCodes = isDayView && props.subCodes && props.subCodes.length > 0;
+
+                   // Responsive font sizes
+                   const isMonthView = arg.view.type === 'dayGridMonth';
+                    let titleSize = 'text-[10px]';
+                    let infoSize = 'text-[9px]';
+                    let subSize = 'text-[8px]';
+
+                    if (isDayView) {
+                      titleSize = isMobile ? 'text-[13px]' : 'text-[15px]';
+                      infoSize = isMobile ? 'text-[11px]' : 'text-[13px]';
+                      subSize = isMobile ? 'text-[10px]' : 'text-[13px]';
+                    } else if (isMonthView) {
+                      titleSize = 'text-[9px]';
+                      infoSize = 'text-[8px]';
+                      subSize = 'text-[7px]';
+                    }
 
                    return (
-                     <div className="flex flex-col h-full overflow-hidden leading-tight py-1 px-1.5 border-l-2 border-white/30">
-                       <div className="font-bold text-[10px] truncate">{event.title}</div>
-                       <div className="text-[9px] font-medium opacity-90 truncate">{timeText} – {endTimeText}</div>
-                       {props.location && (
-                           <div className="text-[9px] font-medium opacity-90 truncate mt-0.5">{props.location}</div>
+                     <div className={`flex ${hasSubCodes ? 'flex-row items-center gap-2 sm:gap-5' : 'flex-col'} h-full overflow-hidden leading-tight ${isMonthView ? "py-0.5 px-0.5" : "py-1 px-1.5"} border-l-2 border-white/30`}>
+                       {/* 📍 Left: Main Info */}
+                       <div className={`${hasSubCodes ? 'flex-none min-w-[120px] sm:min-w-[180px] pr-2 sm:pr-5 border-r border-white/20' : ''}`}>
+                         <div className={`font-bold ${titleSize} truncate uppercase leading-tight`}>{event.title}</div>
+                         <div className={`${infoSize} font-medium opacity-90 truncate mt-0.5`}>{timeText} – {endTimeText}</div>
+                         {props.location && (
+                           <div className={`${infoSize} font-bold opacity-100 truncate mt-0.5 sm:mt-1 whitespace-nowrap overflow-hidden bg-white/10 ${isMonthView ? "px-1 py-0" : "px-2 py-0.5"} rounded-md inline-block`}>{props.location}</div>
+                         )}
+                       </div>
+                       
+                       {/* 🏷️ Right: Sub-items (column F data) */}
+                       {hasSubCodes && (
+                         <div className="flex-1 min-w-0">
+                           <div className={`${subSize} font-bold text-white grid grid-cols-2 gap-1.5 sm:gap-3 overflow-visible`}>
+                              {props.subCodes.map((code, idx) => (
+                                <div key={idx} className="bg-white/20 px-2 sm:px-3 py-1 sm:py-2 rounded-md sm:rounded-lg border border-white/10 whitespace-normal leading-tight flex items-start gap-1 sm:gap-2 break-words shadow-sm">
+                                  <span className="opacity-60 mt-1 flex-shrink-0 text-[8px] sm:text-[10px]">●</span>
+                                  <span className={isMobile ? 'line-clamp-1' : ''}>{code}</span>
+                                </div>
+                              ))}
+                           </div>
+                         </div>
                        )}
                      </div>
                    );
@@ -493,11 +604,11 @@ export const LecturerCalendarPage: React.FC = () => {
                  buttonText={{ today: 'Hôm nay', month: 'Tháng', week: 'Tuần', day: 'Ngày' }}
                  slotLabelFormat={{ hour: 'numeric', meridiem: 'short', hour12: true }}
                  slotMinTime="07:00:00"
-                 slotMaxTime="22:00:00"
+                 slotMaxTime="21:00:00"
                  allDaySlot={false}
                  stickyHeaderDates={true}
                  handleWindowResize={true}
-                 expandRows={false}
+                 expandRows={true}
                  eventDisplay="block"
                />
              </div>
@@ -508,8 +619,20 @@ export const LecturerCalendarPage: React.FC = () => {
       <style>{`
         /* 🎨 THE GOOGLE CALENDAR REDESIGN */
         .google-style.fc {
-          --fc-border-color: #dadce0;
+          --fc-border-color: #bdc1c6;
           --fc-today-bg-color: transparent !important;
+        }
+
+        /* 📱 Responsive Horizontal Scroll for Week View */
+        @media (max-width: 768px) {
+          .google-style .fc-view-harness {
+            overflow-x: auto !important;
+          }
+          .google-style .fc-timeGridWeek-view {
+            min-width: 800px !important;
+          }
+        }
+
           --fc-now-indicator-color: #ea4335;
           --fc-page-bg-color: #ffffff;
           --fc-neutral-bg-color: transparent;
@@ -534,32 +657,147 @@ export const LecturerCalendarPage: React.FC = () => {
         }
 
         .google-style .fc-toolbar {
-          padding: 8px 16px !important;
-          border-bottom: 1px solid #dadce0;
+          padding: 8px 12px !important;
+          border-bottom: 1px solid #bdc1c6;
           background: white;
+          display: flex !important;
+          flex-wrap: wrap !important;
+          gap: 8px !important;
+          justify-content: space-between !important;
         }
 
-        .google-style .fc-toolbar-title {
-          font-size: 20px !important;
-          font-weight: 400 !important;
-          color: #3c4043 !important;
-          margin-left: 16px !important;
+        @media (max-width: 768px) {
+          .google-style .fc-toolbar {
+            padding: 8px !important;
+            flex-direction: column !important;
+            align-items: stretch !important;
+            gap: 12px !important;
+          }
+          
+          /* First Row: Navigator + Title */
+          .google-style .fc-toolbar-chunk:first-child {
+            display: flex !important;
+            justify-content: space-between !important;
+            width: 100% !important;
+            align-items: center !important;
+          }
+          
+          /* Mobile: Swap order to Today -> Arrows -> Title */
+          .google-style .fc-today-button {
+            order: 1 !important;
+            margin: 0 !important;
+            margin-right: 8px !important;
+            padding: 6px 10px !important;
+            font-size: 12px !important;
+          }
+
+          .google-style .fc-toolbar-chunk:first-child .fc-button-group {
+            order: 2 !important;
+            margin: 0 !important;
+          }
+
+          .google-style .fc-toolbar-title {
+            order: 3 !important;
+            font-size: 14px !important;
+            font-weight: 700 !important;
+            margin: 0 !important;
+            color: #3c4043 !important;
+            flex: 1;
+            text-align: right;
+          }
+
+          /* Second Row: View Switcher */
+          .google-style .fc-toolbar-chunk:last-child {
+            width: 100% !important;
+            display: grid !important;
+            grid-template-columns: 1fr 1fr 1fr !important;
+            gap: 4px !important;
+            padding-top: 8px !important;
+            border-top: 1px solid #f1f3f4 !important;
+          }
+
+          .google-style .fc-toolbar-chunk:last-child .fc-button {
+            width: 100% !important;
+            margin: 0 !important;
+            padding: 8px 0 !important;
+            justify-content: center !important;
+          }
         }
 
-        .google-style .fc-button {
+        /* 🔘 View Switcher Buttons (Month, Week, Day) - Premium Redesign */
+        .google-style .fc-button-group {
+          background: #f1f3f4;
+          padding: 3px;
+          border-radius: 12px;
+          border: 1px solid #e8eaed;
+          display: flex !important;
+          gap: 2px;
+        }
+
+        .google-style .fc-button-group .fc-button {
+          background: transparent !important;
+          border: none !important;
+          color: #5f6368 !important;
+          font-weight: 600 !important;
+          font-size: 13px !important;
+          text-transform: none !important;
+          border-radius: 9px !important;
+          padding: 8px 16px !important;
+          transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1) !important;
+          box-shadow: none !important;
+          flex: 1;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          min-width: 60px;
+          margin: 0 !important;
+        }
+
+        /* 🛠️ Navigator Group (Prev/Next) specific - Keep it compact */
+        .google-style .fc-toolbar-chunk .fc-button-group:first-child {
+          background: transparent !important;
+          border: none !important;
+          padding: 0 !important;
+        }
+
+
+        .google-style .fc-button-group .fc-button:hover {
+          background: rgba(60, 64, 67, 0.08) !important;
+          color: #202124 !important;
+        }
+
+        .google-style .fc-button-group .fc-button-active {
+          background: #1a73e8 !important;
+          color: white !important;
+          box-shadow: 0 4px 10px rgba(26, 115, 232, 0.3) !important;
+        }
+
+        /* Today Button */
+        .google-style .fc-today-button {
+          margin-left: 12px !important;
+          margin-right: 12px !important;
           background: white !important;
           border: 1px solid #dadce0 !important;
           color: #3c4043 !important;
-          font-size: 14px !important;
-          font-weight: 500 !important;
-          padding: 6px 12px !important;
-          border-radius: 4px !important;
-          box-shadow: none !important;
+          border-radius: 8px !important;
+          font-weight: 600 !important;
+          padding: 8px 16px !important;
+          transition: all 0.2s !important;
+          font-size: 13px !important;
           text-transform: none !important;
+          box-shadow: 0 1px 2px rgba(0,0,0,0.05) !important;
         }
 
-        .google-style .fc-button:hover { background: #f8f9fa !important; border-color: #dadce0 !important; }
-        .google-style .fc-button-active { background: #e8f0fe !important; color: #1a73e8 !important; border-color: #e8f0fe !important; }
+        .google-style .fc-today-button:hover {
+          background: #f8f9fa !important;
+          border-color: #d2d4d7 !important;
+          box-shadow: 0 2px 4px rgba(0,0,0,0.08) !important;
+        }
+
+        .google-style .fc-today-button:disabled {
+          opacity: 0.5 !important;
+          cursor: not-allowed !important;
+        }
 
         /* 🔘 SPECIAL STYLING FOR PREV/NEXT BUTTONS */
         .google-style .fc-prev-button, 
@@ -602,8 +840,8 @@ export const LecturerCalendarPage: React.FC = () => {
         }
 
         .google-style .fc-timegrid-slot {
-          height: 52px !important;
-          border-bottom: 1px solid #dadce0 !important;
+          min-height: 52px !important;
+          border-bottom: 1px solid #bdc1c6 !important;
         }
 
         /* Clean Axis - No Vertical Line */
@@ -625,12 +863,12 @@ export const LecturerCalendarPage: React.FC = () => {
           top: 0;
           width: 100vw; /* Extend line all the way to the right */
           height: 1px;
-          background: #dadce0;
+          background: #bdc1c6;
           z-index: 1;
         }
 
-        .google-style .fc-col-header-cell { border-bottom: 1px solid #dadce0 !important; border-left: none !important; background: white !important; }
-        .google-style .fc-theme-standard td, .google-style .fc-theme-standard th { border-right: 1px solid #dadce0 !important; }
+        .google-style .fc-col-header-cell { border-bottom: 1px solid #bdc1c6 !important; border-left: none !important; background: white !important; }
+        .google-style .fc-theme-standard td, .google-style .fc-theme-standard th { border-right: 1px solid #bdc1c6 !important; }
 
         .google-style .fc-v-event,
         .google-style .fc-daygrid-event,

@@ -57,7 +57,6 @@ export const FirebaseProvider: React.FC<{ children: React.ReactNode }> = ({ chil
   const [isWhitelistLoading, setIsWhitelistLoading] = useState(true);
   const [adminList, setAdminList] = useState<string[]>([]);
   const [superAdminList, setSuperAdminList] = useState<string[]>([]);
-  const [lecturerList, setLecturerList] = useState<string[]>([]);
 
   // Check for redirect result on mount
   useEffect(() => {
@@ -176,23 +175,7 @@ export const FirebaseProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     };
   }, []);
     
-  // Handle Lecturer Whitelist
-  useEffect(() => {
-    const lecturerWhitelistRef = ref(database, 'lecturer_whitelist');
-    const unsubscribe = onValue(lecturerWhitelistRef, (snapshot) => {
-      const data = snapshot.val();
-      let list: string[] = [];
-      if (data && typeof data === 'object') {
-        list = Object.values(data).map((v: any) => String(v.email).trim().toLowerCase());
-      }
-      setLecturerList(list);
-      logInfo('Lecturer Whitelist Synced in Context');
-    }, (error) => {
-      console.error('Lecturer whitelist fetch error:', error);
-    });
 
-    return () => unsubscribe();
-  }, []);
 
   // Update isAdmin, isLecturer, isAuthorized whenever user, adminList or lecturerList changes
   useEffect(() => {
@@ -211,12 +194,11 @@ export const FirebaseProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     }
 
     const checkAdmin = checkIsSuperAdmin(email) || adminList.includes(email);
-    const checkLecturer = lecturerList.includes(email);
     
     setIsAdmin(checkAdmin);
-    setIsLecturer(checkLecturer);
-    setIsAuthorized(checkAdmin || checkLecturer);
-  }, [user, adminList, lecturerList]);
+    setIsLecturer(false); // Mechanism removed
+    setIsAuthorized(checkAdmin); // Access granted only if Admin
+  }, [user, adminList]);
   /* 
   // PREVIOUS REDIRECT LOGIC (Commented out per User Request):
   const loginWithGoogle = async () => {

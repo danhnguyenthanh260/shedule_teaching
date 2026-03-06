@@ -29,6 +29,7 @@ export const MappingTool: React.FC<MappingToolProps> = ({
     { key: 'task', label: 'Tiêu đề / Reviewer 1' },
     { key: 'person', label: 'Họ tên / Reviewer 2' },
     { key: 'location', label: 'Phòng' },
+    { key: 'code', label: 'Mã GV' },
   ];
 
   return (
@@ -57,13 +58,14 @@ export const MappingTool: React.FC<MappingToolProps> = ({
           )}
         </div>
 
-        <div className="grid grid-cols-2 lg:grid-cols-5 gap-2 items-end">
+        <div className="grid grid-cols-2 lg:grid-cols-6 gap-2 items-end">
           {[
             { key: 'date', label: 'NGÀY' },
             { key: 'time', label: 'THỜI GIAN' },
             { key: 'task', label: 'TIÊU ĐỀ / REVIEWER 1' },
             { key: 'person', label: 'HỌ TÊN / REVIEWER 2' },
             { key: 'location', label: 'PHÒNG' },
+            { key: 'code', label: 'MÃ GIẢNG VIÊN' },
           ].map((field) => (
             <div key={field.key} className="space-y-1.5 flex flex-col justify-end">
               <label className="flex items-center gap-2 text-[9px] font-bold text-slate-400 ml-1 uppercase tracking-[0.15em] min-h-[1.5rem] leading-tight">

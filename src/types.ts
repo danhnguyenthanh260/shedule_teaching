@@ -18,6 +18,7 @@ export interface ColumnMapping {
   task?: number;
   location?: number;
   email?: number;
+  code?: number;
 }
 
 export interface RowNormalized {
@@ -51,12 +52,13 @@ export interface RowNormalized {
   blockStart?: number;
   blockEnd?: number;
   reviewAreaStart?: number; // Boundary index (A-I vs J+)
-  subEvents?: { 
+    subEvents?: { 
     start: string; 
     end: string; 
     location: string;
     description?: string;
   }[]; // 📧 NEW: Dùng cho logic gom nhóm email (Series)
+  subCodes?: string[]; // 🏷️ NEW: Thu thập dữ liệu cột F của các dòng bị gộp (chế độ Review)
 }
 
 export interface SyncError {

@@ -35,16 +35,18 @@ const Layout: React.FC<Props> = ({ children, user, userId, onLogout, syncHistory
         </div>
 
         <div className="flex items-center gap-4">
-          <button
-            onClick={() => setShowHistoryModal(true)}
-            className="flex items-center justify-center w-10 h-10 sm:w-auto sm:px-4 sm:py-2 bg-slate-50 hover:bg-slate-100 text-slate-600 rounded-xl transition-all font-bold text-sm border border-slate-200"
-            title="Xem lịch sử đồng bộ"
-          >
-            <svg className="w-5 h-5 sm:w-4 sm:h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
-            </svg>
-            <span className="hidden sm:inline ml-2">Lịch sử</span>
-          </button>
+          {user.email && (
+            <button
+              onClick={() => setShowHistoryModal(true)}
+              className="flex items-center justify-center w-10 h-10 sm:w-auto sm:px-4 sm:py-2 bg-slate-50 hover:bg-slate-100 text-slate-600 rounded-xl transition-all font-bold text-sm border border-slate-200"
+              title="Xem lịch sử đồng bộ"
+            >
+              <svg className="w-5 h-5 sm:w-4 sm:h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
+              </svg>
+              <span className="hidden sm:inline ml-2">Lịch sử</span>
+            </button>
+          )}
 
           <Link
             to="/"
@@ -57,7 +59,7 @@ const Layout: React.FC<Props> = ({ children, user, userId, onLogout, syncHistory
             <span className="hidden sm:inline ml-2">Lịch trình</span>
           </Link>
 
-          {isAdmin(user.email) && (
+          {user.email && isAdmin(user.email) && (
             <Link
               to="/admin"
               className="flex items-center justify-center w-10 h-10 sm:w-auto sm:px-4 sm:py-2 bg-slate-800 hover:bg-slate-900 text-white rounded-xl transition-all font-bold text-sm shadow-md"
@@ -73,30 +75,23 @@ const Layout: React.FC<Props> = ({ children, user, userId, onLogout, syncHistory
 
           <div className="h-8 w-px bg-slate-200 mx-1 sm:mx-2 hidden xs:block"></div>
 
-          <div className="flex items-center gap-1 sm:gap-3">
-            <div className="flex flex-col items-end hidden sm:flex">
-              <div className="font-bold text-[13px] text-slate-800 leading-none">{user.name}</div>
-              <div className="flex items-center gap-1 mt-1">
-                <div className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse"></div>
-                <span className="text-[9px] font-bold text-slate-400 uppercase tracking-widest">Đang hoạt động</span>
-              </div>
+            <div className="flex items-center gap-1 sm:gap-3">
+              {user.email ? (
+                <button 
+                  onClick={onLogout} 
+                  className="px-4 py-2 text-slate-500 hover:text-rose-500 hover:bg-rose-50 rounded-xl font-bold text-sm transition-all"
+                >
+                  Đăng xuất
+                </button>
+              ) : (
+                <Link
+                  to="/admin"
+                  className="px-6 py-2 bg-blue-600 text-white rounded-xl font-bold text-sm shadow-md hover:bg-blue-700 transition-all active:scale-95"
+                >
+                  Đăng nhập
+                </Link>
+              )}
             </div>
-            
-            <div className="relative group shrink-0">
-              <img src={user.image} className="w-8 h-8 sm:w-10 sm:h-10 rounded-full border border-slate-200 shadow-sm object-cover" alt="Avatar" />
-              <div className="absolute -bottom-0.5 -right-0.5 w-2.5 h-2.5 sm:w-3.5 sm:h-3.5 bg-emerald-500 border-2 border-white rounded-full"></div>
-            </div>
-            
-            <button 
-              onClick={onLogout} 
-              className="p-1.5 sm:p-2 text-slate-400 hover:text-rose-500 hover:bg-rose-50 rounded-xl transition-all"
-              title="Đăng xuất"
-            >
-              <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1" />
-              </svg>
-            </button>
-          </div>
         </div>
       </nav>
       <main className="flex-1 overflow-hidden flex flex-col min-h-0">

@@ -11,22 +11,20 @@ export const LecturerApp: React.FC = () => {
 
   // Map Firebase User to UserProfile for Layout
   const userProfile = useMemo(() => ({
-    name: firebaseUser?.displayName || 'User',
+    name: firebaseUser?.displayName || 'Giảng viên',
     email: firebaseUser?.email || '',
-    image: firebaseUser?.photoURL || `https://ui-avatars.com/api/?name=${firebaseUser?.displayName || 'U'}&background=random`
+    image: firebaseUser?.photoURL || `https://ui-avatars.com/api/?name=${firebaseUser?.displayName || 'G'}&background=random`
   }), [firebaseUser]);
-
-  if (!firebaseUser) return null;
 
   return (
     <Layout
       user={userProfile}
-      userId={firebaseUser.uid}
+      userId={firebaseUser?.uid || 'guest'}
       onLogout={() => {
         persistence.clearPersistence();
         logout();
       }}
-      syncHistoryRefresh={0} // This will be handled inside LecturerDashboard if needed
+      syncHistoryRefresh={0}
     >
       <LecturerDashboard />
     </Layout>

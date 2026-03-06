@@ -89,6 +89,10 @@ export function inferSchema(headers: string[], sampleRows: string[][]): Inferred
     else if (head.includes("phòng") || head.includes("location") || head.includes("room") || head.includes("địa điểm")) mapping.location = i;
     // Ưu tiên Email
     else if (head.includes("email") || head.includes("thư điện tử") || head.includes("mail")) mapping.email = i;
+    // Ưu tiên Mã giảng viên
+    else if (head.includes("mã giang viên") || head.includes("lecturer code") || head.includes("mã số") || head.includes("msnv")) {
+      if (!mapping.code) mapping.code = i;
+    }
   });
 
   // Kiểm tra dữ liệu mẫu để cải thiện độ chính xác
@@ -264,8 +268,18 @@ export class GoogleSyncService {
           : { start: "", end: "" };
 
         let person = (pIdx < row.length ? (row[pIdx] || "") : "").toString().trim();
+        
+        // 🔍 NEW: Extract Code (either mapped or fallback to Column M/Index 12)
+        let code = "";
+        const cIdx = mapping.code !== undefined ? mapping.code : (row.length > 12 ? 12 : -1);
+        if (cIdx !== -1 && cIdx < row.length) {
+          code = (row[cIdx] || "").toString().trim();
+        }
 
-        if (!person || !isLikelyPersonName(person)) {
+        // 📝 Display only Code if it exists, otherwise fallback to name
+        if (code) {
+          person = code;
+        } else if (!person || !isLikelyPersonName(person)) {
           const taskVal = (mapping.task !== undefined && mapping.task < row.length ? row[mapping.task] : (row[pIdx] || ""));
           person = (taskVal || person || "Cán bộ/GV").toString().trim();
         }
@@ -280,6 +294,7 @@ export class GoogleSyncService {
           task: (mapping.task !== undefined && mapping.task < row.length ? (row[mapping.task] || "Nhiệm vụ") : "Nhiệm vụ").toString().trim(),
           location: lastLocation || "Chưa xác định",
           email: (mapping.email !== undefined && mapping.email < row.length ? row[mapping.email] : "").toString().trim(),
+          code: code,
           sheetType: 'council',
           resources: [
             person ? `teacher:${person}` : null,
@@ -509,13 +524,24 @@ export class GoogleSyncService {
       });
     });
 
-    // 🚀 SMART DEDUPLICATION: Merge identical events (including Code)
+    // 🚀 SMART DEDUPLICATION: Merge identical events (Grouping overlapping codes)
     const uniqueMap = new Map<string, RowNormalized>();
     allEvents.forEach(ev => {
-      // Key includes time, person, location, and code to be safe
-      const key = `${ev.startTime}-${ev.endTime}-${ev.person}-${ev.location}-${ev.code || ''}`.toLowerCase();
+      // 🎯 Group by time, person, and location only
+      const key = `${ev.startTime}-${ev.endTime}-${ev.person}-${ev.location}`.toLowerCase();
+      
+      // 🏷️ Extract Column F (index 5) - usually "Nhóm" or unique identifier
+      const colFValue = ev.rawRow && ev.rawRow.length > 5 ? String(ev.rawRow[5] || "").trim() : "";
+      
       if (!uniqueMap.has(key)) {
+        ev.subCodes = colFValue ? [colFValue] : [];
         uniqueMap.set(key, ev);
+      } else {
+        const existing = uniqueMap.get(key)!;
+        if (colFValue && !existing.subCodes?.includes(colFValue)) {
+          if (!existing.subCodes) existing.subCodes = [];
+          existing.subCodes.push(colFValue);
+        }
       }
     });
 

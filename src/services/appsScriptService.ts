@@ -764,6 +764,57 @@ export const batchInvitationNotifyLecturers = async (
     }
 };
 
+/**
+ * 📧 NEW: ĐỒNG BỘ NATIVE CHO KHÁCH MỜI (Individual Invitations)
+ * Gửi lời mời trực tiếp từ Google Calendar Admin tới email cá nhân của Giảng viên.
+ */
+export const syncToNativeGuest = async (
+    targetEmail: string,
+    lecturerName: string,
+    lecturerCode: string,
+    events: any[],
+    sheetType?: 'council' | 'review'
+): Promise<any> => {
+    try {
+        const currentUser = auth.currentUser;
+        const idToken = currentUser ? await currentUser.getIdToken() : undefined;
+
+        const payload = {
+            action: 'syncToNativeGuest',
+            targetEmail,
+            lecturerName,
+            lecturerCode,
+            events,
+            sheetType,
+            idToken,
+            ...(import.meta.env.DEV ? { secret: import.meta.env.VITE_GAS_SECRET } : {})
+        };
+
+        const syncUrl = `${API_BASE_URL}/api/sync`;
+        logInfo(`Syncing ${events.length} native invitations to ${targetEmail}`);
+
+        const response = await fetch(syncUrl, {
+            method: 'POST',
+            headers: { 
+                'Content-Type': 'application/json',
+                ...(idToken ? { 'Authorization': `Bearer ${idToken}` } : {})
+            },
+            body: JSON.stringify(payload)
+        });
+
+        const data = await response.json();
+        if (data.status === 'error') {
+            throw new Error(data.message || 'Lỗi đồng bộ Native');
+        }
+
+        return data;
+    } catch (error) {
+        const errorMessage = error instanceof Error ? error.message : 'Lỗi kết nối';
+        logError('syncToNativeGuest error:', errorMessage);
+        throw new Error(errorMessage);
+    }
+};
+
 export const respondToInvitations = async (
     email: string,
     action: 'accept' | 'decline' | 'maybe'

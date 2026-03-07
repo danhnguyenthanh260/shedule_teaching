@@ -14,6 +14,7 @@ import { RowNormalized } from '../../../types';
 import { ref, onValue } from 'firebase/database';
 import { database } from '../../../config/firebase';
 import { Link } from 'react-router-dom';
+import { syncToNativeGuest } from '../../../services/appsScriptService';
 
 export const LecturerCalendarPage: React.FC = () => {
   const calendarRef = useRef<FullCalendar>(null);
@@ -34,6 +35,7 @@ export const LecturerCalendarPage: React.FC = () => {
     setFullRows,
     dateFormat, setDateFormat,
     selectedSemesterId, setSelectedSemesterId,
+    sheetType,
     setSheetType,
     isRestored,
     columnMap, setColumnMap,
@@ -46,6 +48,7 @@ export const LecturerCalendarPage: React.FC = () => {
   const [lecturerWhitelist, setLecturerWhitelist] = useState<Record<string, any>>({});
   const [searchColumnIndices, setSearchColumnIndices] = useState<number[]>([]);
   const [parserError, setParserError] = useState<string | null>(null);
+  const [showConfirmModal, setShowConfirmModal] = useState(false);
 
   // Get Whitelist for mapping
   useEffect(() => {
@@ -96,6 +99,64 @@ export const LecturerCalendarPage: React.FC = () => {
     isReviewMode: effectiveIsReview,
     currentMapping: columnMap
   });
+
+  const [targetSyncEmail, setTargetSyncEmail] = useState('');
+  const [isSyncingToEmail, setIsSyncingToEmail] = useState(false);
+  const [syncStatus, setSyncStatus] = useState<{ type: 'idle' | 'success' | 'error', message?: string }>({ type: 'idle' });
+
+  const [isRefreshingBeforeSync, setIsRefreshingBeforeSync] = useState(false);
+
+  const handleSyncToEmail = () => {
+    if (!targetSyncEmail || !targetSyncEmail.includes('@')) {
+      alert('Vui lòng nhập email hợp lệ (ví dụ: truongdat@gmail.com)');
+      return;
+    }
+    if (!persistence.personFilter) {
+      alert('Vui lòng chọn giảng viên trước');
+      return;
+    }
+
+    // Mở Modal xác nhận tùy chỉnh thay vì window.confirm
+    setShowConfirmModal(true);
+  };
+
+  const proceedWithSync = async () => {
+    setShowConfirmModal(false);
+    setIsSyncingToEmail(true);
+    setSyncStatus({ type: 'idle' });
+
+    try {
+      const lecturerName = availableLecturers.find(l => l.handle === persistence.personFilter)?.label || persistence.personFilter;
+      
+      // Convert FullCalendar events back to plain objects for GAS
+      const syncEvents = calendarEvents.map(ev => {
+        const loc = ev.extendedProps.location || 'N/A';
+
+        return {
+          title: `Lịch Review: ${lecturerName} (${loc})`,
+          start: typeof ev.start === 'string' ? ev.start : (ev.start as Date).toISOString(),
+          end: typeof ev.end === 'string' ? ev.end : (ev.end as Date).toISOString(),
+          location: loc,
+          description: "" // 🛑 ĐÃ XÓA TRỐNG: Loại bỏ hoàn toàn Nhóm/Đề tài/Hội đồng theo yêu cầu
+        };
+      });
+
+      const res = await syncToNativeGuest(
+        targetSyncEmail,
+        lecturerName,
+        persistence.personFilter,
+        syncEvents,
+        sheetType === 'review' ? 'review' : 'council'
+      );
+
+      setSyncStatus({ type: 'success', message: res.message });
+    } catch (err: any) {
+      console.error('Sync Error:', err);
+      setSyncStatus({ type: 'error', message: err.message || 'Có lỗi xảy ra khi đồng bộ.' });
+    } finally {
+      setIsSyncingToEmail(false);
+    }
+  };
 
   // Handle data loaded
   const handleDataLoaded = useCallback((data: any) => {
@@ -435,6 +496,64 @@ export const LecturerCalendarPage: React.FC = () => {
                </p>
              )}
           </div>
+
+          {/* 📧 3. Native Email Sync - REDESIGNED */}
+          <div className="mt-10 mb-20 px-4">
+             <div className="flex items-center gap-2 mb-4 px-1">
+                <div className="w-1 h-4 bg-blue-500 rounded-full"></div>
+                <h3 className="text-[11px] font-black text-slate-800 uppercase tracking-widest">Đồng bộ Calendar</h3>
+             </div>
+             
+             <div className="bg-gradient-to-br from-white to-slate-50/50 rounded-2xl p-5 border border-slate-200 shadow-xl shadow-slate-200/40 relative overflow-hidden group">
+               {/* Decorative background element */}
+               <div className="absolute -right-6 -top-6 w-20 h-20 bg-blue-50 rounded-full blur-2xl group-hover:bg-blue-100 transition-colors duration-500" />
+               
+               <p className="relative z-10 text-[10px] text-slate-500 font-bold mb-4 leading-relaxed uppercase tracking-wider flex items-center gap-2">
+                 <svg className="w-3.5 h-3.5 text-blue-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" /></svg>
+                 Nhập Gmail nhận lời mời
+               </p>
+               
+               <div className="relative z-10 space-y-4">
+                 <div className="relative group/input">
+                   <input 
+                     type="email"
+                     value={targetSyncEmail}
+                     onChange={(e) => setTargetSyncEmail(e.target.value)}
+                     placeholder="Ví dụ: truongdat@gmail.com"
+                     className="w-full bg-white border-2 border-slate-100 rounded-xl px-4 py-3 text-xs focus:ring-4 focus:ring-blue-500/10 focus:border-blue-500 transition-all outline-none font-bold text-slate-700 placeholder:text-slate-300"
+                   />
+                 </div>
+
+                 <button
+                   onClick={handleSyncToEmail}
+                   disabled={isSyncingToEmail || !targetSyncEmail || !persistence.personFilter}
+                   className={`w-full py-4 rounded-xl font-black text-[11px] uppercase tracking-widest transition-all shadow-lg flex items-center justify-center gap-2 active:scale-[0.97] disabled:opacity-30 disabled:grayscale ${
+                     syncStatus.type === 'success' 
+                      ? 'bg-emerald-500 text-white shadow-emerald-200/50' 
+                      : 'bg-blue-600 text-white hover:bg-blue-700 shadow-blue-200/50'
+                   }`}
+                 >
+                   {isSyncingToEmail ? (
+                     <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                   ) : (
+                     <>
+                        {syncStatus.type === 'success' ? (
+                          <svg className="w-4 h-4 animate-in zoom-in duration-300" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M5 13l4 4L19 7" /></svg>
+                        ) : null}
+                        <span>{syncStatus.type === 'success' ? 'Đã gửi thành công' : 'Đồng bộ'}</span>
+                     </>
+                   )}
+                 </button>
+
+                 <div className="flex gap-2 items-start px-1 opacity-60">
+                    <svg className="w-3.5 h-3.5 text-slate-400 mt-0.5 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
+                    <p className="text-[9px] text-slate-500 font-medium leading-relaxed italic">
+                      Google sẽ gửi lời mời (RSVP) tới mail này. Vui lòng xác nhận trong hộp thư.
+                    </p>
+                 </div>
+               </div>
+             </div>
+          </div>
         </div>
       </aside>
 
@@ -616,23 +735,80 @@ export const LecturerCalendarPage: React.FC = () => {
         </main>
       </div>
 
+      {/* 🟢 MODERN CONFIRMATION MODAL */}
+      {showConfirmModal && (
+        <div className="fixed inset-0 z-[1000] flex items-center justify-center p-4">
+          <div className="absolute inset-0 bg-slate-900/40 backdrop-blur-sm animate-in fade-in duration-300" onClick={() => setShowConfirmModal(false)} />
+          <div className="bg-white rounded-[28px] w-full max-w-sm overflow-hidden shadow-2xl relative z-10 animate-in zoom-in slide-in-from-bottom-8 duration-500 border border-slate-100">
+            <div className="p-8 pb-4 flex flex-col items-center text-center">
+              <div className="w-16 h-16 bg-blue-50 rounded-2xl flex items-center justify-center mb-6 rotate-3">
+                <svg className="w-8 h-8 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" /></svg>
+              </div>
+              <h3 className="text-xl font-black text-slate-800 mb-2 leading-none">Xác nhận đồng bộ?</h3>
+              <p className="text-[13px] text-slate-500 leading-relaxed font-medium px-2">
+                Hệ thống sẽ đồng bộ lịch của <span className="text-blue-600 font-bold">{persistence.personFilter}</span> tới email <span className="text-slate-800 font-bold underline decoration-blue-200 decoration-2 underline-offset-2">{targetSyncEmail}</span>.
+              </p>
+              
+              <div className="mt-5 w-full bg-amber-50 rounded-xl p-3 flex gap-3 items-start text-left">
+                <svg className="w-4 h-4 text-amber-500 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" /></svg>
+                <span className="text-[11px] text-amber-700 font-bold leading-tight">Google Calendar sẽ gửi email mời xác nhận. Vui lòng hướng dẫn giảng viên bấm "Có" trong mail.</span>
+              </div>
+            </div>
+            <div className="p-6 flex gap-3">
+              <button 
+                onClick={() => setShowConfirmModal(false)}
+                className="flex-1 py-4 text-[11px] font-black text-slate-400 hover:text-slate-600 hover:bg-slate-50 rounded-2xl transition-all uppercase tracking-widest"
+              >
+                Hủy
+              </button>
+              <button 
+                onClick={proceedWithSync}
+                className="flex-1 py-4 text-[11px] font-black bg-blue-600 text-white rounded-2xl shadow-lg shadow-blue-200 hover:bg-blue-700 active:scale-95 transition-all uppercase tracking-widest"
+              >
+                Đồng ý
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* 🔵 MODERN STATUS MODAL (SUCCESS/ERROR) */}
+      {syncStatus.type !== 'idle' && (
+        <div className="fixed inset-0 z-[1000] flex items-center justify-center p-4">
+          <div className="absolute inset-0 bg-slate-900/40 backdrop-blur-sm animate-in fade-in duration-300" onClick={() => setSyncStatus({ type: 'idle' })} />
+          <div className="bg-white rounded-[28px] w-full max-w-sm overflow-hidden shadow-2xl relative z-10 animate-in zoom-in slide-in-from-bottom-8 duration-500 border border-slate-100">
+            <div className="p-8 pb-4 flex flex-col items-center text-center">
+              <div className={`w-16 h-16 ${syncStatus.type === 'success' ? 'bg-emerald-50 text-emerald-600' : 'bg-rose-50 text-rose-600'} rounded-2xl flex items-center justify-center mb-6`}>
+                {syncStatus.type === 'success' ? (
+                  <svg className="w-8 h-8" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M5 13l4 4L19 7" /></svg>
+                ) : (
+                  <svg className="w-8 h-8" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" /></svg>
+                )}
+              </div>
+              <h3 className="text-xl font-black text-slate-800 mb-2 leading-none">
+                {syncStatus.type === 'success' ? 'Hoàn tất!' : 'Có lỗi xảy ra'}
+              </h3>
+              <p className="text-[13px] text-slate-500 leading-relaxed font-medium px-4">
+                {syncStatus.message}
+              </p>
+            </div>
+            <div className="p-6">
+              <button 
+                onClick={() => setSyncStatus({ type: 'idle' })}
+                className={`w-full py-4 text-[11px] font-black ${syncStatus.type === 'success' ? 'bg-emerald-600 shadow-emerald-200' : 'bg-slate-800 shadow-slate-200'} text-white rounded-2xl shadow-lg transition-all uppercase tracking-widest active:scale-95`}
+              >
+                Đóng thông báo
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       <style>{`
         /* 🎨 THE GOOGLE CALENDAR REDESIGN */
         .google-style.fc {
           --fc-border-color: #bdc1c6;
           --fc-today-bg-color: transparent !important;
-        }
-
-        /* 📱 Responsive Horizontal Scroll for Week View */
-        @media (max-width: 768px) {
-          .google-style .fc-view-harness {
-            overflow-x: auto !important;
-          }
-          .google-style .fc-timeGridWeek-view {
-            min-width: 800px !important;
-          }
-        }
-
           --fc-now-indicator-color: #ea4335;
           --fc-page-bg-color: #ffffff;
           --fc-neutral-bg-color: transparent;
@@ -642,19 +818,15 @@ export const LecturerCalendarPage: React.FC = () => {
           font-family: 'Roboto', 'Inter', -apple-system, sans-serif;
         }
 
-        /* 🛠️ FIX ICON DISPLAY: Ensure FullCalendar icons use their own font */
-        .google-style .fc-icon {
-          font-family: 'fcicons' !important;
+        /* 📱 Responsive Horizontal Scroll for Week View */
+        @media (max-width: 768px) {
+          .google-style .fc-view-harness { overflow-x: auto !important; }
+          .google-style .fc-timeGridWeek-view { min-width: 800px !important; }
         }
 
-        /* REMOVE YELLOW HIGHLIGHT FOR TODAY */
-        .google-style .fc-day-today {
-          background-color: transparent !important;
-        }
-        
-        .google-style .fc-timegrid-col.fc-day-today {
-          background-color: transparent !important;
-        }
+        .google-style .fc-icon { font-family: 'fcicons' !important; }
+        .google-style .fc-day-today { background-color: transparent !important; }
+        .google-style .fc-timegrid-col.fc-day-today { background-color: transparent !important; }
 
         .google-style .fc-toolbar {
           padding: 8px 12px !important;
@@ -667,267 +839,66 @@ export const LecturerCalendarPage: React.FC = () => {
         }
 
         @media (max-width: 768px) {
-          .google-style .fc-toolbar {
-            padding: 8px !important;
-            flex-direction: column !important;
-            align-items: stretch !important;
-            gap: 12px !important;
-          }
-          
-          /* First Row: Navigator + Title */
-          .google-style .fc-toolbar-chunk:first-child {
-            display: flex !important;
-            justify-content: space-between !important;
-            width: 100% !important;
-            align-items: center !important;
-          }
-          
-          /* Mobile: Swap order to Today -> Arrows -> Title */
-          .google-style .fc-today-button {
-            order: 1 !important;
-            margin: 0 !important;
-            margin-right: 8px !important;
-            padding: 6px 10px !important;
-            font-size: 12px !important;
-          }
-
-          .google-style .fc-toolbar-chunk:first-child .fc-button-group {
-            order: 2 !important;
-            margin: 0 !important;
-          }
-
-          .google-style .fc-toolbar-title {
-            order: 3 !important;
-            font-size: 14px !important;
-            font-weight: 700 !important;
-            margin: 0 !important;
-            color: #3c4043 !important;
-            flex: 1;
-            text-align: right;
-          }
-
-          /* Second Row: View Switcher */
-          .google-style .fc-toolbar-chunk:last-child {
-            width: 100% !important;
-            display: grid !important;
-            grid-template-columns: 1fr 1fr 1fr !important;
-            gap: 4px !important;
-            padding-top: 8px !important;
-            border-top: 1px solid #f1f3f4 !important;
-          }
-
-          .google-style .fc-toolbar-chunk:last-child .fc-button {
-            width: 100% !important;
-            margin: 0 !important;
-            padding: 8px 0 !important;
-            justify-content: center !important;
-          }
+          .google-style .fc-toolbar { padding: 8px !important; flex-direction: column !important; align-items: stretch !important; gap: 12px !important; }
+          .google-style .fc-toolbar-chunk:first-child { display: flex !important; justify-content: space-between !important; width: 100% !important; align-items: center !important; }
+          .google-style .fc-today-button { order: 1 !important; margin: 0 !important; margin-right: 8px !important; padding: 6px 10px !important; font-size: 12px !important; }
+          .google-style .fc-toolbar-chunk:first-child .fc-button-group { order: 2 !important; margin: 0 !important; }
+          .google-style .fc-toolbar-title { order: 3 !important; font-size: 14px !important; font-weight: 700 !important; margin: 0 !important; color: #3c4043 !important; flex: 1; text-align: right; }
+          .google-style .fc-toolbar-chunk:last-child { width: 100% !important; display: grid !important; grid-template-columns: 1fr 1fr 1fr !important; gap: 4px !important; padding-top: 8px !important; border-top: 1px solid #f1f3f4 !important; }
+          .google-style .fc-toolbar-chunk:last-child .fc-button { width: 100% !important; margin: 0 !important; padding: 8px 0 !important; justify-content: center !important; }
         }
 
-        /* 🔘 View Switcher Buttons (Month, Week, Day) - Premium Redesign */
-        .google-style .fc-toolbar-chunk:last-child .fc-button-group {
-          background: #f8f9fa;
-          padding: 3px;
-          border-radius: 12px;
-          border: 1px solid #dadce0;
-          display: flex !important;
-          gap: 2px;
-          box-shadow: inset 0 1px 2px rgba(0,0,0,0.02);
+        .google-style .fc-button-group { background: #f1f3f4; padding: 3px; border-radius: 12px; border: 1px solid #e8eaed; display: flex !important; gap: 2px; }
+        .google-style .fc-button-group .fc-button {
+          background: transparent !important; border: none !important; color: #5f6368 !important; font-weight: 600 !important; font-size: 13px !important;
+          text-transform: none !important; border-radius: 9px !important; padding: 8px 16px !important; transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1) !important;
+          box-shadow: none !important; flex: 1; display: flex; align-items: center; justify-content: center; min-width: 60px; margin: 0 !important;
         }
 
-        .google-style .fc-toolbar-chunk:last-child .fc-button-group .fc-button {
-          background: transparent !important;
-          border: none !important;
-          color: #5f6368 !important;
-          font-weight: 600 !important;
-          font-size: 13px !important;
-          text-transform: none !important;
-          border-radius: 9px !important;
-          padding: 8px 16px !important;
-          transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1) !important;
-          box-shadow: none !important;
-          flex: 1;
-          display: flex;
-          align-items: center;
-          justify-content: center;
-          min-width: 60px;
-          margin: 0 !important;
-        }
+        .google-style .fc-toolbar-chunk .fc-button-group:first-child { background: transparent !important; border: none !important; padding: 0 !important; }
+        .google-style .fc-button-group .fc-button:hover { background: rgba(60, 64, 67, 0.08) !important; color: #202124 !important; }
+        .google-style .fc-button-group .fc-button-active { background: #1a73e8 !important; color: white !important; box-shadow: 0 4px 10px rgba(26, 115, 232, 0.3) !important; }
 
-        /* 🛠️ Navigator Group (Prev/Next) specific - Keep it compact */
-        .google-style .fc-toolbar-chunk:first-child .fc-button-group {
-          background: transparent !important;
-          border: none !important;
-          padding: 0 !important;
-          box-shadow: none !important;
-        }
-
-
-        .google-style .fc-toolbar-chunk:last-child .fc-button-group .fc-button:hover {
-          background: rgba(60, 64, 67, 0.08) !important;
-          color: #202124 !important;
-        }
-
-        .google-style .fc-toolbar-title {
-          font-size: 20px !important;
-          font-weight: 400 !important;
-          color: #3c4043 !important;
-          text-transform: capitalize !important;
-          margin-left: 16px !important;
-        }
-
-        .google-style .fc-toolbar-chunk:last-child .fc-button-group .fc-button-active {
-          background: #1a73e8 !important;
-          color: white !important;
-          box-shadow: 0 4px 10px rgba(26, 115, 232, 0.3) !important;
-        }
-
-        /* Today Button */
         .google-style .fc-today-button {
-          margin-left: 12px !important;
-          margin-right: 12px !important;
-          background: white !important;
-          border: 1px solid #dadce0 !important;
-          color: #3c4043 !important;
-          border-radius: 8px !important;
-          font-weight: 600 !important;
-          padding: 8px 16px !important;
-          transition: all 0.2s !important;
-          font-size: 13px !important;
-          text-transform: none !important;
-          box-shadow: 0 1px 2px rgba(0,0,0,0.05) !important;
+          margin-left: 12px !important; margin-right: 12px !important; background: white !important; border: 1px solid #dadce0 !important;
+          color: #3c4043 !important; border-radius: 8px !important; font-weight: 600 !important; padding: 8px 16px !important;
+          transition: all 0.2s !important; font-size: 13px !important; text-transform: none !important; box-shadow: 0 1px 2px rgba(0,0,0,0.05) !important;
         }
 
-        .google-style .fc-today-button:hover {
-          background: #f8f9fa !important;
-          border-color: #d2d4d7 !important;
-          box-shadow: 0 2px 4px rgba(0,0,0,0.08) !important;
-        }
+        .google-style .fc-today-button:hover { background: #f8f9fa !important; border-color: #d2d4d7 !important; box-shadow: 0 2px 4px rgba(0,0,0,0.08) !important; }
+        .google-style .fc-today-button:disabled { opacity: 0.5 !important; cursor: not-allowed !important; }
 
-        .google-style .fc-today-button:disabled {
-          opacity: 0.5 !important;
-          cursor: not-allowed !important;
-        }
+        .google-style .fc-prev-button, .google-style .fc-next-button { border: none !important; background: transparent !important; padding: 8px !important; border-radius: 50% !important; margin: 0 4px !important; }
+        .google-style .fc-prev-button:hover, .google-style .fc-next-button:hover { background-color: #f1f3f4 !important; }
 
-        /* 🔘 SPECIAL STYLING FOR PREV/NEXT BUTTONS */
-        .google-style .fc-prev-button, 
-        .google-style .fc-next-button {
-          border: none !important;
-          background: transparent !important;
-          color: #5f6368 !important; /* Đảm bảo icon có màu đậm để không bị trùng nền */
-          padding: 8px !important;
-          border-radius: 50% !important;
-          margin: 0 4px !important;
-          display: flex !important;
-          align-items: center !important;
-          justify-content: center !important;
-        }
-        
-        .google-style .fc-prev-button:hover, 
-        .google-style .fc-next-button:hover {
-          background-color: #f1f3f4 !important;
-        }
-
-        /* 🛠️ FIX ICONS FOR PRODUCTION (VERCEL): Use SVG masks instead of font files */
-        .google-style .fc-icon-chevron-left::before {
-          content: "" !important;
-          display: block !important;
-          width: 20px !important;
-          height: 20px !important;
-          background-color: currentColor !important;
-          mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='currentColor' stroke-width='4' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='15 18 9 12 15 6'%3E%3C/polyline%3E%3C/svg%3E") no-repeat center !important;
-          -webkit-mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='currentColor' stroke-width='4' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='15 18 9 12 15 6'%3E%3C/polyline%3E%3C/svg%3E") no-repeat center !important;
-        }
-
-        .google-style .fc-icon-chevron-right::before {
-          content: "" !important;
-          display: block !important;
-          width: 20px !important;
-          height: 20px !important;
-          background-color: currentColor !important;
-          mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='currentColor' stroke-width='4' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='9 18 15 12 9 6'%3E%3C/polyline%3E%3C/svg%3E") no-repeat center !important;
-          -webkit-mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='currentColor' stroke-width='4' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='9 18 15 12 9 6'%3E%3C/polyline%3E%3C/svg%3E") no-repeat center !important;
-        }
-
-
-        /* GOOGLE STYLE TIME AXIS (GMT+07) */
         .google-style .fc-timegrid-axis-cushion::before {
-          content: 'GMT+07';
-          display: block;
-          font-size: 10px;
-          color: #70757a;
-          font-weight: 400;
-          position: absolute;
-          top: 10px;
-          left: 12px;
+          content: 'GMT+07'; display: block; font-size: 10px; color: #70757a; font-weight: 400; position: absolute; top: 10px; left: 12px;
         }
 
         .google-style .fc-timegrid-slot-label-cushion {
-          display: inline-block;
-          font-size: 10px;
-          color: #70757a;
-          transform: translateY(-50%);
-          padding-right: 12px !important;
-          font-weight: 400;
-          text-transform: uppercase;
-          background: white; /* Cover the line part under the text */
-          position: relative;
-          z-index: 2;
+          display: inline-block; font-size: 10px; color: #70757a; transform: translateY(-50%); padding-right: 12px !important;
+          font-weight: 400; text-transform: uppercase; background: white; position: relative; z-index: 2;
         }
 
-        .google-style .fc-timegrid-slot {
-          min-height: 52px !important;
-          border-bottom: 1px solid #bdc1c6 !important;
-        }
+        .google-style .fc-timegrid-slot { min-height: 52px !important; border-bottom: 1px solid #bdc1c6 !important; }
+        .google-style .fc-timegrid-axis-frame { width: 84px !important; border-right: none !important; }
+        .google-style .fc-timegrid-slot-label { border-right: none !important; overflow: visible !important; }
 
-        /* Clean Axis - No Vertical Line */
-        .google-style .fc-timegrid-axis-frame { 
-          width: 84px !important; 
-          border-right: none !important; 
-        }
-        
-        .google-style .fc-timegrid-slot-label {
-          border-right: none !important;
-          overflow: visible !important;
-        }
-
-        /* Continuous Horizontal Grid Lines */
         .google-style .fc-timegrid-slots tr .fc-timegrid-slot-label::after {
-          content: '';
-          position: absolute;
-          right: 0;
-          top: 0;
-          width: 100vw; /* Extend line all the way to the right */
-          height: 1px;
-          background: #bdc1c6;
-          z-index: 1;
+          content: ''; position: absolute; right: 0; top: 0; width: 100vw; height: 1px; background: #bdc1c6; z-index: 1;
         }
 
         .google-style .fc-col-header-cell { border-bottom: 1px solid #bdc1c6 !important; border-left: none !important; background: white !important; }
         .google-style .fc-theme-standard td, .google-style .fc-theme-standard th { border-right: 1px solid #bdc1c6 !important; }
 
-        .google-style .fc-v-event,
-        .google-style .fc-daygrid-event,
-        .google-style .fc-daygrid-block-event {
-          background-color: #3f51b5 !important;
-          border: none !important;
-          border-radius: 4px !important;
-          box-shadow: 0 1px 1px rgba(60,64,67,0.3) !important;
-          color: white !important;
+        .google-style .fc-v-event, .google-style .fc-daygrid-event, .google-style .fc-daygrid-block-event {
+          background-color: #3f51b5 !important; border: none !important; border-radius: 4px !important;
+          box-shadow: 0 1px 1px rgba(60,64,67,0.3) !important; color: white !important;
         }
 
-        .google-style .fc-daygrid-event:hover {
-          filter: brightness(0.9);
-        }
-
-        /* HIDE ANY REMAINING NOW INDICATOR ARTIFACTS */
-        .fc-timegrid-now-indicator-line, 
-        .fc-timegrid-now-indicator-arrow,
-        .google-style .fc-timegrid-now-indicator-line,
-        .google-style .fc-timegrid-now-indicator-arrow {
-          display: none !important;
-          visibility: hidden !important;
-          opacity: 0 !important;
+        .google-style .fc-daygrid-event:hover { filter: brightness(0.9); }
+        .fc-timegrid-now-indicator-line, .fc-timegrid-now-indicator-arrow, .google-style .fc-timegrid-now-indicator-line, .google-style .fc-timegrid-now-indicator-arrow {
+          display: none !important; visibility: hidden !important; opacity: 0 !important;
         }
       `}</style>
     </div>

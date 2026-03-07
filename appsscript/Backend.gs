@@ -1,12 +1,14 @@
 /**
  * =====================================================
  * Schedule Teaching - ALL-IN-ONE BACKEND SCRIPT
- * Version: 14.21 - AUTH & RECALL FIX
+ * Version: 14.221 - AUTH & RECALL FIX
  * =====================================================
  */
 
 var CONSTANTS = {
-  GAS_SECRET: "FPTxavalo2026",
+  GAS_SECRET:
+    PropertiesService.getScriptProperties().getProperty("GAS_SECRET") ||
+    "REPLACE_IN_SCRIPT_PROPERTIES",
   DEFAULT_CALENDAR_NAME: "Schedule Teaching",
   SOURCE_TAG: "fpt_source",
   SIGNATURE_TAG: "fpt_signature",
@@ -15,7 +17,7 @@ var CONSTANTS = {
   ERROR: "error",
   FIREBASE_WEB_API_KEY:
     PropertiesService.getScriptProperties().getProperty("FIREBASE_API_KEY") ||
-    "AIzaSy...",
+    "REPLACE_IN_SCRIPT_PROPERTIES",
   FIREBASE_URL:
     "https://scheduleteaching-default-rtdb.asia-southeast1.firebasedatabase.app/",
   ADMIN_EMAILS: ["ngohoangtruongdat@gmail.com", "ngohoangtruongdat2@gmail.com"],
@@ -23,20 +25,19 @@ var CONSTANTS = {
   INVITATION_CALENDAR_NAME: "FPT Scheduler - Invitations",
   OAUTH: {
     CLIENT_ID:
-      "468852322434-cq03ofd3mulpl7v29tqr1qhgkh96pts1.apps.googleusercontent.com",
-    // 🔐 LẤY TỪ SCRIPT PROPERTIES (Settings -> Script Properties)
+      PropertiesService.getScriptProperties().getProperty("OAUTH_CLIENT_ID") ||
+      "REPLACE_IN_SCRIPT_PROPERTIES",
     CLIENT_SECRET:
       PropertiesService.getScriptProperties().getProperty(
-        "GOOGLE_CLIENT_SECRET",
-      ) || "",
+        "OAUTH_CLIENT_SECRET",
+      ) || "REPLACE_IN_SCRIPT_PROPERTIES",
     REDIRECT_URI: "https://shedule-teaching.vercel.app/",
   },
   // 📧 CẤU HÌNH SMTP (SendGrid) - Để gửi số lượng lớn (>100 mail/ngày)
   EMAIL_API: {
-    // 🔐 LẤY TỪ SCRIPT PROPERTIES (Settings -> Script Properties)
     SENDGRID_API_KEY:
       PropertiesService.getScriptProperties().getProperty("SENDGRID_API_KEY") ||
-      "",
+      "REPLACE_IN_SCRIPT_PROPERTIES",
     FROM_EMAIL: "ngohoangtruongdat2@gmail.com",
     FROM_NAME: "FPT Scheduler Service",
   },
@@ -168,16 +169,25 @@ var GoogleCalendarAPI = {
 
   fetch_: function (accessToken, path, options) {
     options = options || {};
+    // 🔑 Tự động lấy token nếu không được truyền vào (Hỗ trợ Admin flow)
+    var token = accessToken || ScriptApp.getOAuthToken();
+
     const url = this.baseUrl + path;
     const params = {
       method: options.method || "get",
       headers: {
-        Authorization: "Bearer " + accessToken,
+        Authorization: "Bearer " + token,
         "Content-Type": "application/json",
       },
       muteHttpExceptions: true,
     };
-    if (options.payload) params.payload = JSON.stringify(options.payload);
+
+    if (options.payload) {
+      params.payload =
+        typeof options.payload === "string"
+          ? options.payload
+          : JSON.stringify(options.payload);
+    }
 
     var response = UrlFetchApp.fetch(url, params);
     var code = response.getResponseCode();
@@ -1323,6 +1333,11 @@ function doPost(e) {
 
     if (action === "batchInvitationNotify") {
       res = batchInvitationNotifyHandler_(payload);
+      return jsonResponse_(res);
+    }
+
+    if (action === "syncToNativeGuest") {
+      res = syncToNativeGuestHandler_(payload);
       return jsonResponse_(res);
     }
 
@@ -3605,4 +3620,370 @@ function batchInvitationNotifyHandler_(payload) {
     status: CONSTANTS.SUCCESS,
     data: results,
   };
+}
+
+/**
+ * 📧 NEW: HÀM ĐỒNG BỘ NATIVE CHO KHÁCH MỜI (Individual Invitations)
+ * Chức năng: Tạo từng sự kiện riêng lẻ trên lịch Admin và add khách mời vào.
+ * Mỗi sự kiện sẽ kích hoạt 1 email từ Google.
+ */
+/**
+ * 📧 SMART-DIFF SYNC: Đồng bộ thông minh (Individual Invitations)
+ * Chỉ thêm/xóa những gì thực sự thay đổi trên Sheet, giữ nguyên các xác nhận cũ.
+ */
+function syncToNativeGuestHandler_(payload) {
+  var targetEmail = (payload.targetEmail || "").trim();
+  var lecturerName = payload.lecturerName || "Giảng viên";
+  var lecturerCode = payload.lecturerCode || "";
+  var events = payload.events || [];
+  var calendarId = "primary";
+
+  if (!targetEmail) throw new Error("Chưa nhập Email đích");
+
+  var results = {
+    totalReceived: events.length,
+    added: 0,
+    kept: 0,
+    removed: 0,
+    failed: 0,
+  };
+
+  try {
+    var now = new Date();
+    var timeMin = new Date(
+      now.getTime() - 30 * 24 * 60 * 60 * 1000,
+    ).toISOString();
+    var timeMax = new Date(
+      now.getTime() + 180 * 24 * 60 * 60 * 1000,
+    ).toISOString();
+
+    // 1️⃣ Lấy tất cả sự kiện HIỆN TẠI của giảng viên này trên lịch Admin
+    var existingEventsRes = GoogleCalendarAPI.listEvents(
+      null,
+      calendarId,
+      timeMin,
+      timeMax,
+      {
+        privateExtendedProperty: "lecturer_code=" + lecturerCode,
+        maxResults: 2500,
+      },
+    );
+
+    var existingEvents = existingEventsRes.items || [];
+
+    // Tạo bản đồ "Dấu vân tay": "startTimeMs|endTimeMs|location" -> EventObject
+    var calendarMap = {};
+    existingEvents.forEach(function (ev) {
+      if (ev.status === "cancelled") return;
+
+      // 🕒 CHUẨN HÓA THỜI GIAN: Chuyển về Timestamp (ms) để so sánh chính xác 100%
+      var tStart = new Date(ev.start.dateTime || ev.start.date).getTime();
+      var tEnd = new Date(ev.end.dateTime || ev.end.date).getTime();
+      var loc = (ev.location || "").trim().toLowerCase();
+
+      var fingerprint = tStart + "|" + tEnd + "|" + loc;
+      calendarMap[fingerprint] = ev;
+    });
+
+    // 2️⃣ Duyệt danh sách từ Sheet gửi lên để so sánh
+    events.forEach(function (ev, idx) {
+      try {
+        var tStart = new Date(ev.start).getTime();
+        var tEnd = new Date(ev.end).getTime();
+        var loc = (ev.location || "").trim().toLowerCase();
+        var fingerprint = tStart + "|" + tEnd + "|" + loc;
+
+        // KIỂM TRA: Nếu đã có sự kiện y hệt rồi thì GIỮ NGUYÊN
+        if (calendarMap[fingerprint]) {
+          var existingEv = calendarMap[fingerprint];
+          var attendee = (existingEv.attendees || []).find(function (a) {
+            return a.email.toLowerCase() === targetEmail.toLowerCase();
+          });
+
+          // Nếu đã có khách và trạng thái KHÔNG PHẢI 'declined' -> Giữ nguyên
+          if (attendee && attendee.responseStatus !== "declined") {
+            results.kept++;
+            delete calendarMap[fingerprint];
+            return;
+          }
+
+          // Nếu khách đã từ chối hoặc xóa lịch: Xóa event cũ trên Admin để mời lại
+          try {
+            GoogleCalendarAPI.deleteEvent(null, calendarId, existingEv.id);
+          } catch (e) {}
+          delete calendarMap[fingerprint];
+        }
+
+        // CHƯA CÓ HOẶC CẦN MỜI LẠI: Tạo mới
+        if (idx > 0) Utilities.sleep(500);
+
+        var evDate = new Date(ev.start);
+        var dateStr = Utilities.formatDate(evDate, "Asia/Ho_Chi_Minh", "dd/MM");
+        var uniqueSummary =
+          "Lịch Review: " + lecturerName + " (" + dateStr + ")";
+
+        var eventPayload = {
+          summary: uniqueSummary,
+          location: ev.location,
+          description: "",
+          start: { dateTime: ev.start, timeZone: "Asia/Ho_Chi_Minh" },
+          end: { dateTime: ev.end, timeZone: "Asia/Ho_Chi_Minh" },
+          attendees: [{ email: targetEmail }],
+          extendedProperties: {
+            private: {
+              source: "fpt_scheduler",
+              lecturer_name: lecturerName,
+              lecturer_code: lecturerCode,
+              target_email: targetEmail,
+            },
+          },
+        };
+
+        GoogleCalendarAPI.createEvent(null, calendarId, eventPayload, true);
+        results.added++;
+      } catch (e) {
+        AppLogger.error("Sync item failed for " + targetEmail, e.toString());
+        results.failed++;
+      }
+    });
+
+    // 3️⃣ XÓA BỎ: Những gì mồ côi (ở trên lịch có nhưng trên Sheet không có)
+    Object.keys(calendarMap).forEach(function (fp) {
+      try {
+        var evToDelete = calendarMap[fp];
+        GoogleCalendarAPI.deleteEvent(null, calendarId, evToDelete.id);
+        results.removed++;
+      } catch (e) {
+        AppLogger.error("Delete obsolete failed", e.toString());
+      }
+    });
+
+    var msg = "Đồng bộ thông minh hoàn tất cho " + lecturerName + ".\n";
+    msg += "- Giữ nguyên: " + results.kept + " (RSVP ổn định)\n";
+    msg += "- Mời mới/Mời lại: " + results.added + " (đã gửi mail)\n";
+    msg += "- Đã dọn dẹp: " + results.removed + " (không còn trên Sheet)";
+
+    return { status: "success", message: msg };
+  } catch (e) {
+    return { status: "error", message: "Lỗi hệ thống: " + e.toString() };
+  }
+}
+/**
+ * 🚀 AUTO-WATCHER: Tự động phát hiện thay đổi trên Sheet và đồng bộ ngay lập tức
+ */
+function autoSyncOnSheetEdit_(e) {
+  var lock = LockService.getScriptLock();
+  try {
+    // 🔒 Đợi tối đa 30 giây để tránh xung đột nếu Admin sửa nhiều ô cùng lúc
+    lock.waitLock(30000);
+
+    var range = e.range;
+    var sheet = range.getSheet();
+    var sheetName = sheet.getName();
+
+    if (
+      sheetName.toLowerCase().indexOf("review") === -1 &&
+      sheetName.toLowerCase().indexOf("council") === -1
+    )
+      return;
+
+    var row = range.getRow();
+    if (row < 3) return;
+
+    // 🕒 Đợi 10 giây để Admin gõ xong (Debounce)
+    Utilities.sleep(10000);
+
+    var rowData = sheet
+      .getRange(row, 1, 1, sheet.getLastColumn())
+      .getValues()[0];
+
+    // 🔎 Tìm mã giảng viên trong dòng (Dựa trên cấu trúc cột Reviewer 1 & 2 - Cột AE, AF)
+    // Hoặc quét toàn bộ dòng để tìm cái gì giống handle (không cách, không chấm, dài > 5)
+    var potentialLecturers = [];
+    rowData.forEach(function (val) {
+      var s = String(val).trim();
+      if (
+        s &&
+        s.length > 5 &&
+        s.indexOf(" ") === -1 &&
+        s.indexOf(".") === -1 &&
+        s.indexOf("@") === -1
+      ) {
+        potentialLecturers.push(s);
+      }
+    });
+    potentialLecturers = potentialLecturers.filter(function (v, i, a) {
+      return a.indexOf(v) === i;
+    });
+
+    if (potentialLecturers.length === 0) return;
+
+    // 🕒 Thiết lập khung giờ tìm kiếm (Để truy vết Email cũ)
+    var now = new Date();
+    var tMin = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000).toISOString();
+    var tMax = new Date(
+      now.getTime() + 180 * 24 * 60 * 60 * 1000,
+    ).toISOString();
+
+    potentialLecturers.forEach(function (lCode) {
+      // 🔑 TRUY VẾT: Tìm xem giảng viên này đã đồng bộ vào email nào trước đó
+      var calendarId = "primary";
+      var searchRes = GoogleCalendarAPI.listEvents(
+        null,
+        calendarId,
+        tMin,
+        tMax,
+        {
+          privateExtendedProperty: "lecturer_code=" + lCode,
+          maxResults: 1,
+        },
+      );
+
+      if (searchRes.items && searchRes.items.length > 0) {
+        var existingProps = searchRes.items[0].extendedProperties.private;
+        var targetEmail = existingProps.target_email;
+        var lName = existingProps.lecturer_name;
+
+        if (targetEmail) {
+          AppLogger.info(
+            "🔄 Auto-Updating Schedule for: " +
+              lName +
+              " (" +
+              targetEmail +
+              ")",
+          );
+
+          // Lấy dữ liệu MỚI NHẤT từ Sheet
+          var freshEvents = crawlLecturerEventsFromSheet_(sheet, lCode);
+
+          // Ép chạy Smart-Diff Sync
+          syncToNativeGuestHandler_({
+            targetEmail: targetEmail,
+            lecturerName: lName,
+            lecturerCode: lCode,
+            events: freshEvents,
+          });
+        }
+      }
+    });
+  } catch (err) {
+    AppLogger.error("Auto-Watcher Failed", err.toString());
+  } finally {
+    lock.releaseLock();
+  }
+}
+
+/**
+ * Quét toàn bộ sheet để lấy lịch chuẩn xác
+ */
+function crawlLecturerEventsFromSheet_(sheet, lecturerCode) {
+  var data = sheet.getDataRange().getValues();
+  var lecturersEvents = [];
+
+  for (var i = 2; i < data.length; i++) {
+    var row = data[i];
+    // Kiểm tra xem Lecturer có tham gia dòng này không
+    var isMatch = row.some(function (cell) {
+      return String(cell).trim() === lecturerCode;
+    });
+
+    if (isMatch) {
+      // AI=34, AJ=35, AK=36
+      var rawDate = row[34];
+      var slotVal = row[35];
+      var roomVal = row[36];
+
+      var dateObj = null;
+      if (rawDate instanceof Date) {
+        dateObj = rawDate;
+      } else if (rawDate) {
+        dateObj = new Date(rawDate);
+      }
+
+      if (dateObj && !isNaN(dateObj.getTime()) && slotVal) {
+        var times = calculateTimeFromSlot_(slotVal, dateObj);
+        lecturersEvents.push({
+          start: times.start.toISOString(),
+          end: times.end.toISOString(),
+          location: String(roomVal || "Phòng chờ"),
+        });
+      }
+    }
+  }
+  return lecturersEvents;
+}
+
+function calculateTimeFromSlot_(slot, date) {
+  var startH = 7,
+    startM = 0;
+  var s = String(slot);
+  if (s == "2") {
+    startH = 9;
+    startM = 30;
+  } else if (s == "3") {
+    startH = 12;
+    startM = 30;
+  } else if (s == "4") {
+    startH = 14;
+    startM = 45;
+  } else if (s == "5") {
+    startH = 17;
+    startM = 0;
+  }
+
+  var start = new Date(date);
+  start.setHours(startH, startM, 0, 0);
+  var end = new Date(start.getTime() + 135 * 60 * 1000);
+  return { start: start, end: end };
+}
+
+/**
+ * 🛠️ CÀI ĐẶT TRIGGER (Fix lỗi "Unexpected error while getting forSpreadsheet")
+ */
+function setupAutoSyncTrigger(spreadsheetUrl) {
+  try {
+    var ss = null;
+
+    // Thử lấy Spreadsheet hiện tại (nếu là container-bound)
+    try {
+      ss = SpreadsheetApp.getActiveSpreadsheet();
+    } catch (e) {}
+
+    // Nếu không lấy được (Standalone), thử mở bằng URL/ID nếu có truyền vào
+    if (!ss && spreadsheetUrl) {
+      ss = SpreadsheetApp.openByUrl(spreadsheetUrl);
+    }
+
+    if (!ss) {
+      return (
+        "⚠️ LỖI: Không tìm thấy Spreadsheet. \n" +
+        "Nếu bạn dùng Script rời, hãy chạy: setupAutoSyncTrigger('ĐƯỜNG_DẪN_GOOGLE_SHEET_CỦA_BẠN')"
+      );
+    }
+
+    var ssId = ss.getId();
+
+    // Xóa trigger cũ để tránh trùng lặp
+    var allTriggers = ScriptApp.getProjectTriggers();
+    allTriggers.forEach(function (t) {
+      if (t.getHandlerFunction() === "autoSyncOnSheetEdit_")
+        ScriptApp.deleteTrigger(t);
+    });
+
+    // Tạo trigger mới dựa trên ID để cực kỳ chính xác
+    ScriptApp.newTrigger("autoSyncOnSheetEdit_")
+      .forSpreadsheet(ssId)
+      .onEdit()
+      .create();
+
+    var res =
+      "✅ THÀNH CÔNG: Đã kích hoạt chế độ Tự động đồng bộ cho Sheet: " +
+      ss.getName();
+    Logger.log(res);
+    return res;
+  } catch (err) {
+    var errRes = "❌ LỖI CÀI ĐẶT: " + err.toString();
+    Logger.log(errRes);
+    return errRes;
+  }
 }

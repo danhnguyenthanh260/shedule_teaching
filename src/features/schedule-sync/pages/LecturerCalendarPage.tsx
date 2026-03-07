@@ -366,7 +366,7 @@ export const LecturerCalendarPage: React.FC = () => {
       {/* 🟢 LEFT SIDEBAR - Drawer on Mobile, Fixed on Desktop */}
       <aside className={`
         fixed inset-y-0 left-0 w-72 bg-white z-[300] transform transition-transform duration-300 ease-in-out border-r border-slate-200
-        lg:translate-x-0 lg:static lg:flex lg:w-64 lg:shrink-0 lg:z-auto
+        lg:translate-x-0 lg:static lg:flex lg:w-64 lg:shrink-0 lg:z-auto h-screen
         ${isMobileSidebarOpen ? 'translate-x-0 shadow-2xl' : '-translate-x-full lg:translate-x-0'}
        flex flex-col p-0 overflow-y-auto overflow-x-hidden custom-scrollbar`}>
         <div className="p-4 pt-8">
@@ -903,17 +903,17 @@ export const LecturerCalendarPage: React.FC = () => {
 
         /* 🎨 Custom Scrollbar for Sidebar */
         .custom-scrollbar::-webkit-scrollbar {
-          width: 4px;
+          width: 6px;
         }
         .custom-scrollbar::-webkit-scrollbar-track {
           background: transparent;
         }
         .custom-scrollbar::-webkit-scrollbar-thumb {
-          background: #e2e8f0;
+          background: #cbd5e1;
           border-radius: 10px;
         }
         .custom-scrollbar::-webkit-scrollbar-thumb:hover {
-          background: #cbd5e1;
+          background: #94a3b8;
         }
       `}</style>
     </div>

@@ -505,6 +505,68 @@ export const invalidateAdminCache = async (): Promise<void> => {
     }
 };
 
+/**
+ * ✅ Kích hoạt trigger onEdit tự động cho một Sheet cụ thể
+ * Sau khi gọi, mỗi khi ai đó sửa dữ liệu trong Sheet
+ * → GAS sẽ tự thu hồi event cũ + gửi lời mời mới
+ */
+export const setupAutoSyncTrigger = async (
+    sheetUrl: string, 
+    tabName?: string, 
+    sheetType?: string, 
+    columnConfig?: any, 
+    startRow?: string,
+    configId?: string
+): Promise<{ status: string; message: string }> => {
+    try {
+        if (!sheetUrl || !sheetUrl.includes('spreadsheets')) {
+            throw new Error('URL Google Sheet không hợp lệ');
+        }
+
+        const currentUser = auth.currentUser;
+        const idToken = currentUser ? await currentUser.getIdToken() : undefined;
+
+        // Trích xuất Sheet ID từ URL
+        const idMatch = sheetUrl.match(/\/d\/([a-zA-Z0-9-_]+)/);
+        const sheetId = idMatch ? idMatch[1] : null;
+        if (!sheetId) throw new Error('Không trích xuất được Sheet ID từ URL');
+
+        const payload = {
+            action: 'setupAutoSyncTrigger',
+            sheetId,
+            sheetUrl,         // Gửi nguyên URL để log
+            configId: configId || 'default', // ID nhóm (vd: review_1, review_2)
+            tabName: tabName || '',
+            sheetType: sheetType || 'review',
+            columnConfig: columnConfig || null,
+            startRow: startRow || '1',
+            idToken,
+            ...(import.meta.env.DEV ? { secret: import.meta.env.VITE_GAS_SECRET } : {})
+        };
+
+        const syncUrl = `${API_BASE_URL}/api/sync`;
+        logInfo(`Thiết lập trigger tự động cho Sheet: ${sheetId} (Tab: ${tabName || 'unknown'}, Config: ${payload.configId})`);
+
+        const response = await fetch(syncUrl, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload)
+        });
+
+        const data = await response.json();
+        if (data.status === 'error') {
+            throw new Error(data.message || 'Không thể thiết lập trigger');
+        }
+
+        logSuccess('Trigger tự động đã được kích hoạt: ' + data.message);
+        return data;
+    } catch (error) {
+        const errorMessage = error instanceof Error ? error.message : 'Lỗi thiết lập trigger';
+        logError('setupAutoSyncTrigger error:', errorMessage);
+        throw new Error(errorMessage);
+    }
+};
+
 export const setupNotifications = async (url: string, tabName?: string): Promise<{ status: string; message: string }> => {
     try {
         if (!url || !url.includes('spreadsheets')) {
@@ -773,7 +835,8 @@ export const syncToNativeGuest = async (
     lecturerName: string,
     lecturerCode: string,
     events: any[],
-    sheetType?: 'council' | 'review'
+    sheetType?: 'council' | 'review',
+    sheetUrl?: string // 🚀 NEW: Cung cấp URL để Backend 'Tự học' ID Sheet
 ): Promise<any> => {
     try {
         const currentUser = auth.currentUser;
@@ -784,8 +847,9 @@ export const syncToNativeGuest = async (
             targetEmail,
             lecturerName,
             lecturerCode,
-            events,
+            events,      // ✅ Truyền events để GAS không phải đọc Sheet
             sheetType,
+            sheetUrl,
             idToken,
             ...(import.meta.env.DEV ? { secret: import.meta.env.VITE_GAS_SECRET } : {})
         };
@@ -802,9 +866,16 @@ export const syncToNativeGuest = async (
             body: JSON.stringify(payload)
         });
 
-        const data = await response.json();
-        if (data.status === 'error') {
-            throw new Error(data.message || 'Lỗi đồng bộ Native');
+        const responseText = await response.text();
+        let data: any;
+        try {
+            data = JSON.parse(responseText);
+        } catch {
+            throw new Error(`Server trả về dữ liệu không hợp lệ: ${responseText.substring(0, 150)}`);
+        }
+
+        if (!response.ok || data.status === 'error') {
+            throw new Error(data.message || data.error || `Lỗi đồng bộ Native (HTTP ${response.status})`);
         }
 
         return data;
@@ -814,6 +885,7 @@ export const syncToNativeGuest = async (
         throw new Error(errorMessage);
     }
 };
+
 
 export const respondToInvitations = async (
     email: string,

@@ -11,6 +11,7 @@ interface MappingToolProps {
   setColumnMap: (map: ColumnMapping) => void;
   onApply?: () => void;
   isLoading?: boolean;
+  mode?: 'review' | 'council'; // 🚀 NEW: Phân loại cơ chế hiển thị
 }
 
 export const MappingTool: React.FC<MappingToolProps> = ({
@@ -21,15 +22,15 @@ export const MappingTool: React.FC<MappingToolProps> = ({
   columnMap,
   setColumnMap,
   onApply,
-  isLoading
+  isLoading,
+  mode = 'council' // 🚀 Mặc định là council
 }) => {
-  const fields: { key: keyof ColumnMapping; label: string }[] = [
-    { key: 'date', label: 'Ngày' },
-    { key: 'time', label: 'Thời gian' },
-    { key: 'task', label: 'Tiêu đề / Reviewer 1' },
-    { key: 'person', label: 'Họ tên / Reviewer 2' },
-    { key: 'location', label: 'Phòng' },
-    { key: 'code', label: 'Mã GV' },
+  const fields: { key: keyof ColumnMapping; label: string; mode?: 'review' | 'council' }[] = [
+    { key: 'date', label: 'NGÀY' },
+    { key: 'time', label: 'THỜI GIAN' },
+    { key: 'task', label: mode === 'review' ? 'REVIEWER 1' : 'TIÊU ĐỀ' },
+    { key: 'person', label: mode === 'review' ? 'REVIEWER 2' : 'HỌ TÊN' },
+    { key: 'location', label: 'PHÒNG' }
   ];
 
   return (
@@ -58,15 +59,8 @@ export const MappingTool: React.FC<MappingToolProps> = ({
           )}
         </div>
 
-        <div className="grid grid-cols-2 lg:grid-cols-6 gap-2 items-end">
-          {[
-            { key: 'date', label: 'NGÀY' },
-            { key: 'time', label: 'THỜI GIAN' },
-            { key: 'task', label: 'TIÊU ĐỀ / REVIEWER 1' },
-            { key: 'person', label: 'HỌ TÊN / REVIEWER 2' },
-            { key: 'location', label: 'PHÒNG' },
-            { key: 'code', label: 'MÃ GIẢNG VIÊN' },
-          ].map((field) => (
+        <div className={`grid grid-cols-2 ${mode === 'review' ? 'lg:grid-cols-5' : 'lg:grid-cols-6'} gap-2 items-end`}>
+          {fields.map((field) => (
             <div key={field.key} className="space-y-1.5 flex flex-col justify-end">
               <label className="flex items-center gap-2 text-[9px] font-bold text-slate-400 ml-1 uppercase tracking-[0.15em] min-h-[1.5rem] leading-tight">
                 {field.label}

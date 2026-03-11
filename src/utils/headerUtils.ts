@@ -33,23 +33,10 @@ export const generateHeaderOptions = (
     let label = String(h || "").trim();
     if (!label || label.startsWith('Column_')) return;
 
-    const isStaticArea = i < 9;
-    const countInReview = labelCountsInReview.get(label) || 0;
-    const isMapped = Object.values(currentMapping).includes(i);
-    const isFirstTriplet = i === firstOccurrencesInReview.get(label) && countInReview >= 3;
-
     if (isReviewMode) {
-      if (isUserAdmin) {
-        // 🏛️ ADMIN in Review Mode:
-        // Show static area OR first occurrence of ANY label OR mapped columns
-        const isFirstOccurrence = i === firstOccurrencesInReview.get(label);
-        if (isStaticArea || isFirstOccurrence || isMapped) {
-          // Keep it
-        } else {
-          return;
-        }
-      } else {
+      if (!isUserAdmin) {
         // 🎓 LECTURER in Review Mode: Keyword filtering
+        const isMapped = Object.values(currentMapping).includes(i);
         if (!isMapped) {
           const allowedKeywords = [
             "code", "reviewer", "date", "slot", "room", "time", "gvhd",
@@ -61,15 +48,15 @@ export const generateHeaderOptions = (
           if (!isAllowed) return;
         }
       }
+      // For Admin, we KEEP ALL columns! No early return dropping columns!
     }
 
     // 🕵️ Handle Duplicate Labels
     let finalLabel = label;
-    const shouldBeClean = isReviewMode && isFirstTriplet;
-
-    // Admins see suffixes for clarity unless it's a representative triplet
-    if (isUserAdmin && !shouldBeClean && seen.has(label)) {
-      finalLabel = `${label} (${i + 1})`;
+    
+    // Add (column index) suffix if duplicate label exists, so Admin can differentiate Date of Rev1 vs Rev2
+    if (seen.has(label)) {
+      finalLabel = `${label} (${i + 1})`; // 1-indexed for display
     }
 
     if (!looksLikeDataRow([label])) {

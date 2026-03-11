@@ -78,7 +78,7 @@ const App: React.FC = () => {
             )
           } 
         />
-        <Route path="/dashboard" element={<Navigate to="/" />} />
+        <Route path="/dashboard" element={<LecturerApp />} />
         <Route path="/" element={<LecturerCalendarPage />} />
         <Route path="*" element={<Navigate to="/" />} />
       </Routes>

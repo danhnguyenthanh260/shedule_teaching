@@ -11,6 +11,7 @@ export interface SemesterConfig {
     mapping?: import('../types').ColumnMapping;
     createdAt?: number;
     notifEnabled?: boolean;
+    autoSyncEnabled?: boolean;
 }
 
 export const configService = {

@@ -6,7 +6,7 @@ import { database } from '../config/firebase';
 import { isSuperAdmin, SUPER_ADMIN_EMAILS } from '../config/admin';
 import { ref, set, push, onValue, remove, update } from 'firebase/database';
 import * as XLSX from 'xlsx';
-import { readSheet, getTabNames, setupNotifications, disableNotifications, invalidateAdminCache } from '../services/appsScriptService';
+import { readSheet, getTabNames, setupNotifications, disableNotifications, invalidateAdminCache, setupAutoSyncTrigger } from '../services/appsScriptService';
 import { MappingTool } from '../components/MappingTool';
 import { ColumnMapping } from '../types';
 import { generateHeaderOptions } from '../utils/headerUtils';
@@ -47,7 +47,8 @@ export const AdminPage: React.FC = () => {
         sheetType: 'council' as 'review' | 'council',
         tabName: '',
         mapping: {} as ColumnMapping,
-        notifEnabled: false
+        notifEnabled: false,
+        autoSyncEnabled: false
     });
 
     const [sheetHeaders, setSheetHeaders] = useState<{ label: string; value: number }[]>([]);
@@ -162,10 +163,44 @@ export const AdminPage: React.FC = () => {
                 tabName: newSemester.tabName,
                 mapping: newSemester.mapping || {},
                 createdAt: existingSemester?.createdAt || Date.now(),
-                notifEnabled: newSemester.notifEnabled || false
+                notifEnabled: newSemester.notifEnabled || false,
+                autoSyncEnabled: newSemester.autoSyncEnabled || false
             });
 
-            setToastMessage(editMode ? '✅ Cập nhật học kỳ thành công!' : '✅ Tạo học kỳ thành công!');
+            // ✅ TỰ ĐỘNG đăng ký trigger onEdit cho Sheet mới (Chỉ nếu Bật)
+            if (newSemester.autoSyncEnabled) {
+                try {
+                    // Parse mapping từ frontend (date/time/location/task/person) 
+                    // thành config cho backend GAS (0-indexed)
+                    const mapping = newSemester.mapping || {};
+                    const columnConfig = {
+                        dateCol: mapping.date ?? -1,
+                        slotCol: mapping.time ?? -1,
+                        roomCol: mapping.location ?? -1,
+                        codeCol: mapping.code ?? -1,
+                        gidCol: -1, // Sẽ tự động tìm ở backend
+                        lecturerCols: newSemester.sheetType === 'review' 
+                            ? [mapping.task, mapping.person].filter(x => x !== undefined) // Reviewer 1 & 2
+                            : [mapping.person].filter(x => x !== undefined) // Name
+                    };
+
+                    await setupAutoSyncTrigger(
+                        newSemester.sheetUrl,
+                        newSemester.tabName,
+                        newSemester.sheetType,
+                        columnConfig,
+                        newSemester.startRow,
+                        semesterId // <-- Added semesterId to distinguish different sections sharing the same sheet!
+                    );
+                    console.log('✅ Auto-sync trigger đã được đăng ký cho:', newSemester.sheetUrl, ' với alias:', semesterId);
+                } catch (triggerErr) {
+                    // Không fail cả form nếu trigger lỗi - chỉ log warning
+                    console.warn('⚠️ Trigger setup skipped or failed:', triggerErr);
+                }
+            }
+
+
+            setToastMessage(editMode ? '✅ Cập nhật học kỳ thành công! Trigger auto-sync đã được kích hoạt.' : '✅ Tạo học kỳ thành công! Trigger auto-sync đã được kích hoạt.');
             setTimeout(() => setToastMessage(null), 5000);
             
             // Clean up state
@@ -182,7 +217,8 @@ export const AdminPage: React.FC = () => {
                 sheetType: 'council',
                 tabName: '',
                 mapping: {},
-                notifEnabled: false
+                notifEnabled: false,
+                autoSyncEnabled: false
             });
 
             fetchConfigs();
@@ -225,7 +261,8 @@ export const AdminPage: React.FC = () => {
             sheetType: semester.sheetType || 'council',
             tabName: semester.tabName || '',
             mapping: semester.mapping || {},
-            notifEnabled: semester.notifEnabled || false
+            notifEnabled: semester.notifEnabled || false,
+            autoSyncEnabled: semester.autoSyncEnabled || false
         });
         setEditMode(semester.id);
         setSheetHeaders([]);
@@ -489,7 +526,7 @@ export const AdminPage: React.FC = () => {
                                     setNewSemester({ 
                                         semester: '', sheetUrl: '', startRow: '1', columns: '', 
                                         dateFormat: 'dd/MM/yyyy', sheetType: 'council', tabName: '', mapping: {},
-                                        notifEnabled: false
+                                        notifEnabled: false, autoSyncEnabled: false
                                     });
                                 }}
                             />

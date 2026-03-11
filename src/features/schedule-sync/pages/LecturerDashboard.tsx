@@ -463,7 +463,7 @@ export const LecturerDashboard: React.FC = () => {
 
     const dataOnly = allRows.slice(headerRowIndex + 1);
     return dataOnly.map((r, idx) => {
-      const actualIdx = idx + headerRowIndex + 1;
+      const actualIdx = idx + headerRowIndex + 2;
       const cleanTab = (tabName || 'Sheet1').replace(/[^a-zA-Z0-9]/g, '');
       return {
         id: `row-${sheetMeta?.sheetId?.substring(0, 5) || 'preview'}-${cleanTab}-${actualIdx}`,
@@ -644,6 +644,9 @@ export const LecturerDashboard: React.FC = () => {
             end: r.endTime,
             location: r.location || '',
             title: eventTitle,
+            code: r.code,
+            groupName: r.groupName,
+            rowId: r.id,
             description: r.isGrouped 
               ? `Đồng bộ từ FPT Scheduler\nGiảng viên: ${foundName}\nThời gian: ${r.timeRaw || 'N/A'}`
               : `Nhiệm vụ: ${r.task || 'Chưa phân công'}\nGiảng viên: ${foundName}\nThời gian: ${r.timeRaw || 'N/A'}`

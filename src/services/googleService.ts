@@ -286,7 +286,7 @@ export class GoogleSyncService {
 
         successCount++;
         return {
-          id: generateRowId(sheetId, tab, idx + headerRowIndex + 1),
+          id: generateRowId(sheetId, tab, idx + headerRowIndex + 2),
           date: lastDate,
           startTime: start,
           endTime: end,
@@ -335,6 +335,12 @@ export class GoogleSyncService {
     const dataRows = rawRows.slice(headerRowIndex + 1);
 
     const findTripleAnchors = (headers: string[]) => {
+      // 🕵️ CHIẾN LƯỢC CỐ ĐỊNH: Review 1 (J=9), Review 2 (T=19), Review 3 (AC=28)
+      // Đây là cấu trúc chuẩn của user, ưu tiên tuyệt đối.
+      if ((tab || "").toLowerCase().includes("review") || detailHeaders.some(h => String(h || "").toLowerCase().includes("reviewer 1"))) {
+         return [9, 19, 28];
+      }
+
       const labels: Record<string, number[]> = {};
       headers.forEach((h, i) => {
         const lbl = (h || "").trim().toLowerCase();
@@ -435,11 +441,11 @@ export class GoogleSyncService {
       if (rowLocation) lastLocation = rowLocation;
 
       const baseTask = (mapping.task !== undefined ? (row[mapping.task] || "Review") : "Review").toString().trim();
-      const rCode = inferredCodeIdx !== -1 ? (row[inferredCodeIdx] || "").toString().trim() : "";
 
       finalBlockStarts.forEach((blockStart, blockIdx) => {
+        // blockEnd should be just before the next block starts, or the end of the sheet
         const blockEnd = isTripleMode 
-          ? (blockIdx < blockStartIndices.length - 1 ? blockStartIndices[blockIdx + 1] - 1 : detailHeaders.length - 1)
+          ? (blockIdx < finalBlockStarts.length - 1 ? finalBlockStarts[blockIdx + 1] - 1 : detailHeaders.length - 1)
           : detailHeaders.length - 1;
 
         let rDate = getMappedValue('date', row, blockStart, blockEnd) || lastDate;
@@ -454,10 +460,11 @@ export class GoogleSyncService {
           location: ['phòng', 'room', 'location'],
           person: ['reviewer', 'giảng viên', 'cán bộ', 'họ tên'],
           task: ['nhiệm vụ', 'đề tài', 'task', 'tiêu đề'],
-          email: ['email', 'thư điện tử', 'mail']
+          email: ['email', 'thư điện tử', 'mail'],
+          code: ['mã hđ', 'mã hd', 'code', 'mã đề tài', 'id']
         };
 
-        const autoInferList = (field: keyof ColumnMapping) => {
+        const autoInferList = (field: keyof typeof fieldKeywords) => {
           const keywords = fieldKeywords[field] || [];
           const matches: string[] = [];
           detailHeaders.forEach((h, i) => {
@@ -475,6 +482,18 @@ export class GoogleSyncService {
         if (!rLocation) rLocation = autoInferList('location')[0] || lastLocation;
         if (!rTask) rTask = autoInferList('task')[0] || "";
         if (!rPerson) rPerson = autoInferList('person')[0] || "";
+        
+        // 🚀 ĐỈNH CAO: Bắt `Code/Mã HĐ` chính xác theo từng block y hệt Backend
+        let rCode = "";
+        if (isTripleMode) {
+            // Ép vị trí cột theo Block Index cho chế độ Review
+            const hardcodedCodeIdx = blockIdx === 0 ? 9 : (blockIdx === 1 ? 19 : 28);
+            rCode = (row[hardcodedCodeIdx] || "").toString().trim();
+        } 
+        
+        if (!rCode) {
+            rCode = autoInferList('code')[0] || (inferredCodeIdx !== -1 ? (row[inferredCodeIdx] || "").toString().trim() : "");
+        }
 
         // 🛡️ TRIPLE MODE FILTER: Chỉ tạo sự kiện nếu block có Giảng viên hoặc Giờ cụ thể
         const hasBlockContent = rPerson || rTime;
@@ -488,7 +507,7 @@ export class GoogleSyncService {
           const finalTime = rTime || "---";
           const { start, end } = (parsedD.date && rTime) ? parseVNTime(rDate, rTime, preferredFormat) : { start: "", end: "" };
           const finalReviewers = autoInferList('person').slice(0, 2);
-          const eventId = `${generateRowId(sheetId, tab, rowIndex + headerRowIndex + 1)}-b${blockIdx}`;
+          const eventId = `${generateRowId(sheetId, tab, rowIndex + headerRowIndex + 2)}-b${blockIdx}`;
 
           allEvents.push({
             id: eventId,

@@ -133,6 +133,8 @@ export const LecturerCalendarPage: React.FC = () => {
         const loc = ev.extendedProps.location || 'N/A';
 
         return {
+          rowId: ev.id,
+          code: ev.extendedProps.code || "",
           title: `Lịch Review: ${lecturerName} (${loc})`,
           start: typeof ev.start === 'string' ? ev.start : (ev.start as Date).toISOString(),
           end: typeof ev.end === 'string' ? ev.end : (ev.end as Date).toISOString(),
@@ -146,7 +148,8 @@ export const LecturerCalendarPage: React.FC = () => {
         lecturerName,
         persistence.personFilter,
         syncEvents,
-        sheetType === 'review' ? 'review' : 'council'
+        sheetType === 'review' ? 'review' : 'council',
+        sheetUrl // 🚀 NEW: Truyền thêm URL để Backend tự động nhận diện ID Sheet
       );
 
       setSyncStatus({ type: 'success', message: res.message });
@@ -223,7 +226,7 @@ export const LecturerCalendarPage: React.FC = () => {
     const addPerson = (val: string) => {
       if (!val || typeof val !== 'string') return;
       const str = val.trim();
-      if (!str) return;
+      if (!str || str.toUpperCase().startsWith('#N/A') || str.includes('#REF!')) return;
 
       let handle = "";
       if (str.includes('(') && str.includes(')')) {
@@ -236,14 +239,15 @@ export const LecturerCalendarPage: React.FC = () => {
         handle = parts[parts.length - 1].toLowerCase().replace(/[^a-z0-9]/g, '');
       }
 
-      if (handle && !map.has(handle)) {
+      // 🛡️ CHẶN TIẾP: Nếu handle là 'na' hoặc chỉ có số (ngày/giờ nhầm lẫn)
+      if (handle && handle !== 'na' && isNaN(Number(handle)) && !map.has(handle)) {
         map.set(handle, str);
       }
     };
 
     rows.forEach(r => {
       if (r.person) addPerson(r.person);
-      if (r.reviewers) r.reviewers.forEach(addPerson);
+      if (r.reviewers) r.reviewers.forEach((p: string) => addPerson(p));
       if (r.email) addPerson(r.email);
     });
 
@@ -290,6 +294,7 @@ export const LecturerCalendarPage: React.FC = () => {
       end: r.endTime,
       extendedProps: {
         location: r.location,
+        code: r.code,
         group: r.groupName,
         person: r.person,
         reviewers: r.reviewers,
@@ -578,6 +583,18 @@ export const LecturerCalendarPage: React.FC = () => {
           </div>
 
           <div className="flex items-center gap-2 sm:gap-4">
+            {/* Dashboard Navigation */}
+            <Link
+              to="/dashboard"
+              className="flex items-center justify-center w-10 h-10 sm:w-auto sm:px-4 sm:py-2 bg-blue-50 text-blue-600 rounded-xl font-bold text-sm border border-blue-100 hover:bg-blue-100 transition-all shadow-sm"
+              title="Truy cập Bảng điều khiển"
+            >
+              <svg className="w-5 h-5 sm:w-4 sm:h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M4 6a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2V6zM14 6a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2V6zM4 16a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2v-2zM14 16a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2v-2z" />
+              </svg>
+              <span className="hidden sm:inline ml-2">Bảng điều khiển</span>
+            </Link>
+
             {/* Navigation for Admins */}
             {isAdmin && (
               <Link

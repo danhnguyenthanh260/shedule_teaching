@@ -170,17 +170,40 @@ export const SemesterForm: React.FC<SemesterFormProps> = ({
                         </div>
                     </div>
 
-                    {/* {formData.sheetType === 'council' && (
+                    <div className="grid grid-cols-1 xl:grid-cols-2 gap-4">
                         <div className="flex items-center justify-between p-4 bg-orange-50/30 rounded-xl border border-orange-100/50 shadow-sm transition-all hover:bg-orange-50/50">
                             <div className="flex items-center gap-3">
-                                <div className={`w-8 h-8 rounded-lg flex items-center justify-center transition-all ${formData.notifEnabled ? 'bg-orange-500 text-white shadow-md shadow-orange-200' : 'bg-white text-slate-400 border border-slate-200'}`}>
+                                <div className={`w-8 h-8 rounded-lg flex items-center justify-center transition-all ${formData.autoSyncEnabled ? 'bg-[#F27024] text-white shadow-md shadow-orange-200' : 'bg-white text-slate-400 border border-slate-200'}`}>
+                                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M13 10V3L4 14h7v7l9-11h-7z" />
+                                    </svg>
+                                </div>
+                                <div className="space-y-0.5">
+                                    <p className="text-[10px] font-black text-slate-800 uppercase tracking-tight">Tự động Thu hồi & Đồng bộ</p>
+                                    <p className="text-[8px] font-medium text-slate-400">Tự phát hiện thay đổi trên Sheet & Cập nhật lại Calendar</p>
+                                </div>
+                            </div>
+                            <label className="relative inline-flex items-center cursor-pointer">
+                                <input 
+                                    type="checkbox" 
+                                    className="sr-only peer"
+                                    checked={formData.autoSyncEnabled}
+                                    onChange={(e) => onFormChange({ autoSyncEnabled: e.target.checked })}
+                                />
+                                <div className="w-9 h-5 bg-slate-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-[#F27024]"></div>
+                            </label>
+                        </div>
+
+                        <div className="flex items-center justify-between p-4 bg-slate-50/50 rounded-xl border border-slate-100 shadow-sm transition-all hover:bg-slate-50">
+                            <div className="flex items-center gap-3">
+                                <div className={`w-8 h-8 rounded-lg flex items-center justify-center transition-all ${formData.notifEnabled ? 'bg-indigo-600 text-white shadow-md shadow-indigo-100' : 'bg-white text-slate-400 border border-slate-200'}`}>
                                     <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11a6.002 6.002 0 00-4-5.659V5a2 2 0 10-4 0v.341C7.67 6.165 6 8.388 6 11v3.159c0 .538-.214 1.055-.595 1.436L4 17h5m6 0v1a3 3 0 11-6 0v-1m6 0H9" />
                                     </svg>
                                 </div>
                                 <div className="space-y-0.5">
-                                    <p className="text-[10px] font-bold text-slate-800 font-heading">Thông báo mail tự động</p>
-                                    <p className="text-[8px] font-medium text-slate-400">Gửi mail khi có thay đổi trên Sheet (Debounce 20s)</p>
+                                    <p className="text-[10px] font-black text-slate-800 uppercase tracking-tight">Thông báo Email</p>
+                                    <p className="text-[8px] font-medium text-slate-400">Gửi mail nhắc nhở khi có sự thay đổi dữ liệu</p>
                                 </div>
                             </div>
                             <label className="relative inline-flex items-center cursor-pointer">
@@ -190,10 +213,10 @@ export const SemesterForm: React.FC<SemesterFormProps> = ({
                                     checked={formData.notifEnabled}
                                     onChange={(e) => onFormChange({ notifEnabled: e.target.checked })}
                                 />
-                                <div className="w-9 h-5 bg-slate-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-[#F27024]"></div>
+                                <div className="w-9 h-5 bg-slate-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-indigo-600"></div>
                             </label>
                         </div>
-                    )} */}
+                    </div>
 
                     <div>
                         <div className="flex items-center justify-between mb-2 ml-1">
@@ -226,6 +249,7 @@ export const SemesterForm: React.FC<SemesterFormProps> = ({
                                 onHeaderRowChange={() => {}}
                                 columnMap={formData.mapping}
                                 setColumnMap={(map) => onFormChange({ mapping: map })}
+                                mode={formData.sheetType} // 🚀 NEW
                                 isCompact={true}
                             />
                         </div>

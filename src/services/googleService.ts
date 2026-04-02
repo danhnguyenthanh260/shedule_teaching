@@ -78,11 +78,14 @@ export function inferSchema(headers: string[], sampleRows: string[][]): Inferred
     // Ưu tiên Giờ
     else if (head === "giờ" || head === "time" || head.includes("slot") || head.includes("tiết")) mapping.time = i;
     // Ưu tiên GVHD/Người thực hiện/Hội đồng
-    else if (head.includes("người") || head.includes("gvhd") || head.includes("giảng viên") || head.includes("reviewer") || head.includes("họ và tên") || head.includes("thành viên")) {
-      if (!mapping.person) mapping.person = i;
+    else if (head.includes("người") || head.includes("gvhd") || head.includes("giảng viên") || head.includes("reviewer") || head.includes("họ và tên") || head.includes("họ tên") || head.includes("thành viên")) {
+      // 🛡️ TRÁNH KÌ: Nếu là "Nhiệm vụ" thì không cho vào Person
+      if (!head.includes("nhiệm vụ") && !head.includes("nh nhiệm") && !mapping.person) {
+        mapping.person = i;
+      }
     }
     // Ưu tiên Tên đề tài/Nhiệm vụ
-    else if (head.includes("tên đề tài") || head.includes("nhiệm vụ") || head.includes("topic") || head.includes("project") || head.includes("đề tài")) {
+    else if (head.includes("tên đề tài") || head.includes("nhiệm vụ") || head.includes("topic") || head.includes("project") || head.includes("đề tài") || head.includes("nhiệm vụ tvhd")) {
       if (!mapping.task) mapping.task = i;
     }
     // Ưu tiên Phòng
@@ -90,7 +93,7 @@ export function inferSchema(headers: string[], sampleRows: string[][]): Inferred
     // Ưu tiên Email
     else if (head.includes("email") || head.includes("thư điện tử") || head.includes("mail")) mapping.email = i;
     // Ưu tiên Mã giảng viên
-    else if (head.includes("mã giang viên") || head.includes("lecturer code") || head.includes("mã số") || head.includes("msnv")) {
+    else if (head.includes("mã giang viên") || head.includes("lecturer code") || head.includes("mã số") || head.includes("msnv") || head.includes("mã gv")) {
       if (!mapping.code) mapping.code = i;
     }
   });
@@ -269,6 +272,11 @@ export class GoogleSyncService {
 
         let person = (pIdx < row.length ? (row[pIdx] || "") : "").toString().trim();
         
+        // 🎯 TỰ ĐỘNG LẤY CỘT D LÀM TASK (Nếu chưa có mapping và là Council)
+        const inferredTaskIdx = mapping.task !== undefined ? mapping.task : 3; // Index 3 = Cột D
+        const taskValRaw = inferredTaskIdx < row.length ? row[inferredTaskIdx] : "";
+        const finalTask = (taskValRaw || "").toString().trim();
+
         // 🔍 NEW: Extract Code (either mapped or fallback to Column M/Index 12)
         let code = "";
         const cIdx = mapping.code !== undefined ? mapping.code : (row.length > 12 ? 12 : -1);
@@ -291,7 +299,7 @@ export class GoogleSyncService {
           startTime: start,
           endTime: end,
           person: person,
-          task: (mapping.task !== undefined && mapping.task < row.length ? (row[mapping.task] || "Nhiệm vụ") : "Nhiệm vụ").toString().trim(),
+          task: finalTask || "Nhiệm vụ",
           location: lastLocation || "Chưa xác định",
           email: (mapping.email !== undefined && mapping.email < row.length ? row[mapping.email] : "").toString().trim(),
           code: code,

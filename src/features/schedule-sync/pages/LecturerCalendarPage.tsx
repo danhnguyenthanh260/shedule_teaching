@@ -131,11 +131,13 @@ export const LecturerCalendarPage: React.FC = () => {
       // Convert FullCalendar events back to plain objects for GAS
       const syncEvents = calendarEvents.map(ev => {
         const loc = ev.extendedProps.location || 'N/A';
+        const isCouncil = sheetType === 'council';
+        const typeLabel = isCouncil ? 'Hội đồng' : 'Review';
 
         return {
           rowId: ev.id,
           code: ev.extendedProps.code || "",
-          title: `Lịch Review: ${lecturerName} (${loc})`,
+          title: `Lịch ${typeLabel}: ${lecturerName} (${loc})`,
           start: typeof ev.start === 'string' ? ev.start : (ev.start as Date).toISOString(),
           end: typeof ev.end === 'string' ? ev.end : (ev.end as Date).toISOString(),
           location: loc,
@@ -223,27 +225,27 @@ export const LecturerCalendarPage: React.FC = () => {
   const availableLecturers = useMemo(() => {
     const map = new Map<string, string>(); // handle -> original string
     
-    const addPerson = (val: string) => {
-      if (!val || typeof val !== 'string') return;
-      const str = val.trim();
-      if (!str || str.toUpperCase().startsWith('#N/A') || str.includes('#REF!')) return;
+      const addPerson = (val: string) => {
+        if (!val || typeof val !== 'string') return;
+        const str = val.trim();
+        if (!str || str.toUpperCase().startsWith('#N/A') || str.includes('#REF!')) return;
 
-      let handle = "";
-      if (str.includes('(') && str.includes(')')) {
-        handle = str.split('(')[1].split(')')[0].trim().toLowerCase();
-      } else if (str.includes('@')) {
-        handle = str.split('@')[0].trim().toLowerCase();
-      } else {
-        const nonAccented = khongDau(str);
-        const parts = nonAccented.split(' ');
-        handle = parts[parts.length - 1].toLowerCase().replace(/[^a-z0-9]/g, '');
-      }
+        let handle = "";
+        if (str.includes('(') && str.includes(')')) {
+          handle = str.split('(')[1].split(')')[0].trim().toLowerCase().replace(/[^a-z0-9]/g, '');
+        } else if (str.includes('@')) {
+          handle = str.split('@')[0].trim().toLowerCase().replace(/[^a-z0-9]/g, '');
+        } else {
+          const nonAccented = khongDau(str).toLowerCase().replace(/[^a-z0-9\s]/g, '');
+          const parts = nonAccented.split(' ');
+          handle = parts[parts.length - 1]; // Lấy chữ cuối làm handle
+        }
 
-      // 🛡️ CHẶN TIẾP: Nếu handle là 'na' hoặc chỉ có số (ngày/giờ nhầm lẫn)
-      if (handle && handle !== 'na' && isNaN(Number(handle)) && !map.has(handle)) {
-        map.set(handle, str);
-      }
-    };
+        // 🛡️ CHẶN TIẾP: Nếu handle là 'na' hoặc chỉ có số (ngày/giờ nhầm lẫn)
+        if (handle && handle !== 'na' && isNaN(Number(handle)) && !map.has(handle)) {
+          map.set(handle, str);
+        }
+      };
 
     rows.forEach(r => {
       if (r.person) addPerson(r.person);
@@ -257,29 +259,35 @@ export const LecturerCalendarPage: React.FC = () => {
   }, [rows]);
 
   // Filter rows for selected lecturer
-  const calendarEvents = useMemo(() => {
-    const filterHandle = persistence.personFilter?.toLowerCase().replace(/[^a-z0-9]/g, '');
-    if (!filterHandle || rows.length === 0) return [];
-    
-    const userRows = rows.filter(r => {
-      const identifiers: string[] = [];
+    const calendarEvents = useMemo(() => {
+      const filterHandle = persistence.personFilter;
+      if (!filterHandle || rows.length === 0) return [];
       
-      const getHandle = (s: string) => {
-        if (!s || typeof s !== 'string') return '';
-        const str = s.trim();
-        if (str.includes('(') && str.includes(')')) {
-          return str.split('(')[1].split(')')[0].trim().toLowerCase().replace(/[^a-z0-9]/g, '');
+      const userRows = rows.filter(r => {
+        const identifiers: string[] = [];
+        
+        const getHandle = (s: string) => {
+          if (!s || typeof s !== 'string') return '';
+          const str = s.trim();
+          if (str.includes('(') && str.includes(')')) {
+            return str.split('(')[1].split(')')[0].trim().toLowerCase().replace(/[^a-z0-9]/g, '');
+          }
+          if (str.includes('@')) {
+            return str.split('@')[0].trim().toLowerCase().replace(/[^a-z0-9]/g, '');
+          }
+          // Dùng logic khongDau đồng nhất với availableLecturers
+          const clean = khongDau(str).toLowerCase().replace(/[^a-z0-9\s]/g, '');
+          const parts = clean.split(' ');
+          return parts[parts.length - 1]; // Lấy chữ cuối làm handle
+        };
+        
+        if (r.email) identifiers.push(getHandle(r.email));
+        if (r.reviewers && Array.isArray(r.reviewers)) {
+          r.reviewers.forEach(rev => {
+            if (rev) identifiers.push(getHandle(rev));
+          });
         }
-        return str.split('@')[0].split('(')[0].trim().toLowerCase().replace(/[^a-z0-9]/g, '');
-      };
-      
-      if (r.email) identifiers.push(getHandle(r.email));
-      if (r.reviewers && Array.isArray(r.reviewers)) {
-        r.reviewers.forEach(rev => {
-          if (rev) identifiers.push(getHandle(rev));
-        });
-      }
-      if (r.person) identifiers.push(getHandle(r.person));
+        if (r.person) identifiers.push(getHandle(r.person));
       
       const hasInIdentifiers = identifiers.some(id => id && id === filterHandle);
       const hasInRaw = r.rawRow && typeof r.rawRow === 'string' && r.rawRow.toLowerCase().includes(filterHandle);
@@ -297,6 +305,7 @@ export const LecturerCalendarPage: React.FC = () => {
         code: r.code,
         group: r.groupName,
         person: r.person,
+        task: r.task,
         reviewers: r.reviewers,
         subCodes: r.subCodes,
         rawRow: r.rawRow
@@ -717,10 +726,22 @@ export const LecturerCalendarPage: React.FC = () => {
                        {/* 📍 Left: Main Info */}
                        <div className={`${hasSubCodes ? 'flex-none min-w-[120px] sm:min-w-[180px] pr-2 sm:pr-5 border-r border-white/20' : ''}`}>
                          <div className={`font-bold ${titleSize} truncate uppercase leading-tight`}>{event.title}</div>
-                         <div className={`${infoSize} font-medium opacity-90 truncate mt-0.5`}>{timeText} – {endTimeText}</div>
-                         {props.location && (
-                           <div className={`${infoSize} font-bold opacity-100 truncate mt-0.5 sm:mt-1 whitespace-nowrap overflow-hidden bg-white/10 ${isMonthView ? "px-1 py-0" : "px-2 py-0.5"} rounded-md inline-block`}>{props.location}</div>
-                         )}
+                          <div className="flex flex-col sm:flex-row sm:items-center gap-x-3 gap-y-0.5 overflow-hidden">
+                             <div className={`${infoSize} font-medium opacity-90 truncate shrink-0`}>{timeText} – {endTimeText}</div>
+                             {props.task && (
+                               <div className={`${infoSize} font-medium opacity-80 truncate leading-tight flex-1 border-l-2 border-white/20 pl-2 hidden sm:block`}>
+                                 {props.task}
+                               </div>
+                             )}
+                          </div>
+                          {props.task && (
+                             <div className={`${infoSize} font-medium opacity-80 truncate mt-0.5 leading-tight sm:hidden`}>
+                               {props.task}
+                             </div>
+                          )}
+                          {props.location && (
+                            <div className={`${infoSize} font-bold opacity-100 truncate mt-1 whitespace-nowrap overflow-hidden bg-white/10 ${isMonthView ? "px-1 py-0" : "px-2 py-0.5"} rounded-md inline-block shrink-0`}>{props.location}</div>
+                          )}
                        </div>
                        
                        {/* 🏷️ Right: Sub-items (column F data) */}

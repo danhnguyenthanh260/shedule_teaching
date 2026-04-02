@@ -131,11 +131,13 @@ export const LecturerCalendarPage: React.FC = () => {
       // Convert FullCalendar events back to plain objects for GAS
       const syncEvents = calendarEvents.map(ev => {
         const loc = ev.extendedProps.location || 'N/A';
+        const isCouncil = sheetType === 'council';
+        const typeLabel = isCouncil ? 'Hội đồng' : 'Review';
 
         return {
           rowId: ev.id,
           code: ev.extendedProps.code || "",
-          title: `Lịch Review: ${lecturerName} (${loc})`,
+          title: `Lịch ${typeLabel}: ${lecturerName} (${loc})`,
           start: typeof ev.start === 'string' ? ev.start : (ev.start as Date).toISOString(),
           end: typeof ev.end === 'string' ? ev.end : (ev.end as Date).toISOString(),
           location: loc,
@@ -223,27 +225,27 @@ export const LecturerCalendarPage: React.FC = () => {
   const availableLecturers = useMemo(() => {
     const map = new Map<string, string>(); // handle -> original string
     
-    const addPerson = (val: string) => {
-      if (!val || typeof val !== 'string') return;
-      const str = val.trim();
-      if (!str || str.toUpperCase().startsWith('#N/A') || str.includes('#REF!')) return;
+      const addPerson = (val: string) => {
+        if (!val || typeof val !== 'string') return;
+        const str = val.trim();
+        if (!str || str.toUpperCase().startsWith('#N/A') || str.includes('#REF!')) return;
 
-      let handle = "";
-      if (str.includes('(') && str.includes(')')) {
-        handle = str.split('(')[1].split(')')[0].trim().toLowerCase();
-      } else if (str.includes('@')) {
-        handle = str.split('@')[0].trim().toLowerCase();
-      } else {
-        const nonAccented = khongDau(str);
-        const parts = nonAccented.split(' ');
-        handle = parts[parts.length - 1].toLowerCase().replace(/[^a-z0-9]/g, '');
-      }
+        let handle = "";
+        if (str.includes('(') && str.includes(')')) {
+          handle = str.split('(')[1].split(')')[0].trim().toLowerCase().replace(/[^a-z0-9]/g, '');
+        } else if (str.includes('@')) {
+          handle = str.split('@')[0].trim().toLowerCase().replace(/[^a-z0-9]/g, '');
+        } else {
+          const nonAccented = khongDau(str).toLowerCase().replace(/[^a-z0-9\s]/g, '');
+          const parts = nonAccented.split(' ');
+          handle = parts[parts.length - 1]; // Lấy chữ cuối làm handle
+        }
 
-      // 🛡️ CHẶN TIẾP: Nếu handle là 'na' hoặc chỉ có số (ngày/giờ nhầm lẫn)
-      if (handle && handle !== 'na' && isNaN(Number(handle)) && !map.has(handle)) {
-        map.set(handle, str);
-      }
-    };
+        // 🛡️ CHẶN TIẾP: Nếu handle là 'na' hoặc chỉ có số (ngày/giờ nhầm lẫn)
+        if (handle && handle !== 'na' && isNaN(Number(handle)) && !map.has(handle)) {
+          map.set(handle, str);
+        }
+      };
 
     rows.forEach(r => {
       if (r.person) addPerson(r.person);
@@ -257,29 +259,35 @@ export const LecturerCalendarPage: React.FC = () => {
   }, [rows]);
 
   // Filter rows for selected lecturer
-  const calendarEvents = useMemo(() => {
-    const filterHandle = persistence.personFilter?.toLowerCase().replace(/[^a-z0-9]/g, '');
-    if (!filterHandle || rows.length === 0) return [];
-    
-    const userRows = rows.filter(r => {
-      const identifiers: string[] = [];
+    const calendarEvents = useMemo(() => {
+      const filterHandle = persistence.personFilter;
+      if (!filterHandle || rows.length === 0) return [];
       
-      const getHandle = (s: string) => {
-        if (!s || typeof s !== 'string') return '';
-        const str = s.trim();
-        if (str.includes('(') && str.includes(')')) {
-          return str.split('(')[1].split(')')[0].trim().toLowerCase().replace(/[^a-z0-9]/g, '');
+      const userRows = rows.filter(r => {
+        const identifiers: string[] = [];
+        
+        const getHandle = (s: string) => {
+          if (!s || typeof s !== 'string') return '';
+          const str = s.trim();
+          if (str.includes('(') && str.includes(')')) {
+            return str.split('(')[1].split(')')[0].trim().toLowerCase().replace(/[^a-z0-9]/g, '');
+          }
+          if (str.includes('@')) {
+            return str.split('@')[0].trim().toLowerCase().replace(/[^a-z0-9]/g, '');
+          }
+          // Dùng logic khongDau đồng nhất với availableLecturers
+          const clean = khongDau(str).toLowerCase().replace(/[^a-z0-9\s]/g, '');
+          const parts = clean.split(' ');
+          return parts[parts.length - 1]; // Lấy chữ cuối làm handle
+        };
+        
+        if (r.email) identifiers.push(getHandle(r.email));
+        if (r.reviewers && Array.isArray(r.reviewers)) {
+          r.reviewers.forEach(rev => {
+            if (rev) identifiers.push(getHandle(rev));
+          });
         }
-        return str.split('@')[0].split('(')[0].trim().toLowerCase().replace(/[^a-z0-9]/g, '');
-      };
-      
-      if (r.email) identifiers.push(getHandle(r.email));
-      if (r.reviewers && Array.isArray(r.reviewers)) {
-        r.reviewers.forEach(rev => {
-          if (rev) identifiers.push(getHandle(rev));
-        });
-      }
-      if (r.person) identifiers.push(getHandle(r.person));
+        if (r.person) identifiers.push(getHandle(r.person));
       
       const hasInIdentifiers = identifiers.some(id => id && id === filterHandle);
       const hasInRaw = r.rawRow && typeof r.rawRow === 'string' && r.rawRow.toLowerCase().includes(filterHandle);
@@ -297,6 +305,7 @@ export const LecturerCalendarPage: React.FC = () => {
         code: r.code,
         group: r.groupName,
         person: r.person,
+        task: r.task,
         reviewers: r.reviewers,
         subCodes: r.subCodes,
         rawRow: r.rawRow
@@ -583,17 +592,19 @@ export const LecturerCalendarPage: React.FC = () => {
           </div>
 
           <div className="flex items-center gap-2 sm:gap-4">
-            {/* Dashboard Navigation */}
-            <Link
-              to="/dashboard"
-              className="flex items-center justify-center w-10 h-10 sm:w-auto sm:px-4 sm:py-2 bg-blue-50 text-blue-600 rounded-xl font-bold text-sm border border-blue-100 hover:bg-blue-100 transition-all shadow-sm"
-              title="Truy cập Bảng điều khiển"
-            >
-              <svg className="w-5 h-5 sm:w-4 sm:h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M4 6a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2V6zM14 6a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2V6zM4 16a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2v-2zM14 16a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2v-2z" />
-              </svg>
-              <span className="hidden sm:inline ml-2">Bảng điều khiển</span>
-            </Link>
+            {/* Dashboard Navigation - Only for Admins */}
+            {isAdmin && (
+              <Link
+                to="/dashboard"
+                className="flex items-center justify-center w-10 h-10 sm:w-auto sm:px-4 sm:py-2 bg-blue-50 text-blue-600 rounded-xl font-bold text-sm border border-blue-100 hover:bg-blue-100 transition-all shadow-sm"
+                title="Truy cập Bảng điều khiển"
+              >
+                <svg className="w-5 h-5 sm:w-4 sm:h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M4 6a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2V6zM14 6a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2V6zM4 16a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2v-2zM14 16a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2v-2z" />
+                </svg>
+                <span className="hidden sm:inline ml-2">Bảng điều khiển</span>
+              </Link>
+            )}
 
             {/* Navigation for Admins */}
             {isAdmin && (
@@ -715,10 +726,22 @@ export const LecturerCalendarPage: React.FC = () => {
                        {/* 📍 Left: Main Info */}
                        <div className={`${hasSubCodes ? 'flex-none min-w-[120px] sm:min-w-[180px] pr-2 sm:pr-5 border-r border-white/20' : ''}`}>
                          <div className={`font-bold ${titleSize} truncate uppercase leading-tight`}>{event.title}</div>
-                         <div className={`${infoSize} font-medium opacity-90 truncate mt-0.5`}>{timeText} – {endTimeText}</div>
-                         {props.location && (
-                           <div className={`${infoSize} font-bold opacity-100 truncate mt-0.5 sm:mt-1 whitespace-nowrap overflow-hidden bg-white/10 ${isMonthView ? "px-1 py-0" : "px-2 py-0.5"} rounded-md inline-block`}>{props.location}</div>
-                         )}
+                          <div className="flex flex-col sm:flex-row sm:items-center gap-x-3 gap-y-0.5 overflow-hidden">
+                             <div className={`${infoSize} font-medium opacity-90 truncate shrink-0`}>{timeText} – {endTimeText}</div>
+                             {props.task && (
+                               <div className={`${infoSize} font-medium opacity-80 truncate leading-tight flex-1 border-l-2 border-white/20 pl-2 hidden sm:block`}>
+                                 {props.task}
+                               </div>
+                             )}
+                          </div>
+                          {props.task && (
+                             <div className={`${infoSize} font-medium opacity-80 truncate mt-0.5 leading-tight sm:hidden`}>
+                               {props.task}
+                             </div>
+                          )}
+                          {props.location && (
+                            <div className={`${infoSize} font-bold opacity-100 truncate mt-1 whitespace-nowrap overflow-hidden bg-white/10 ${isMonthView ? "px-1 py-0" : "px-2 py-0.5"} rounded-md inline-block shrink-0`}>{props.location}</div>
+                          )}
                        </div>
                        
                        {/* 🏷️ Right: Sub-items (column F data) */}

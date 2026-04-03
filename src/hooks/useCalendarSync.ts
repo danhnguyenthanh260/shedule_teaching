@@ -115,21 +115,23 @@ export const useCalendarSync = ({ accessToken, reauthorizeGoogle }: UseCalendarS
         const isoStart = r.startTime?.includes('T') ? r.startTime : formatToISO(r.date, r.startTime);
         const isoEnd = r.endTime?.includes('T') ? r.endTime : formatToISO(r.date, r.endTime);
 
-        // 🚀 CLEAN TITLE MERGE (Unified for Council and Review)
-        let eventTitle = r.person;
+        // 🚀 SMART TITLE MERGE v14.74 (Unified for Council and Review)
+        let eventTitle = r.person || "Cán bộ/GV";
+        const codePrefix = r.code ? `[${r.code}] ` : '';
+        const modeLabel = detectedType === 'review' ? 'Review' : 'Hội Đồng';
         
         if (r.isGrouped) {
-           const names = r.reviewers && r.reviewers.length > 0 ? r.reviewers : [r.person];
+           const names = r.reviewers && r.reviewers.length > 0 ? r.reviewers : [eventTitle];
            const timePart = r.timeRaw ? ` - Slot(${r.timeRaw})` : '';
-           eventTitle = `${names.join(' & ')}${timePart}`.trim();
+           eventTitle = `${codePrefix}${modeLabel}: ${names.join(' & ')}${timePart}`.trim();
         } else {
-           // For Council or simple rows: "Name - Task/Topic"
+           // For Council or simple rows: "[Mã] Hội Đồng: Tên - Nhiệm vụ"
            const taskPart = r.task && r.task !== 'Nhiệm vụ' && r.task !== 'Review' ? ` - ${r.task}` : '';
-           eventTitle = `${r.person}${taskPart}`;
+           eventTitle = `${codePrefix}${modeLabel}: ${eventTitle}${taskPart}`;
         }
 
         return {
-          title: eventTitle || "Sự kiện không tên",
+          title: eventTitle,
           start: isoStart || new Date().toISOString(),
           end: isoEnd || new Date().toISOString(),
           location: r.location || '',
@@ -137,7 +139,7 @@ export const useCalendarSync = ({ accessToken, reauthorizeGoogle }: UseCalendarS
           resources: [r.person, r.location].filter(Boolean) as string[],
           description: r.raw?.description || `Đồng bộ từ FPT Scheduler\nGV: ${r.person || 'N/A'}\nNhiệm vụ: ${r.task || 'N/A'}\nPhòng: ${r.location || 'N/A'}\n[ID: ${r.id}]`,
           signature: r.id,
-          colorId: r.sheetType === 'review' ? '9' : '11', // 🎨 Review: Blue (9), Council: Red (11)
+          colorId: detectedType === 'review' ? '9' : '11', // 🎨 Review: Blue (9), Council: Red (11)
           subEvents: r.subEvents // 📧 NEW: Truyền danh sách các buổi lẻ
         };
       });

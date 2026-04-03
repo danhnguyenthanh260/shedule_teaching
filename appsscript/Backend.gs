@@ -6,7 +6,7 @@
  */
 
 var CONSTANTS = {
-  GAS_SECRET: "FPTxavalo2026",
+  GAS_SECRET: PropertiesService.getScriptProperties().getProperty("GAS_SECRET") || "FPTxavalo2026",
   DEFAULT_CALENDAR_NAME: "Schedule Teaching",
   SOURCE_TAG: "fpt_source",
   SIGNATURE_TAG: "fpt_signature",
@@ -15,7 +15,7 @@ var CONSTANTS = {
   ERROR: "error",
   FIREBASE_WEB_API_KEY:
     PropertiesService.getScriptProperties().getProperty("FIREBASE_API_KEY") ||
-    "AIzaSyDRwHY6mgdHKjkanLJk8BFpOQSeV5sqvaY",
+    "YOUR_FIREBASE_KEY_HERE",
   FIREBASE_URL:
     "https://scheduleteaching-default-rtdb.asia-southeast1.firebasedatabase.app/",
   ADMIN_EMAILS: ["ngohoangtruongdat@gmail.com", "ngohoangtruongdat2@gmail.com"],
@@ -36,7 +36,6 @@ var CONSTANTS = {
     FROM_NAME: "FPT Scheduler Service",
   },
 };
-
 /**
  * 📨 HE THONG GUI MAIL TAP TRUNG (Hybrid Email Service)
  */
@@ -5248,7 +5247,11 @@ function cleanupPrimaryCalendarOrphans_(lecturerName, sheetEvents, logFunc) {
        if (title.indexOf(lecturerName) === -1) return;
        const start = ev.getStartTime();
        const isStillInSheet = sheetEvents.some(se => Math.abs(new Date(se.start).getTime() - start.getTime()) < 60000);
-       if (!isStillInSheet && (title.toLowerCase().indexOf("lich review") !== -1 || title.toLowerCase().indexOf("lich hoi dong") !== -1)) {
+       
+       // 🕵️ MÁY HÚT BỤI v14.71: Nhận diện cả 'Lich Review' cũ và '[Mã] Review' mới để dọn sạch
+       const isOurEvent = /lich\s*(review|hoi\s*dong)|\[.*\]\s*(review|hội\s*đồng)/i.test(title);
+       
+       if (!isStillInSheet && isOurEvent) {
           logFunc("🗑️ Thu hồi Portal: " + title + " (" + Utilities.formatDate(start, "GMT+7", "dd/MM") + ")");
           ev.deleteEvent();
        }
@@ -5355,14 +5358,15 @@ function extractLecturerEventsFromSheet_(data, colMap, lName, tabName) {
                   start: start.toISOString(),
                   end: end.toISOString(),
                   dateStr: dateStr,
-                  rowId: i + 1 + "-" + block.name + "-" + codeVal
+                  rowId: i + 1 + "-" + block.name + "-" + codeVal,
+                  colorId: "9" // 🔵 Review mặc định màu Xanh (Blueberry)
                });
             }
         }
       });
     } 
     else {
-      // Logic cho Hội đồng (Giữ nguyên hoặc tùy chỉnh theo yêu cầu)
+      // 🔴 LOGIC HỘI ĐỒNG (Ép cứng Màu Đỏ + Tiêu đề Hội Đồng)
       const rowPerson = (row[colMap.person] || "").toLowerCase().trim();
       if (rowPerson === lNameNorm) {
         const dateStr = row[colMap.date];
@@ -5398,7 +5402,8 @@ function extractLecturerEventsFromSheet_(data, colMap, lName, tabName) {
               start: start.toISOString(),
               end: end.toISOString(),
               dateStr: dateStr,
-              rowId: i + 1 + "-" + codeVal
+              rowId: i + 1 + "-" + codeVal,
+              colorId: "11" // 🔴 Ép cứng màu ĐỎ (Tomato/Hội Đồng)
            });
         }
       }
